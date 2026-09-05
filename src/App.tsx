@@ -1,0 +1,316 @@
+import { useEffect, useMemo, useState } from 'react'
+import './App.css'
+import { connectWallet, getDeviceId, getLanguage, signReceipt, type WalletAccount } from './lib/wallet'
+import {
+  getNimiqBalance,
+  getNimiqTransactions,
+  getEvmBalances,
+  getFiatRates,
+  formatLuna,
+  formatUnits,
+  type NimiqTx,
+  type EvmBalance,
+} from './lib/chain'
+import { encodeReceipt, type SignedReceipt } from './lib/receipt'
+
+type View = 'dashboard' | 'history' | 'receipts' | 'export'
+
+export default function App() {
+  const [account, setAccount] = useState<WalletAccount | null>(null)
+  const [connecting, setConnecting] = useState(false)
+  const [view, setView] = useState<View>('dashboard')
+  const [nimBalance, setNimBalance] = useState<string>('0')
+  const [nimTxs, setNimTxs] = useState<NimiqTx[]>([])
+  const [evmBalances, setEvmBalances] = useState<EvmBalance[]>([])
+  const [rates, setRates] = useState<{ nim: number; usdt: number }>({ nim: 0, usdt: 1 })
+  const [deviceId, setDeviceId] = useState<string | null>(null)
+  const [lang, setLang] = useState<string>('en')
+  const [receipts, setReceipts] = useState<SignedReceipt[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    setLang(getLanguage() ?? 'en')
+    getDeviceId().then(setDeviceId)
+    const saved = localStorage.getItem('nimbooks:receipts')
+    if (saved) {
+      try {
+        setReceipts(JSON.parse(saved))
+      } catch {
+        /* ignore */
+      }
+    }
+    getFiatRates('nim').then((r) => setRates((p) => ({ ...p, nim: r.usd })))
+    getFiatRates('usdt').then((r) => setRates((p) => ({ ...p, usdt: r.usd })))
+  }, [])
+
+  const connect = async () => {
+    setConnecting(true)
+    setError(null)
+    try {
+      const acc = await connectWallet()
+      if (!acc.nimiqAddress && !acc.evmAddress) {
+        setError('No wallet found. Open this app inside Nimiq Pay.')
+        return
+      }
+      setAccount(acc)
+      await refresh(acc)
+    } catch (e) {
+      setError('Connection failed: ' + (e as Error).message)
+    } finally {
+      setConnecting(false)
+    }
+  }
+
+  const refresh = async (acc: WalletAccount) => {
+    setLoading(true)
+    try {
+      if (acc.nimiqAddress) {
+        const [bal, txs] = await Promise.all([
+          getNimiqBalance(acc.nimiqAddress),
+          getNimiqTransactions(acc.nimiqAddress, 50),
+        ])
+        setNimBalance(bal)
+        setNimTxs(txs)
+      }
+      if (acc.evmAddress) {
+        const evm = await getEvmBalances(acc.evmAddress)
+        setEvmBalances(evm)
+      }
+    } catch (e) {
+      setError('Refresh failed: ' + (e as Error).message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const totalUsd = useMemo(() => {
+    let total = 0
+    total += (Number(nimBalance) / 100000) * rates.nim
+    for (const b of evmBalances) {
+      const val = Number(b.balance) / 10 ** b.decimals
+      total += b.symbol === 'USDT' ? val * rates.usdt : val * (b.symbol === 'POL' ? 0.4 : 2500)
+    }
+    return total
+  }, [nimBalance, evmBalances, rates])
+
+  const makeReceipt = async (tx: NimiqTx) => {
+    if (!account?.nimiqAddress) return
+    const receipt = await signReceipt({
+      app: 'nimbooks',
+      v: 1,
+      txHash: tx.hash,
+      sender: tx.sender,
+      recipient: tx.recipient,
+      amount: tx.value,
+      asset: 'NIM',
+      timestamp: tx.timestamp ?? Math.floor(Date.now() / 1000),
+      memo: tx.data,
+    })
+    if (!receipt) {
+      setError('Signing cancelled or failed.')
+      return
+    }
+    const next = [receipt, ...receipts].slice(0, 20)
+    setReceipts(next)
+    localStorage.setItem('nimbooks:receipts', JSON.stringify(next))
+  }
+
+  const exportCsv = () => {
+    if (!account?.nimiqAddress) return
+    const rows = [
+      ['timestamp', 'txHash', 'sender', 'recipient', 'amountNIM', 'amountUSDT', 'memo'],
+      ...nimTxs.map((t) => [
+        new Date(t.timestamp ?? Date.now()).toISOString(),
+        t.hash,
+        t.sender,
+        t.recipient,
+        formatLuna(t.value),
+        (Number(t.value) / 100000 * rates.nim).toFixed(6),
+        t.data ?? '',
+      ]),
+    ]
+    const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `nimbooks-${account.nimiqAddress.slice(0, 8)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  if (!account) {
+    return (
+      <div className="app">
+        <header className="hero">
+          <div className="logo">📒</div>
+          <h1>NimBooks</h1>
+          <p className="tagline">The books for your Nimiq wallet.</p>
+        </header>
+        <main className="connect-panel">
+          <button className="btn-primary" onClick={connect} disabled={connecting}>
+            {connecting ? 'Connecting…' : 'Connect Wallet'}
+          </button>
+          {error && <p className="error">{error}</p>}
+          <p className="hint">
+            Open this app inside <strong>Nimiq Pay</strong> to see your balances, history, and
+            signed receipts.
+          </p>
+        </main>
+      </div>
+    )
+  }
+
+  return (
+    <div className="app">
+      <header className="topbar">
+        <div className="logo small">📒</div>
+        <h1>NimBooks</h1>
+        <button className="btn-ghost" onClick={() => refresh(account)} disabled={loading}>
+          {loading ? '…' : '↻'}
+        </button>
+      </header>
+
+      <nav className="tabs">
+        <button className={view === 'dashboard' ? 'tab active' : 'tab'} onClick={() => setView('dashboard')}>
+          Overview
+        </button>
+        <button className={view === 'history' ? 'tab active' : 'tab'} onClick={() => setView('history')}>
+          History
+        </button>
+        <button className={view === 'receipts' ? 'tab active' : 'tab'} onClick={() => setView('receipts')}>
+          Receipts
+        </button>
+        <button className={view === 'export' ? 'tab active' : 'tab'} onClick={() => setView('export')}>
+          Export
+        </button>
+      </nav>
+
+      <main>
+        {view === 'dashboard' && (
+          <section className="dashboard">
+            <div className="card total">
+              <span className="label">Total value</span>
+              <span className="value">${totalUsd.toFixed(2)}</span>
+              <span className="sub">≈ {lang === 'en' ? 'USD' : 'USD'} · {lang}</span>
+            </div>
+
+            <div className="card">
+              <span className="label">NIM balance</span>
+              <span className="value">{formatLuna(nimBalance)} NIM</span>
+              <span className="sub">≈ ${((Number(nimBalance) / 100000) * rates.nim).toFixed(4)}</span>
+            </div>
+
+            {evmBalances.length > 0 && (
+              <div className="card">
+                <span className="label">EVM assets</span>
+                {evmBalances
+                  .filter((b) => Number(b.balance) > 0)
+                  .map((b) => (
+                    <div key={b.chainId + b.symbol} className="row">
+                      <span>
+                        {b.symbol} · {b.chainName}
+                      </span>
+                      <span>{formatUnits(b.balance, b.decimals)}</span>
+                    </div>
+                  ))}
+                {evmBalances.every((b) => Number(b.balance) === 0) && (
+                  <span className="sub">No EVM balances found</span>
+                )}
+              </div>
+            )}
+
+            <div className="card">
+              <span className="label">Addresses</span>
+              {account.nimiqAddress && (
+                <div className="addr" title={account.nimiqAddress}>
+                  NIM: {account.nimiqAddress.slice(0, 12)}…
+                </div>
+              )}
+              {account.evmAddress && (
+                <div className="addr" title={account.evmAddress}>
+                  EVM: {account.evmAddress.slice(0, 10)}…
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+
+        {view === 'history' && (
+          <section className="history">
+            <h2>NIM transactions</h2>
+            {nimTxs.length === 0 && <p className="empty">No transactions yet.</p>}
+            {nimTxs.map((tx) => (
+              <div key={tx.hash} className="tx">
+                <div className="tx-main">
+                  <span className={tx.sender === account.nimiqAddress ? 'out' : 'in'}>
+                    {tx.sender === account.nimiqAddress ? '▼ sent' : '▲ received'}
+                  </span>
+                  <span className="tx-amount">{formatLuna(tx.value)} NIM</span>
+                </div>
+                <div className="tx-sub">
+                  {tx.timestamp ? new Date(tx.timestamp).toLocaleString() : '—'} ·{' '}
+                  {tx.hash.slice(0, 10)}…
+                </div>
+                {tx.data && <div className="tx-memo">memo: {tx.data}</div>}
+                <button className="btn-small" onClick={() => makeReceipt(tx)}>
+                  Sign receipt
+                </button>
+              </div>
+            ))}
+          </section>
+        )}
+
+        {view === 'receipts' && (
+          <section className="receipts">
+            <h2>Signed receipts</h2>
+            {receipts.length === 0 && (
+              <p className="empty">
+                No receipts yet. Go to History and tap "Sign receipt" on a transaction.
+              </p>
+            )}
+            {receipts.map((r) => (
+              <div key={r.txHash} className="receipt">
+                <div className="tx-main">
+                  <span>{formatLuna(r.amount)} {r.asset}</span>
+                  <span className="ok">✓ signed</span>
+                </div>
+                <div className="tx-sub">
+                  {r.txHash.slice(0, 12)}… · {new Date(r.timestamp * 1000).toLocaleDateString()}
+                </div>
+                <a
+                  className="btn-small"
+                  href={`#/verify/${encodeReceipt(r)}`}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    const enc = encodeReceipt(r)
+                    window.open(`${window.location.origin}${window.location.pathname}#/verify/${enc}`, '_blank')
+                  }}
+                >
+                  Share verification link
+                </a>
+              </div>
+            ))}
+          </section>
+        )}
+
+        {view === 'export' && (
+          <section className="export">
+            <h2>Export</h2>
+            <p className="hint">
+              Download your NIM transaction history as CSV — ready for your accountant or tax
+              records.
+            </p>
+            <button className="btn-primary" onClick={exportCsv}>
+              Download CSV ({nimTxs.length} transactions)
+            </button>
+            <p className="hint small">
+              Device: {deviceId ? deviceId.slice(0, 12) + '…' : 'not available'} · Lang: {lang}
+            </p>
+          </section>
+        )}
+      </main>
+    </div>
+  )
+}
