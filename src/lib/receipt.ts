@@ -1,8 +1,9 @@
 // Receipt verification — self-contained signed receipts.
 // A receipt is a signed JSON payload; verification = Ed25519 signature
-// check + on-chain tx cross-check via Nimiq RPC.
+// check + public-key→address binding + on-chain tx cross-check via Nimiq RPC.
 
-import { getNimiqTransactions } from './chain'
+import blake2b from 'blakejs'
+import { getNimiqTransactionByHash } from './chain'
 
 export interface ReceiptPayload {
   app: 'nimbooks'
@@ -12,13 +13,52 @@ export interface ReceiptPayload {
   recipient: string
   amount: string // Luna
   asset: 'NIM' | 'USDT' | string
-  timestamp: number
+  timestamp: number // seconds
   memo?: string
 }
 
 export interface SignedReceipt extends ReceiptPayload {
   publicKey: string
   signature: string
+}
+
+// --- Nimiq address derivation (from public key) ---
+// Address = "NQ" + IBAN checksum(2) + base32(blake2b-256(pubkey)[0:20]) padded to 32
+const NIMIQ_ALPHABET = '0123456789ABCDEFGHJKLMNPQRSTUVXY'
+
+export function deriveNimiqAddress(publicKeyHex: string): string | null {
+  try {
+    const pubBytes = hexToBytes(publicKeyHex)
+    if (pubBytes.length !== 32) return null
+    const hash = blake2b.blake2b(pubBytes, undefined, 32) // 32-byte Blake2b-256
+    const addrBytes = hash.slice(0, 20)
+
+    // Convert 20 bytes to custom base32 (big-endian)
+    let num = BigInt('0x' + bytesToHex(addrBytes))
+    let base32 = ''
+    while (num > 0n) {
+      base32 = NIMIQ_ALPHABET[Number(num % 32n)] + base32
+      num = num / 32n
+    }
+    const padded = base32.padStart(32, NIMIQ_ALPHABET[0])
+
+    // IBAN MOD-97-10 checksum
+    const raw = padded + 'NQ00'
+    let numeric = ''
+    for (let i = 0; i < raw.length; i++) {
+      const c = raw.charCodeAt(i)
+      numeric += c >= 48 && c <= 57 ? raw[i] : String(c - 55)
+    }
+    let remainder = 0
+    for (let i = 0; i < numeric.length; i++) {
+      remainder = (remainder * 10 + parseInt(numeric[i], 10)) % 97
+    }
+    const checksum = String(98 - remainder).padStart(2, '0')
+
+    return 'NQ' + checksum + padded
+  } catch {
+    return null
+  }
 }
 
 export function encodeReceipt(receipt: SignedReceipt): string {
@@ -81,37 +121,85 @@ export async function verifyEd25519(
   }
 }
 
+export type VerifyStatus = 'valid' | 'invalid' | 'inconclusive'
+
 export async function verifyReceiptFull(receipt: SignedReceipt): Promise<{
+  status: VerifyStatus
   signatureValid: boolean
   onChainValid: boolean
+  signerBound: boolean
   details: string
 }> {
   // 1. Signature check
   const payload = canonicalPayload(receipt)
   const signatureValid = await verifyEd25519(receipt.publicKey, payload, receipt.signature)
-
-  // 2. On-chain cross-check: does this tx exist with matching sender/recipient/amount?
-  let onChainValid = false
-  let details = 'Signature invalid — receipt is not authentic.'
-  if (signatureValid) {
-    try {
-      const txs = await getNimiqTransactions(receipt.sender, 20)
-      const match = txs.find(
-        (t) =>
-          t.hash === receipt.txHash &&
-          t.recipient === receipt.recipient &&
-          t.value === receipt.amount
-      )
-      onChainValid = !!match
-      details = onChainValid
-        ? 'Signature valid AND transaction confirmed on the Nimiq blockchain.'
-        : 'Signature valid, but transaction not found on-chain (or params mismatch).'
-    } catch {
-      details = 'Signature valid, but on-chain check failed (RPC unavailable).'
+  if (!signatureValid) {
+    return {
+      status: 'invalid',
+      signatureValid: false,
+      onChainValid: false,
+      signerBound: false,
+      details: 'Signature invalid — receipt is not authentic.',
     }
   }
 
-  return { signatureValid, onChainValid, details }
+  // 2. Public key → address binding: the signer must be the sender or recipient
+  const derived = deriveNimiqAddress(receipt.publicKey)
+  const normSender = receipt.sender.replace(/\s+/g, '').toUpperCase()
+  const normRecipient = receipt.recipient.replace(/\s+/g, '').toUpperCase()
+  const signerBound = derived !== null && (derived === normSender || derived === normRecipient)
+  if (!signerBound) {
+    return {
+      status: 'invalid',
+      signatureValid: true,
+      onChainValid: false,
+      signerBound: false,
+      details: 'Signature valid, but the signer is not the sender or recipient of this transaction.',
+    }
+  }
+
+  // 3. On-chain cross-check: fetch the exact transaction by hash
+  try {
+    const tx = await getNimiqTransactionByHash(receipt.txHash)
+    if (!tx) {
+      return {
+        status: 'inconclusive',
+        signatureValid: true,
+        onChainValid: false,
+        signerBound: true,
+        details: 'Signature valid and signer bound, but the transaction was not found on-chain.',
+      }
+    }
+    const senderMatch = tx.sender.replace(/\s+/g, '').toUpperCase() === normSender
+    const recipientMatch = tx.recipient.replace(/\s+/g, '').toUpperCase() === normRecipient
+    const amountMatch = String(tx.value) === String(receipt.amount)
+    const memoMatch = !receipt.memo || !tx.data || receipt.memo === tx.data
+
+    if (senderMatch && recipientMatch && amountMatch && memoMatch) {
+      return {
+        status: 'valid',
+        signatureValid: true,
+        onChainValid: true,
+        signerBound: true,
+        details: 'Signature valid, signer bound, and transaction confirmed on the Nimiq blockchain.',
+      }
+    }
+    return {
+      status: 'invalid',
+      signatureValid: true,
+      onChainValid: false,
+      signerBound: true,
+      details: 'Signature valid, but transaction parameters (sender, recipient, amount, or memo) mismatch.',
+    }
+  } catch {
+    return {
+      status: 'inconclusive',
+      signatureValid: true,
+      onChainValid: false,
+      signerBound: true,
+      details: 'Signature valid, but the on-chain check could not be completed (RPC unavailable).',
+    }
+  }
 }
 
 function hexToBytes(hex: string): Uint8Array {
@@ -121,6 +209,12 @@ function hexToBytes(hex: string): Uint8Array {
     bytes[i] = parseInt(clean.substr(i * 2, 2), 16)
   }
   return bytes
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('')
 }
 
 function toBufferSource(bytes: Uint8Array): ArrayBuffer {

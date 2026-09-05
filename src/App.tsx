@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import './App.css'
 import { connectWallet, getDeviceId, getLanguage, signReceipt, type WalletAccount } from './lib/wallet'
 import {
@@ -15,34 +15,127 @@ import { encodeReceipt, type SignedReceipt } from './lib/receipt'
 
 type View = 'dashboard' | 'history' | 'receipts' | 'export'
 
+const RATES_KEY = 'nimbooks:rates'
+
+interface RateCache {
+  [asset: string]: { usd: number; at: number }
+}
+
+function readRates(): RateCache {
+  try {
+    return JSON.parse(localStorage.getItem(RATES_KEY) ?? '{}')
+  } catch {
+    return {}
+  }
+}
+
+function writeRates(cache: RateCache) {
+  try {
+    localStorage.setItem(RATES_KEY, JSON.stringify(cache))
+  } catch {
+    /* ignore */
+  }
+}
+
+function sanitizeCsvCell(val: unknown): string {
+  const str = String(val ?? '')
+  // CSV formula injection guard: prefix =, +, -, @, tab, CR with a single quote
+  return /^[=+\-@\t\r]/.test(str) ? `'${str}` : str
+}
+
+function isValidReceipt(r: unknown): r is SignedReceipt {
+  if (!r || typeof r !== 'object') return false
+  const x = r as Record<string, unknown>
+  return (
+    typeof x.app === 'string' &&
+    typeof x.txHash === 'string' &&
+    typeof x.sender === 'string' &&
+    typeof x.recipient === 'string' &&
+    typeof x.amount === 'string' &&
+    typeof x.timestamp === 'number' &&
+    typeof x.publicKey === 'string' &&
+    typeof x.signature === 'string'
+  )
+}
+
 export default function App() {
   const [account, setAccount] = useState<WalletAccount | null>(null)
   const [connecting, setConnecting] = useState(false)
   const [view, setView] = useState<View>('dashboard')
-  const [nimBalance, setNimBalance] = useState<string>('0')
+  const [nimBalance, setNimBalance] = useState<string | null>(null)
   const [nimTxs, setNimTxs] = useState<NimiqTx[]>([])
   const [evmBalances, setEvmBalances] = useState<EvmBalance[]>([])
-  const [rates, setRates] = useState<{ nim: number; usdt: number }>({ nim: 0, usdt: 1 })
+  const [rates, setRates] = useState<{ nim: number; usdt: number; eth: number; pol: number }>({
+    nim: 0,
+    usdt: 1,
+    eth: 0,
+    pol: 0,
+  })
   const [deviceId, setDeviceId] = useState<string | null>(null)
   const [lang, setLang] = useState<string>('en')
   const [receipts, setReceipts] = useState<SignedReceipt[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [toast, setToast] = useState<string | null>(null)
+
+  const receiptsKey = useMemo(
+    () => (account?.nimiqAddress ? `nimbooks:receipts:${account.nimiqAddress}` : 'nimbooks:receipts'),
+    [account?.nimiqAddress]
+  )
 
   useEffect(() => {
-    setLang(getLanguage() ?? 'en')
-    getDeviceId().then(setDeviceId)
-    const saved = localStorage.getItem('nimbooks:receipts')
-    if (saved) {
-      try {
-        setReceipts(JSON.parse(saved))
-      } catch {
-        /* ignore */
-      }
-    }
-    getFiatRates('nim').then((r) => setRates((p) => ({ ...p, nim: r.usd })))
-    getFiatRates('usdt').then((r) => setRates((p) => ({ ...p, usdt: r.usd })))
+    setLang(getLanguage() ?? navigator.language.split('-')[0] ?? 'en')
+    // Load rates from localStorage cache immediately (no flash of $0)
+    const cached = readRates()
+    setRates((p) => ({
+      ...p,
+      nim: cached.nim?.usd ?? 0,
+      usdt: cached.usdt?.usd ?? 1,
+      eth: cached.eth?.usd ?? 0,
+      pol: cached.pol?.usd ?? 0,
+    }))
+    // Fetch fresh rates (single consolidated request)
+    fetchRates()
   }, [])
+
+  const fetchRates = useCallback(async () => {
+    try {
+      const [nim, usdt, eth, pol] = await Promise.all([
+        getFiatRates('nim'),
+        getFiatRates('usdt'),
+        getFiatRates('eth'),
+        getFiatRates('pol'),
+      ])
+      const next = { nim: nim.usd, usdt: usdt.usd, eth: eth.usd, pol: pol.usd }
+      setRates(next)
+      const cache: RateCache = {
+        nim: { usd: nim.usd, at: Date.now() },
+        usdt: { usd: usdt.usd, at: Date.now() },
+        eth: { usd: eth.usd, at: Date.now() },
+        pol: { usd: pol.usd, at: Date.now() },
+      }
+      writeRates(cache)
+    } catch (e) {
+      console.warn('Rate fetch failed:', e)
+      setError('Live rates unavailable — showing cached values.')
+    }
+  }, [])
+
+  // Load receipts scoped to the connected account
+  useEffect(() => {
+    if (!account?.nimiqAddress) return
+    try {
+      const saved = localStorage.getItem(receiptsKey)
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        if (Array.isArray(parsed)) {
+          setReceipts(parsed.filter(isValidReceipt))
+        }
+      }
+    } catch {
+      setReceipts([])
+    }
+  }, [receiptsKey, account?.nimiqAddress])
 
   const connect = async () => {
     setConnecting(true)
@@ -64,6 +157,7 @@ export default function App() {
 
   const refresh = async (acc: WalletAccount) => {
     setLoading(true)
+    setError(null)
     try {
       if (acc.nimiqAddress) {
         const [bal, txs] = await Promise.all([
@@ -86,16 +180,23 @@ export default function App() {
 
   const totalUsd = useMemo(() => {
     let total = 0
-    total += (Number(nimBalance) / 100000) * rates.nim
+    if (nimBalance !== null) total += (Number(nimBalance) / 100000) * rates.nim
     for (const b of evmBalances) {
       const val = Number(b.balance) / 10 ** b.decimals
-      total += b.symbol === 'USDT' ? val * rates.usdt : val * (b.symbol === 'POL' ? 0.4 : 2500)
+      if (!Number.isFinite(val)) continue
+      if (b.symbol === 'USDT') total += val * rates.usdt
+      else if (b.symbol === 'POL') total += val * rates.pol
+      else total += val * rates.eth
     }
-    return total
+    return Number.isFinite(total) ? total : 0
   }, [nimBalance, evmBalances, rates])
 
   const makeReceipt = async (tx: NimiqTx) => {
     if (!account?.nimiqAddress) return
+    if (receipts.some((r) => r.txHash === tx.hash)) {
+      setToast('Receipt already signed for this transaction.')
+      return
+    }
     const receipt = await signReceipt({
       app: 'nimbooks',
       v: 1,
@@ -104,40 +205,79 @@ export default function App() {
       recipient: tx.recipient,
       amount: tx.value,
       asset: 'NIM',
-      timestamp: tx.timestamp ?? Math.floor(Date.now() / 1000),
+      timestamp: Math.floor((tx.timestamp ?? Date.now()) / 1000), // seconds in the signed payload
       memo: tx.data,
     })
     if (!receipt) {
       setError('Signing cancelled or failed.')
       return
     }
-    const next = [receipt, ...receipts].slice(0, 20)
+    const next = [receipt, ...receipts].slice(0, 50)
     setReceipts(next)
-    localStorage.setItem('nimbooks:receipts', JSON.stringify(next))
+    try {
+      localStorage.setItem(receiptsKey, JSON.stringify(next))
+    } catch {
+      /* storage full — keep in memory */
+    }
+    setToast('Receipt signed ✓')
+  }
+
+  const shareReceipt = async (r: SignedReceipt) => {
+    const enc = encodeReceipt(r)
+    const url = `${window.location.origin}${window.location.pathname}#/verify/${enc}`
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: 'NimBooks receipt', text: 'Verified payment receipt', url })
+        return
+      }
+    } catch {
+      /* user cancelled share sheet — fall through to clipboard */
+    }
+    try {
+      await navigator.clipboard.writeText(url)
+      setToast('Verification link copied!')
+    } catch {
+      setError('Could not copy link — long-press the URL in the address bar.')
+    }
   }
 
   const exportCsv = () => {
     if (!account?.nimiqAddress) return
     const rows = [
-      ['timestamp', 'txHash', 'sender', 'recipient', 'amountNIM', 'amountUSDT', 'memo'],
+      ['timestamp', 'txHash', 'sender', 'recipient', 'amountNIM', 'valueUSD_indicative', 'memo'],
       ...nimTxs.map((t) => [
         new Date(t.timestamp ?? Date.now()).toISOString(),
         t.hash,
         t.sender,
         t.recipient,
-        formatLuna(t.value),
-        (Number(t.value) / 100000 * rates.nim).toFixed(6),
+        formatLuna(t.value, lang),
+        ((Number(t.value) / 100000) * rates.nim).toFixed(6),
         t.data ?? '',
       ]),
     ]
-    const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')
-    const blob = new Blob([csv], { type: 'text/csv' })
+    const csv =
+      '\uFEFF' + // UTF-8 BOM for Excel
+      rows
+        .map((r) => r.map((c) => `"${sanitizeCsvCell(c).replace(/"/g, '""')}"`).join(','))
+        .join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `nimbooks-${account.nimiqAddress.slice(0, 8)}.csv`
+    a.download = `nimbooks-${account.nimiqAddress.replace(/\s+/g, '').slice(0, 8)}.csv`
+    document.body.appendChild(a)
     a.click()
-    URL.revokeObjectURL(url)
+    // Defer revoke so the download completes
+    setTimeout(() => {
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    }, 1000)
+  }
+
+  const requestDeviceId = async () => {
+    if (deviceId) return
+    const id = await getDeviceId()
+    if (id) setDeviceId(id)
   }
 
   if (!account) {
@@ -172,6 +312,17 @@ export default function App() {
         </button>
       </header>
 
+      {error && (
+        <div className="error-banner" onClick={() => setError(null)}>
+          {error} <span className="dismiss">✕</span>
+        </div>
+      )}
+      {toast && (
+        <div className="toast" onClick={() => setToast(null)}>
+          {toast}
+        </div>
+      )}
+
       <nav className="tabs">
         <button className={view === 'dashboard' ? 'tab active' : 'tab'} onClick={() => setView('dashboard')}>
           Overview
@@ -193,29 +344,37 @@ export default function App() {
             <div className="card total">
               <span className="label">Total value</span>
               <span className="value">${totalUsd.toFixed(2)}</span>
-              <span className="sub">≈ {lang === 'en' ? 'USD' : 'USD'} · {lang}</span>
+              <span className="sub">≈ USD · {lang}</span>
             </div>
 
             <div className="card">
               <span className="label">NIM balance</span>
-              <span className="value">{formatLuna(nimBalance)} NIM</span>
-              <span className="sub">≈ ${((Number(nimBalance) / 100000) * rates.nim).toFixed(4)}</span>
+              {nimBalance === null ? (
+                <span className="value dim">…</span>
+              ) : (
+                <>
+                  <span className="value">{formatLuna(nimBalance, lang)} NIM</span>
+                  <span className="sub">
+                    ≈ ${((Number(nimBalance) / 100000) * rates.nim).toFixed(4)}
+                  </span>
+                </>
+              )}
             </div>
 
             {evmBalances.length > 0 && (
               <div className="card">
                 <span className="label">EVM assets</span>
                 {evmBalances
-                  .filter((b) => Number(b.balance) > 0)
+                  .filter((b) => Number.isFinite(Number(b.balance)) && Number(b.balance) > 0)
                   .map((b) => (
                     <div key={b.chainId + b.symbol} className="row">
                       <span>
                         {b.symbol} · {b.chainName}
                       </span>
-                      <span>{formatUnits(b.balance, b.decimals)}</span>
+                      <span>{formatUnits(b.balance, b.decimals, lang)}</span>
                     </div>
                   ))}
-                {evmBalances.every((b) => Number(b.balance) === 0) && (
+                {evmBalances.every((b) => !(Number.isFinite(Number(b.balance)) && Number(b.balance) > 0)) && (
                   <span className="sub">No EVM balances found</span>
                 )}
               </div>
@@ -240,25 +399,35 @@ export default function App() {
         {view === 'history' && (
           <section className="history">
             <h2>NIM transactions</h2>
-            {nimTxs.length === 0 && <p className="empty">No transactions yet.</p>}
-            {nimTxs.map((tx) => (
-              <div key={tx.hash} className="tx">
-                <div className="tx-main">
-                  <span className={tx.sender === account.nimiqAddress ? 'out' : 'in'}>
-                    {tx.sender === account.nimiqAddress ? '▼ sent' : '▲ received'}
-                  </span>
-                  <span className="tx-amount">{formatLuna(tx.value)} NIM</span>
+            {loading && nimTxs.length === 0 && <p className="empty">Loading transactions…</p>}
+            {!loading && nimTxs.length === 0 && (
+              <p className="empty">No transactions found for this address.</p>
+            )}
+            {nimTxs.map((tx) => {
+              const isOut = tx.sender.replace(/\s+/g, '').toUpperCase() === account.nimiqAddress?.replace(/\s+/g, '').toUpperCase()
+              return (
+                <div key={tx.hash} className="tx">
+                  <div className="tx-main">
+                    <span className={isOut ? 'out' : 'in'}>
+                      {isOut ? '▼ sent' : '▲ received'}
+                    </span>
+                    <span className="tx-amount">{formatLuna(tx.value, lang)} NIM</span>
+                  </div>
+                  <div className="tx-sub">
+                    {tx.timestamp ? new Date(tx.timestamp).toLocaleString(lang) : '—'} ·{' '}
+                    {tx.hash.slice(0, 10)}…
+                  </div>
+                  {tx.data && <div className="tx-memo">memo: {tx.data}</div>}
+                  <button
+                    className="btn-small"
+                    onClick={() => makeReceipt(tx)}
+                    disabled={receipts.some((r) => r.txHash === tx.hash)}
+                  >
+                    {receipts.some((r) => r.txHash === tx.hash) ? '✓ Signed' : 'Sign receipt'}
+                  </button>
                 </div>
-                <div className="tx-sub">
-                  {tx.timestamp ? new Date(tx.timestamp).toLocaleString() : '—'} ·{' '}
-                  {tx.hash.slice(0, 10)}…
-                </div>
-                {tx.data && <div className="tx-memo">memo: {tx.data}</div>}
-                <button className="btn-small" onClick={() => makeReceipt(tx)}>
-                  Sign receipt
-                </button>
-              </div>
-            ))}
+              )
+            })}
           </section>
         )}
 
@@ -273,23 +442,17 @@ export default function App() {
             {receipts.map((r) => (
               <div key={r.txHash} className="receipt">
                 <div className="tx-main">
-                  <span>{formatLuna(r.amount)} {r.asset}</span>
+                  <span>
+                    {formatLuna(r.amount, lang)} {r.asset}
+                  </span>
                   <span className="ok">✓ signed</span>
                 </div>
                 <div className="tx-sub">
-                  {r.txHash.slice(0, 12)}… · {new Date(r.timestamp * 1000).toLocaleDateString()}
+                  {r.txHash.slice(0, 12)}… · {new Date(r.timestamp * 1000).toLocaleDateString(lang)}
                 </div>
-                <a
-                  className="btn-small"
-                  href={`#/verify/${encodeReceipt(r)}`}
-                  onClick={(e) => {
-                    e.preventDefault()
-                    const enc = encodeReceipt(r)
-                    window.open(`${window.location.origin}${window.location.pathname}#/verify/${enc}`, '_blank')
-                  }}
-                >
+                <button className="btn-small" onClick={() => shareReceipt(r)}>
                   Share verification link
-                </a>
+                </button>
               </div>
             ))}
           </section>
@@ -302,12 +465,13 @@ export default function App() {
               Download your NIM transaction history as CSV — ready for your accountant or tax
               records.
             </p>
-            <button className="btn-primary" onClick={exportCsv}>
+            <button className="btn-primary" onClick={exportCsv} disabled={nimTxs.length === 0}>
               Download CSV ({nimTxs.length} transactions)
             </button>
-            <p className="hint small">
-              Device: {deviceId ? deviceId.slice(0, 12) + '…' : 'not available'} · Lang: {lang}
-            </p>
+            <button className="btn-secondary" onClick={requestDeviceId}>
+              {deviceId ? `Device: ${deviceId.slice(0, 12)}…` : 'Enable device preferences'}
+            </button>
+            <p className="hint small">Lang: {lang}</p>
           </section>
         )}
       </main>
