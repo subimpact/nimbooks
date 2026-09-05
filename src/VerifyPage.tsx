@@ -3,14 +3,16 @@ import './App.css'
 import { decodeReceipt, verifyReceiptFull, type SignedReceipt } from './lib/receipt'
 import { formatLuna } from './lib/chain'
 
+type PageState = 'checking' | 'valid' | 'invalid' | 'inconclusive' | 'error'
+
 export default function VerifyPage() {
   const [receipt, setReceipt] = useState<SignedReceipt | null>(null)
-  const [status, setStatus] = useState<'checking' | 'valid' | 'invalid' | 'error'>('checking')
+  const [status, setStatus] = useState<PageState>('checking')
   const [details, setDetails] = useState('')
 
   useEffect(() => {
     const hash = window.location.hash
-    const m = hash.match(/^#\/verify\/(.+)$/)
+    const m = hash.match(/^#\/verify\/([^?]+)/) // stop at query params
     if (!m) {
       setStatus('error')
       setDetails('No receipt found in the link.')
@@ -24,7 +26,7 @@ export default function VerifyPage() {
     }
     setReceipt(r)
     verifyReceiptFull(r).then((res) => {
-      setStatus(res.signatureValid && res.onChainValid ? 'valid' : res.signatureValid ? 'invalid' : 'invalid')
+      setStatus(res.status)
       setDetails(res.details)
     })
   }, [])
@@ -50,10 +52,18 @@ export default function VerifyPage() {
     )
   }
 
+  const statusMeta = {
+    valid: { icon: '✅', title: 'Verified receipt', cls: 'valid' },
+    invalid: { icon: '❌', title: 'Receipt not verified', cls: 'invalid' },
+    inconclusive: { icon: '⏳', title: 'Verification inconclusive', cls: 'inconclusive' },
+  }[status]
+
   return (
     <div className="verify">
-      <div className={`card verify-card ${status === 'valid' ? 'valid' : 'invalid'}`}>
-        <h1>{status === 'valid' ? '✅ Verified receipt' : '❌ Receipt not verified'}</h1>
+      <div className={`card verify-card ${statusMeta.cls}`}>
+        <h1>
+          {statusMeta.icon} {statusMeta.title}
+        </h1>
         <p className="details">{details}</p>
 
         <div className="verify-grid">
@@ -88,7 +98,7 @@ export default function VerifyPage() {
         </div>
 
         <p className="hint small">
-          Signed with Ed25519 · public key {receipt.publicKey.slice(0, 16)}…
+          Signed with Ed25519 · signer public key {receipt.publicKey.slice(0, 16)}…
           <br />
           Powered by NimBooks — the books for your Nimiq wallet.
         </p>

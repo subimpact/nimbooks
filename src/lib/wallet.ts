@@ -5,6 +5,7 @@
 import { init, requestDeviceIdentifier, getHostLanguage } from '@nimiq/mini-app-sdk'
 import type { NimiqProvider } from '@nimiq/mini-app-sdk'
 import type { SignedReceipt } from './receipt'
+import { canonicalPayload } from './receipt'
 
 export interface WalletAccount {
   nimiqAddress?: string
@@ -86,17 +87,8 @@ export async function signMessage(message: string): Promise<{ publicKey: string;
 }
 
 export async function signReceipt(receipt: Omit<SignedReceipt, 'publicKey' | 'signature'>): Promise<SignedReceipt | null> {
-  const payload = JSON.stringify({
-    app: 'nimbooks',
-    v: 1,
-    txHash: receipt.txHash,
-    sender: receipt.sender,
-    recipient: receipt.recipient,
-    amount: receipt.amount,
-    asset: receipt.asset,
-    timestamp: receipt.timestamp,
-    memo: receipt.memo ?? '',
-  })
+  // Single source of truth for the signed payload (receipt.ts canonicalPayload)
+  const payload = canonicalPayload(receipt)
   const sig = await signMessage(payload)
   if (!sig) return null
   return { ...receipt, publicKey: sig.publicKey, signature: sig.signature }

@@ -71,6 +71,53 @@ body {
   margin-top: 12px;
 }
 
+.error-banner {
+  background: #2a1515;
+  border: 1px solid #4a1d1d;
+  color: var(--red);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 13px;
+  margin-bottom: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+}
+.error-banner .dismiss {
+  color: var(--muted);
+  margin-left: 8px;
+}
+
+.toast {
+  background: #14241a;
+  border: 1px solid #1d4a2f;
+  color: var(--green);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 13px;
+  margin-bottom: 12px;
+  text-align: center;
+  cursor: pointer;
+}
+
+.btn-secondary {
+  background: var(--card-2);
+  color: var(--text);
+  border: none;
+  border-radius: 12px;
+  padding: 12px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  width: 100%;
+  margin-top: 10px;
+}
+
+.value.dim {
+  color: var(--muted);
+}
+
 /* Top bar */
 .topbar {
   display: flex;
