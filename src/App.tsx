@@ -14,7 +14,7 @@ import {
 import { encodeReceipt, type SignedReceipt } from './lib/receipt'
 import Analytics, { type AnalyticsPeriod } from './Analytics'
 
-type View = 'dashboard' | 'analytics' | 'history' | 'receipts' | 'export'
+type View = 'dashboard' | 'history' | 'receipts' | 'export'
 
 const RATES_KEY = 'nimbooks:rates'
 
@@ -379,9 +379,6 @@ export default function App() {
         <button className={view === 'dashboard' ? 'tab active' : 'tab'} onClick={() => setView('dashboard')}>
           Overview
         </button>
-        <button className={view === 'analytics' ? 'tab active' : 'tab'} onClick={() => setView('analytics')}>
-          Analytics
-        </button>
         <button className={view === 'history' ? 'tab active' : 'tab'} onClick={() => setView('history')}>
           History
         </button>
@@ -394,17 +391,6 @@ export default function App() {
       </nav>
 
       <main>
-        {view === 'analytics' && (
-          <Analytics
-            txs={nimTxs}
-            currentBalanceNim={nimBalance}
-            ownAddress={account.nimiqAddress ?? null}
-            period={analyticsPeriod}
-            onPeriodChange={setAnalyticsPeriod}
-            lang={lang}
-          />
-        )}
-
         {view === 'dashboard' && (
           <section className="dashboard">
             <div className="card total">
@@ -459,6 +445,15 @@ export default function App() {
                 </div>
               )}
             </div>
+
+            <Analytics
+              txs={nimTxs}
+              currentBalanceNim={nimBalance}
+              ownAddress={account.nimiqAddress ?? null}
+              period={analyticsPeriod}
+              onPeriodChange={setAnalyticsPeriod}
+              lang={lang}
+            />
           </section>
         )}
 
