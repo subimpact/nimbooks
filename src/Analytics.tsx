@@ -77,8 +77,15 @@ export default function Analytics({
     const cutoff = period === 0 ? 0 : now - period * 86400000
     const buckets = new Map<string, { ts: number; in: number; out: number }>()
     const t = new Date(now)
-    // seed buckets so empty days render as flat segments
-    for (let i = 0; i < (period === 0 ? 30 : period); i++) {
+    // Seed buckets so empty days render as flat segments.
+    // For "All", span from the earliest tx (capped at 90 days) so the chart
+    // actually covers the full history instead of truncating to 30 days.
+    let seedDays: number = period
+    if (period === 0) {
+      const earliest = txs.reduce((min, tx) => (tx.timestamp && tx.timestamp < min ? tx.timestamp : min), now)
+      seedDays = Math.min(90, Math.max(1, Math.ceil((now - earliest) / 86400000)))
+    }
+    for (let i = 0; i < seedDays; i++) {
       const k = dayKey(t.getTime())
       buckets.set(k, { ts: t.getTime(), in: 0, out: 0 })
       t.setDate(t.getDate() - 1)

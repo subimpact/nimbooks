@@ -271,16 +271,21 @@ export default function App() {
   const exportCsv = () => {
     if (!account?.nimiqAddress) return
     const rows = [
-      ['timestamp', 'txHash', 'sender', 'recipient', 'amountNIM', 'valueUSD_indicative', 'memo'],
-      ...nimTxs.map((t) => [
-        new Date(t.timestamp ?? Date.now()).toISOString(),
-        t.hash,
-        t.sender,
-        t.recipient,
-        formatLuna(t.value, lang),
-        ((Number(t.value) / 100000) * rates.nim).toFixed(6),
-        t.data ?? '',
-      ]),
+      ['timestamp', 'txHash', 'type', 'sender', 'recipient', 'amountNIM', 'feeNIM', 'valueUSD_indicative', 'memo'],
+      ...nimTxs.map((t) => {
+        const isOut = t.sender.replace(/\s+/g, '').toUpperCase() === account.nimiqAddress?.replace(/\s+/g, '').toUpperCase()
+        return [
+          new Date(t.timestamp ?? Date.now()).toISOString(),
+          t.hash,
+          isOut ? 'sent' : 'received',
+          t.sender,
+          t.recipient,
+          formatLuna(t.value, lang),
+          formatLuna(t.fee, lang),
+          ((Number(t.value) / 100000) * rates.nim).toFixed(6),
+          t.data ?? '',
+        ]
+      }),
     ]
     const csv =
       '\uFEFF' + // UTF-8 BOM for Excel
@@ -361,6 +366,9 @@ export default function App() {
         <h1>NimBooks</h1>
         <button className="btn-ghost" onClick={() => refresh(account)} disabled={loading}>
           {loading ? '…' : '↻'}
+        </button>
+        <button className="btn-ghost" onClick={() => setAccount(null)} title="Disconnect wallet">
+          ⏻
         </button>
       </header>
 
