@@ -296,6 +296,7 @@ export default function App() {
   }
 
   if (!account) {
+    const isInNimiqPay = typeof window !== 'undefined' && !!window.nimiqPay
     return (
       <div className="app">
         <header className="hero">
@@ -304,17 +305,37 @@ export default function App() {
           <p className="tagline">The books for your Nimiq wallet.</p>
         </header>
         <main className="connect-panel">
-          <button className="btn-primary" onClick={connect} disabled={connecting || hubConnecting}>
-            {connecting ? 'Connecting…' : 'Connect Wallet (Nimiq Pay)'}
-          </button>
-          <div className="connect-divider">or</div>
+          {isInNimiqPay ? (
+            <>
+              <button className="btn-primary" onClick={connect} disabled={connecting || hubConnecting}>
+                {connecting ? 'Connecting…' : 'Connect Wallet'}
+              </button>
+              <div className="connect-divider">or</div>
+            </>
+          ) : (
+            <>
+              <a
+                className="btn-primary btn-link"
+                href="https://nimpay.app/miniapps/open/nimbooks.pages.dev"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Open in Nimiq Pay →
+              </a>
+              <p className="hint">
+                Opens NimBooks inside the Nimiq Pay app — that's where your NIM wallet lives. Tap
+                it on your phone.
+              </p>
+              <div className="connect-divider">or use the web</div>
+            </>
+          )}
           <button className="btn-secondary" onClick={connectWithHub} disabled={connecting || hubConnecting}>
             {hubConnecting ? 'Opening Nimiq Hub…' : 'Continue with Nimiq Hub'}
           </button>
           {error && <p className="error">{error}</p>}
           <p className="hint">
-            Open this app inside <strong>Nimiq Pay</strong> for balances, history, and signed
-            receipts — or use <strong>Nimiq Hub</strong> right here in your browser.
+            In Nimiq Pay you also get balances, history, and signed receipts — or use{' '}
+            <strong>Nimiq Hub</strong> right here in your browser.
           </p>
         </main>
       </div>
