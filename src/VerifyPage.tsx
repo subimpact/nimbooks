@@ -34,6 +34,13 @@ export default function VerifyPage() {
   if (status === 'checking') {
     return (
       <div className="verify">
+        <header className="topbar">
+          <div className="logo small">📒</div>
+          <h1>NimBooks</h1>
+          <a className="btn-ghost btn-link" href="/" title="Back to NimBooks">
+            ← Back
+          </a>
+        </header>
         <div className="card verify-card">
           <h1>Verifying receipt…</h1>
         </div>
@@ -44,6 +51,13 @@ export default function VerifyPage() {
   if (status === 'error' || !receipt) {
     return (
       <div className="verify">
+        <header className="topbar">
+          <div className="logo small">📒</div>
+          <h1>NimBooks</h1>
+          <a className="btn-ghost btn-link" href="/" title="Back to NimBooks">
+            ← Back
+          </a>
+        </header>
         <div className="card verify-card">
           <h1>⚠️ Invalid link</h1>
           <p>{details}</p>
@@ -117,6 +131,9 @@ export default function VerifyPage() {
           <br />
           Powered by NimBooks — the books for your Nimiq wallet.
         </p>
+        <button className="btn-secondary" onClick={() => window.print()} style={{ marginTop: 12 }}>
+          🖨 Print / Save as PDF
+        </button>
       </div>
     </div>
   )

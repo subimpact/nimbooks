@@ -235,11 +235,11 @@ export async function verifyReceiptFull(receipt: SignedReceipt): Promise<{
     const tx = await getNimiqTransactionByHash(receipt.txHash)
     if (!tx) {
       return {
-        status: 'inconclusive',
+        status: 'invalid',
         signatureValid: true,
         onChainValid: false,
         signerBound: true,
-        details: 'Signature valid and signer bound, but the transaction was not found on-chain.',
+        details: 'Transaction was not found on the Nimiq blockchain.',
       }
     }
     const senderMatch = tx.sender.replace(/\s+/g, '').toUpperCase() === normSender
