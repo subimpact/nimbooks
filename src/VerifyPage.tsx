@@ -60,6 +60,13 @@ export default function VerifyPage() {
 
   return (
     <div className="verify">
+      <header className="topbar">
+        <div className="logo small">📒</div>
+        <h1>NimBooks</h1>
+        <a className="btn-ghost btn-link" href="/" title="Back to NimBooks">
+          ← Back
+        </a>
+      </header>
       <div className={`card verify-card ${statusMeta.cls}`}>
         <h1>
           {statusMeta.icon} {statusMeta.title}
@@ -88,6 +95,14 @@ export default function VerifyPage() {
           <div>
             <span className="label">Transaction</span>
             <span className="value mono">{receipt.txHash}</span>
+            <a
+              className="hint small"
+              href={`https://explorer.nimiq.com/transactions/${receipt.txHash}`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              View on Nimiq Explorer ↗
+            </a>
           </div>
           {receipt.memo && (
             <div>

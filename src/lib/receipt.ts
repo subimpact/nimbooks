@@ -214,7 +214,9 @@ export async function verifyReceiptFull(receipt: SignedReceipt): Promise<{
     const senderMatch = tx.sender.replace(/\s+/g, '').toUpperCase() === normSender
     const recipientMatch = tx.recipient.replace(/\s+/g, '').toUpperCase() === normRecipient
     const amountMatch = String(tx.value) === String(receipt.amount)
-    const memoMatch = !receipt.memo || !tx.data || receipt.memo === tx.data
+    // Memo: if the receipt claims a memo, the on-chain tx MUST carry the same data.
+    // (Previously `!tx.data` bypassed the check — a receipt could claim a memo the chain never had.)
+    const memoMatch = !receipt.memo ? true : !!tx.data && receipt.memo === tx.data
 
     if (senderMatch && recipientMatch && amountMatch && memoMatch) {
       return {

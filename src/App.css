@@ -139,11 +139,17 @@ body {
   gap: 6px;
   margin-bottom: 16px;
   overflow-x: auto;
-  position: sticky;
+  position: fixed;
   bottom: 0;
+  left: 0;
+  right: 0;
+  margin-left: auto;
+  margin-right: auto;
+  max-width: 480px;
   background: var(--bg);
-  padding: 8px 0 calc(8px + env(safe-area-inset-bottom));
+  padding: 8px 16px calc(8px + env(safe-area-inset-bottom));
   z-index: 10;
+  border-top: 1px solid #222634;
 }
 .tab {
   flex: 1;
