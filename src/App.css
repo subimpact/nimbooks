@@ -363,3 +363,69 @@ a.btn-primary.btn-link {
   font-family: 'SF Mono', 'Roboto Mono', monospace;
   font-size: 12px !important;
 }
+
+/* Analytics */
+.analytics {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.analytics-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.analytics-head h2 {
+  font-size: 18px;
+}
+.period-switch {
+  display: flex;
+  gap: 4px;
+  background: var(--card);
+  border-radius: 10px;
+  padding: 3px;
+}
+.period {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.period.active {
+  background: var(--accent);
+  color: #1a1408;
+}
+.stat-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.stat {
+  background: var(--card);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+}
+.stat .label {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+.stat .value {
+  font-size: 18px;
+  font-weight: 700;
+}
+.stat .value.green { color: var(--green); }
+.stat .value.red { color: var(--red); }
+.chart-card .chart {
+  width: 100%;
+  height: auto;
+  display: block;
+  margin-top: 8px;
+}
