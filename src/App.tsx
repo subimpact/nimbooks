@@ -12,8 +12,9 @@ import {
   type EvmBalance,
 } from './lib/chain'
 import { encodeReceipt, type SignedReceipt } from './lib/receipt'
+import Analytics, { type AnalyticsPeriod } from './Analytics'
 
-type View = 'dashboard' | 'history' | 'receipts' | 'export'
+type View = 'dashboard' | 'analytics' | 'history' | 'receipts' | 'export'
 
 const RATES_KEY = 'nimbooks:rates'
 
@@ -63,6 +64,7 @@ export default function App() {
   const [connecting, setConnecting] = useState(false)
   const [hubConnecting, setHubConnecting] = useState(false)
   const [view, setView] = useState<View>('dashboard')
+  const [analyticsPeriod, setAnalyticsPeriod] = useState<AnalyticsPeriod>(30)
   const [nimBalance, setNimBalance] = useState<string | null>(null)
   const [nimTxs, setNimTxs] = useState<NimiqTx[]>([])
   const [evmBalances, setEvmBalances] = useState<EvmBalance[]>([])
@@ -212,29 +214,39 @@ export default function App() {
       setToast('Receipt already signed for this transaction.')
       return
     }
-    const receipt = await signReceipt({
-      app: 'nimbooks',
-      v: 1,
-      txHash: tx.hash,
-      sender: tx.sender,
-      recipient: tx.recipient,
-      amount: tx.value,
-      asset: 'NIM',
-      timestamp: Math.floor((tx.timestamp ?? Date.now()) / 1000), // seconds in the signed payload
-      memo: tx.data,
-    })
-    if (!receipt) {
-      setError('Signing cancelled or failed.')
-      return
-    }
-    const next = [receipt, ...receipts].slice(0, 50)
-    setReceipts(next)
     try {
-      localStorage.setItem(receiptsKey, JSON.stringify(next))
-    } catch {
-      /* storage full — keep in memory */
+      const receipt = await signReceipt(
+        {
+          app: 'nimbooks',
+          v: 1,
+          txHash: tx.hash,
+          sender: tx.sender,
+          recipient: tx.recipient,
+          amount: tx.value,
+          asset: 'NIM',
+          timestamp: Math.floor((tx.timestamp ?? Date.now()) / 1000), // seconds in the signed payload
+          memo: tx.data,
+        },
+        account.nimiqAddress // sign with the connected address — no address-selector step
+      )
+      if (!receipt) {
+        setError('Signing cancelled — no signature returned.')
+        return
+      }
+      // Fallback: if the returned public key doesn't bind to sender/recipient,
+      // the receipt is still created but the verify page will flag it.
+      const next = [receipt, ...receipts].slice(0, 50)
+      setReceipts(next)
+      try {
+        localStorage.setItem(receiptsKey, JSON.stringify(next))
+      } catch {
+        /* storage full — keep in memory */
+      }
+      setToast('Receipt signed ✓')
+    } catch (e) {
+      console.error('signReceipt failed:', e)
+      setError('Signing failed: ' + (e instanceof Error ? e.message : String(e)))
     }
-    setToast('Receipt signed ✓')
   }
 
   const shareReceipt = async (r: SignedReceipt) => {
@@ -367,6 +379,9 @@ export default function App() {
         <button className={view === 'dashboard' ? 'tab active' : 'tab'} onClick={() => setView('dashboard')}>
           Overview
         </button>
+        <button className={view === 'analytics' ? 'tab active' : 'tab'} onClick={() => setView('analytics')}>
+          Analytics
+        </button>
         <button className={view === 'history' ? 'tab active' : 'tab'} onClick={() => setView('history')}>
           History
         </button>
@@ -379,6 +394,17 @@ export default function App() {
       </nav>
 
       <main>
+        {view === 'analytics' && (
+          <Analytics
+            txs={nimTxs}
+            currentBalanceNim={nimBalance}
+            ownAddress={account.nimiqAddress ?? null}
+            period={analyticsPeriod}
+            onPeriodChange={setAnalyticsPeriod}
+            lang={lang}
+          />
+        )}
+
         {view === 'dashboard' && (
           <section className="dashboard">
             <div className="card total">

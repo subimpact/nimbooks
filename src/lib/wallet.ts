@@ -80,18 +80,22 @@ export function getLanguage(): string | undefined {
   return getHostLanguage()
 }
 
-export async function signMessage(message: string): Promise<{ publicKey: string; signature: string } | null> {
+export async function signMessage(
+  message: string,
+  signer?: string
+): Promise<{ publicKey: string; signature: string } | null> {
   // Hub-connected users sign via the Nimiq keyguard (Nimiq Signed Message scheme)
   if (activeProvider === 'hub') {
     try {
-      const result = await getHub().signMessage({ appName: 'NimBooks', message })
+      const result = await getHub().signMessage({ appName: 'NimBooks', message, signer })
       if (!result || !result.signerPublicKey || !result.signature) return null
       return {
         publicKey: bytesToHex(result.signerPublicKey),
         signature: bytesToHex(result.signature),
       }
-    } catch {
-      return null
+    } catch (e) {
+      console.error('Hub signMessage failed:', e)
+      throw new Error('Nimiq Hub signing failed: ' + (e instanceof Error ? e.message : String(e)))
     }
   }
   if (!nimiqProvider) return null
@@ -101,15 +105,19 @@ export async function signMessage(message: string): Promise<{ publicKey: string;
       return { publicKey: result.publicKey, signature: result.signature }
     }
     return null
-  } catch {
-    return null
+  } catch (e) {
+    console.error('Nimiq Pay sign failed:', e)
+    throw new Error('Nimiq Pay signing failed: ' + (e instanceof Error ? e.message : String(e)))
   }
 }
 
-export async function signReceipt(receipt: Omit<SignedReceipt, 'publicKey' | 'signature'>): Promise<SignedReceipt | null> {
+export async function signReceipt(
+  receipt: Omit<SignedReceipt, 'publicKey' | 'signature'>,
+  signer?: string
+): Promise<SignedReceipt | null> {
   // Single source of truth for the signed payload (receipt.ts canonicalPayload)
   const payload = canonicalPayload(receipt)
-  const sig = await signMessage(payload)
+  const sig = await signMessage(payload, signer)
   if (!sig) return null
   return { ...receipt, publicKey: sig.publicKey, signature: sig.signature }
 }
