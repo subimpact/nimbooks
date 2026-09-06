@@ -93,6 +93,8 @@ export default function Analytics({
     let totalIn = 0
     let totalOut = 0
     let count = 0
+    let inCount = 0
+    let outCount = 0
     let largestIn = 0
     let largestOut = 0
     for (const tx of txs) {
@@ -107,14 +109,16 @@ export default function Analytics({
         if (isOut) {
           b.out += v
           totalOut += v
+          outCount++
           largestOut = Math.max(largestOut, v)
         } else {
           b.in += v
           totalIn += v
+          inCount++
           largestIn = Math.max(largestIn, v)
         }
+        count++
       }
-      count++
     }
     const points: FlowPoint[] = [...buckets.entries()]
       .map(([key, b]) => ({ key, label: dayLabel(b.ts), in: b.in, out: b.out }))
@@ -124,8 +128,8 @@ export default function Analytics({
       totalOut,
       net: totalIn - totalOut,
       count,
-      avgIn: totalIn / Math.max(1, count),
-      avgOut: totalOut / Math.max(1, count),
+      avgIn: totalIn / Math.max(1, inCount),
+      avgOut: totalOut / Math.max(1, outCount),
       largestIn,
       largestOut,
     }
@@ -133,8 +137,13 @@ export default function Analytics({
   }, [txs, period, ownNorm])
 
   const trajectory = useMemo(
-    () => (currentBalanceNim !== null ? buildTrajectory(txs, Number(currentBalanceNim) / 100000, ownNorm) : []),
-    [txs, currentBalanceNim, ownNorm]
+    () => {
+      if (currentBalanceNim === null) return []
+      const cutoff = period === 0 ? 0 : Date.now() - period * 86400000
+      const filtered = txs.filter((tx) => (tx.timestamp ?? 0) >= cutoff)
+      return buildTrajectory(filtered, Number(currentBalanceNim) / 100000, ownNorm)
+    },
+    [txs, currentBalanceNim, ownNorm, period]
   )
 
   const W = 340
