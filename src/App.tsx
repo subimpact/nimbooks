@@ -396,7 +396,7 @@ export default function App() {
           <button className="btn-secondary" onClick={connectWithHub} disabled={connecting || hubConnecting}>
             {hubConnecting ? 'Opening Nimiq Hub…' : 'Continue with Nimiq Hub'}
           </button>
-          <button className="btn-ghost" onClick={connectDemo} disabled={connecting || hubConnecting}>
+          <button className="btn-ghost-lg" onClick={connectDemo} disabled={connecting || hubConnecting}>
             Try with a sample wallet
           </button>
           {error && <p className="error">{error}</p>}

@@ -320,6 +320,26 @@ a.btn-ghost.btn-link {
   font-size: 16px;
   cursor: pointer;
 }
+/* Full-width ghost button (connect screen demo mode) — btn-ghost is a 36px icon square */
+.btn-ghost-lg {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--card-2);
+  border-radius: 12px;
+  padding: 12px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  width: 100%;
+  margin-top: 10px;
+}
+.btn-ghost-lg:hover {
+  color: var(--text);
+  border-color: var(--muted);
+}
+.btn-ghost-lg:disabled {
+  opacity: 0.6;
+}
 .btn-small {
   display: inline-block;
   background: var(--card-2);
