@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import './App.css'
-import { connectWallet, getDeviceId, getLanguage, signReceipt, type WalletAccount } from './lib/wallet'
+import { connectWallet, connectHub, getDeviceId, getLanguage, signReceipt, type WalletAccount } from './lib/wallet'
 import {
   getNimiqBalance,
   getNimiqTransactions,
@@ -61,6 +61,7 @@ function isValidReceipt(r: unknown): r is SignedReceipt {
 export default function App() {
   const [account, setAccount] = useState<WalletAccount | null>(null)
   const [connecting, setConnecting] = useState(false)
+  const [hubConnecting, setHubConnecting] = useState(false)
   const [view, setView] = useState<View>('dashboard')
   const [nimBalance, setNimBalance] = useState<string | null>(null)
   const [nimTxs, setNimTxs] = useState<NimiqTx[]>([])
@@ -143,7 +144,7 @@ export default function App() {
     try {
       const acc = await connectWallet()
       if (!acc.nimiqAddress && !acc.evmAddress) {
-        setError('No wallet found. Open this app inside Nimiq Pay.')
+        setError('No wallet found. Open this app inside Nimiq Pay, or use the browser login below.')
         return
       }
       setAccount(acc)
@@ -152,6 +153,20 @@ export default function App() {
       setError('Connection failed: ' + (e as Error).message)
     } finally {
       setConnecting(false)
+    }
+  }
+
+  const connectWithHub = async () => {
+    setHubConnecting(true)
+    setError(null)
+    try {
+      const acc = await connectHub()
+      setAccount(acc)
+      await refresh(acc)
+    } catch (e) {
+      setError('Browser login failed: ' + (e as Error).message)
+    } finally {
+      setHubConnecting(false)
     }
   }
 
@@ -289,13 +304,17 @@ export default function App() {
           <p className="tagline">The books for your Nimiq wallet.</p>
         </header>
         <main className="connect-panel">
-          <button className="btn-primary" onClick={connect} disabled={connecting}>
-            {connecting ? 'Connecting…' : 'Connect Wallet'}
+          <button className="btn-primary" onClick={connect} disabled={connecting || hubConnecting}>
+            {connecting ? 'Connecting…' : 'Connect Wallet (Nimiq Pay)'}
+          </button>
+          <div className="connect-divider">or</div>
+          <button className="btn-secondary" onClick={connectWithHub} disabled={connecting || hubConnecting}>
+            {hubConnecting ? 'Opening Nimiq Hub…' : 'Continue with Nimiq Hub'}
           </button>
           {error && <p className="error">{error}</p>}
           <p className="hint">
-            Open this app inside <strong>Nimiq Pay</strong> to see your balances, history, and
-            signed receipts.
+            Open this app inside <strong>Nimiq Pay</strong> for balances, history, and signed
+            receipts — or use <strong>Nimiq Hub</strong> right here in your browser.
           </p>
         </main>
       </div>

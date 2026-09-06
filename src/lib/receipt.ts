@@ -96,7 +96,12 @@ export function canonicalPayload(r: Omit<SignedReceipt, 'publicKey' | 'signature
 }
 
 // Ed25519 verification (Nimiq uses Ed25519 for account signing).
-// Uses WebCrypto — no extra dependency.
+// The Nimiq keyguard/Hub signs with the "Nimiq Signed Message" scheme:
+//   sign(sha256('\x16Nimiq Signed Message:\n' + message.length + message))
+// while the Mini App SDK sign() may return raw Ed25519 over the payload.
+// Support BOTH schemes so receipts verify regardless of which provider signed.
+const NIMIQ_MSG_PREFIX = '\x16Nimiq Signed Message:\n'
+
 export async function verifyEd25519(
   publicKeyHex: string,
   message: string,
@@ -121,6 +126,42 @@ export async function verifyEd25519(
   }
 }
 
+// Nimiq keyguard / Hub scheme: sha256(prefix + message.length + message), then Ed25519 over the digest.
+export async function verifyNimiqSignedMessage(
+  publicKeyHex: string,
+  message: string,
+  signatureHex: string
+): Promise<boolean> {
+  try {
+    const data = `${NIMIQ_MSG_PREFIX}${message.length}${message}`
+    const dataBytes = new TextEncoder().encode(data)
+    const hash = await crypto.subtle.digest('SHA-256', dataBytes)
+    const key = await crypto.subtle.importKey(
+      'raw',
+      toBufferSource(hexToBytes(publicKeyHex)),
+      { name: 'Ed25519' },
+      false,
+      ['verify']
+    )
+    return await crypto.subtle.verify('Ed25519', key, toBufferSource(hexToBytes(signatureHex)), hash)
+  } catch (e) {
+    console.warn('NimiqSignedMessage verify failed:', e)
+    return false
+  }
+}
+
+// Try raw Ed25519 first, then the Nimiq Signed Message scheme.
+export async function verifyEitherScheme(
+  publicKeyHex: string,
+  message: string,
+  signatureHex: string
+): Promise<boolean> {
+  return (
+    (await verifyEd25519(publicKeyHex, message, signatureHex)) ||
+    (await verifyNimiqSignedMessage(publicKeyHex, message, signatureHex))
+  )
+}
+
 export type VerifyStatus = 'valid' | 'invalid' | 'inconclusive'
 
 export async function verifyReceiptFull(receipt: SignedReceipt): Promise<{
@@ -130,9 +171,9 @@ export async function verifyReceiptFull(receipt: SignedReceipt): Promise<{
   signerBound: boolean
   details: string
 }> {
-  // 1. Signature check
+  // 1. Signature check — accepts raw Ed25519 OR the Nimiq Signed Message scheme
   const payload = canonicalPayload(receipt)
-  const signatureValid = await verifyEd25519(receipt.publicKey, payload, receipt.signature)
+  const signatureValid = await verifyEitherScheme(receipt.publicKey, payload, receipt.signature)
   if (!signatureValid) {
     return {
       status: 'invalid',
