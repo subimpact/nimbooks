@@ -288,6 +288,12 @@ body {
 .btn-primary:disabled {
   opacity: 0.6;
 }
+/* Primary button as anchor (deep-link CTA). Block so it centers like the buttons. */
+a.btn-primary.btn-link {
+  display: inline-block;
+  text-decoration: none;
+  margin: 4px 0;
+}
 .btn-ghost {
   background: var(--card);
   color: var(--text);
