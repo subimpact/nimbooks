@@ -300,6 +300,16 @@ a.btn-primary.btn-link {
   text-decoration: none;
   margin: 4px 0;
 }
+/* Ghost button as anchor (back link) — auto width so "← Back" doesn't overflow the 36px box */
+a.btn-ghost.btn-link {
+  width: auto;
+  padding: 6px 12px;
+  font-size: 13px;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
 .btn-ghost {
   background: var(--card);
   color: var(--text);
@@ -434,4 +444,14 @@ a.btn-primary.btn-link {
   height: auto;
   display: block;
   margin-top: 8px;
+}
+
+/* History tx hash link + failed badge */
+.tx-hash-link {
+  color: var(--accent-2);
+  text-decoration: none;
+}
+.tx-failed {
+  color: var(--red);
+  font-size: 12px;
 }

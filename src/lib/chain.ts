@@ -30,7 +30,12 @@ async function rpcCall(method: string, params: unknown[], timeoutMs = 10000): Pr
     })
     if (!res.ok) throw new Error(`RPC HTTP ${res.status}`)
     const json = await res.json()
-    if (json.error) throw new Error(json.error.message || 'RPC error')
+    if (json.error) {
+      // Include the data payload — "Transaction not found: <hash>" lives in
+      // error.data, not error.message ("Internal error"), and callers rely on it.
+      const detail = json.error.data ? `: ${json.error.data}` : ''
+      throw new Error(`${json.error.message || 'RPC error'}${detail}`)
+    }
     return json.result?.data ?? json.result
   } finally {
     clearTimeout(timer)
@@ -86,6 +91,10 @@ export async function getNimiqTransactionByHash(hash: string): Promise<NimiqTx |
       executionResult: t.executionResult,
     }
   } catch (e) {
+    // RPC returns -32603 "Transaction not found: <hash>" for nonexistent hashes.
+    // That is a definitive "no such tx", not an RPC outage.
+    const msg = e instanceof Error ? e.message : String(e)
+    if (/not found/i.test(msg)) return null
     console.warn('getNimiqTransactionByHash failed:', e)
     throw e
   }

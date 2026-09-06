@@ -72,6 +72,7 @@ export default function App() {
   const [lang, setLang] = useState<string>('en')
   const [receipts, setReceipts] = useState<SignedReceipt[]>([])
   const [loading, setLoading] = useState(false)
+  const [signingHash, setSigningHash] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [toast, setToast] = useState<string | null>(null)
 
@@ -215,6 +216,7 @@ export default function App() {
       return
     }
     try {
+      setSigningHash(tx.hash)
       const receipt = await signReceipt(
         {
           app: 'nimbooks',
@@ -246,6 +248,8 @@ export default function App() {
     } catch (e) {
       console.error('signReceipt failed:', e)
       setError('Signing failed: ' + (e instanceof Error ? e.message : String(e)))
+    } finally {
+      setSigningHash(null)
     }
   }
 
@@ -257,8 +261,9 @@ export default function App() {
         await navigator.share({ title: 'NimBooks receipt', text: 'Verified payment receipt', url })
         return
       }
-    } catch {
-      /* user cancelled share sheet — fall through to clipboard */
+    } catch (e) {
+      // User cancelled the share sheet — do NOT fall through to clipboard (would overwrite it)
+      if (e instanceof Error && e.name === 'AbortError') return
     }
     try {
       await navigator.clipboard.writeText(url)
@@ -280,8 +285,8 @@ export default function App() {
           isOut ? 'sent' : 'received',
           t.sender,
           t.recipient,
-          formatLuna(t.value, lang),
-          formatLuna(t.fee, lang),
+          (Number(t.value) / 100000).toFixed(5), // raw decimals — no locale separators (accounting-safe)
+          (Number(t.fee) / 100000).toFixed(5),
           ((Number(t.value) / 100000) * rates.nim).toFixed(6),
           t.data ?? '',
         ]
@@ -304,6 +309,48 @@ export default function App() {
       document.body.removeChild(a)
       URL.revokeObjectURL(url)
     }, 1000)
+  }
+
+  const copyCsv = async () => {
+    if (!account?.nimiqAddress) return
+    const rows = [
+      ['timestamp', 'txHash', 'type', 'sender', 'recipient', 'amountNIM', 'feeNIM', 'valueUSD_indicative', 'memo'],
+      ...nimTxs.map((t) => {
+        const isOut = t.sender.replace(/\s+/g, '').toUpperCase() === account.nimiqAddress?.replace(/\s+/g, '').toUpperCase()
+        return [
+          new Date(t.timestamp ?? Date.now()).toISOString(),
+          t.hash,
+          isOut ? 'sent' : 'received',
+          t.sender,
+          t.recipient,
+          (Number(t.value) / 100000).toFixed(5),
+          (Number(t.fee) / 100000).toFixed(5),
+          ((Number(t.value) / 100000) * rates.nim).toFixed(6),
+          t.data ?? '',
+        ]
+      }),
+    ]
+    const csv =
+      '\uFEFF' +
+      rows
+        .map((r) => r.map((c) => `"${sanitizeCsvCell(c).replace(/"/g, '""')}"`).join(','))
+        .join('\n')
+    try {
+      await navigator.clipboard.writeText(csv)
+      setToast('CSV copied to clipboard!')
+    } catch {
+      setError('Could not copy CSV — use Download instead.')
+    }
+  }
+
+  const disconnect = () => {
+    setAccount(null)
+    setNimBalance(null)
+    setNimTxs([])
+    setEvmBalances([])
+    setReceipts([])
+    setError(null)
+    setToast(null)
   }
 
   const requestDeviceId = async () => {
@@ -370,7 +417,7 @@ export default function App() {
         <button className="btn-ghost" onClick={() => refresh(account)} disabled={loading}>
           {loading ? '…' : '↻'}
         </button>
-        <button className="btn-ghost" onClick={() => setAccount(null)} title="Disconnect wallet">
+        <button className="btn-ghost" onClick={disconnect} title="Disconnect wallet">
           ⏻
         </button>
       </header>
@@ -487,16 +534,27 @@ export default function App() {
                   </div>
                   <div className="tx-sub">
                     {tx.timestamp ? new Date(tx.timestamp).toLocaleString(lang) : '—'} ·{' '}
-                    {tx.hash.slice(0, 10)}…
+                    <a
+                      className="tx-hash-link"
+                      href={`https://explorer.nimiq.com/transactions/${tx.hash}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      {tx.hash.slice(0, 10)}…
+                    </a>
                     {tx.executionResult === false && <span className="tx-failed"> · failed</span>}
                   </div>
                   {tx.data && <div className="tx-memo">memo: {tx.data}</div>}
                   <button
                     className="btn-small"
                     onClick={() => makeReceipt(tx)}
-                    disabled={receipts.some((r) => r.txHash === tx.hash)}
+                    disabled={receipts.some((r) => r.txHash === tx.hash) || signingHash === tx.hash}
                   >
-                    {receipts.some((r) => r.txHash === tx.hash) ? '✓ Signed' : 'Sign receipt'}
+                    {signingHash === tx.hash
+                      ? 'Signing…'
+                      : receipts.some((r) => r.txHash === tx.hash)
+                        ? '✓ Signed'
+                        : 'Sign receipt'}
                   </button>
                 </div>
               )
@@ -540,6 +598,9 @@ export default function App() {
             </p>
             <button className="btn-primary" onClick={exportCsv} disabled={nimTxs.length === 0}>
               Download CSV ({nimTxs.length} transactions)
+            </button>
+            <button className="btn-secondary" onClick={copyCsv} disabled={nimTxs.length === 0}>
+              Copy CSV to clipboard
             </button>
             <button className="btn-secondary" onClick={requestDeviceId}>
               {deviceId ? `Device: ${deviceId.slice(0, 12)}…` : 'Enable device preferences'}

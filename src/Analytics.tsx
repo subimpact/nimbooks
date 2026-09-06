@@ -36,6 +36,7 @@ function dayLabel(tsMs: number): string {
 }
 
 // Reconstruct historical balance by walking txs newest → oldest from the current balance.
+// Outgoing txs cost value + fee; balances are clamped at 0 (can't go negative).
 function buildTrajectory(
   txs: NimiqTx[],
   currentBalanceNim: number,
@@ -47,8 +48,10 @@ function buildTrajectory(
   for (const tx of sorted) {
     const isOut = tx.sender.replace(/\s+/g, '').toUpperCase() === ownAddressNorm
     const v = Number(tx.value) / 100000
+    const fee = Number(tx.fee) / 100000
     if (Number.isFinite(v)) {
-      bal = isOut ? bal + v : bal - v // walk backwards
+      bal = isOut ? bal + v + (Number.isFinite(fee) ? fee : 0) : bal - v // walk backwards
+      bal = Math.max(0, bal)
       if (tx.timestamp) pts.push({ ts: tx.timestamp, balance: bal })
     }
   }
@@ -167,14 +170,21 @@ export default function Analytics({
   const y = (v: number) => PAD_T + plotH - ((v - yMin) / yRange) * plotH
 
   const trajPoints = trajectory.length
-    ? trajectory
-        .map((p, i) => {
-          const x = PAD_L + plotW * (trajectory.length === 1 ? 1 : i / (trajectory.length - 1))
-          const yv = PAD_T + plotH - 4 - ((p.balance - Math.min(...trajectory.map((q) => q.balance))) /
-            Math.max(0.000001, Math.max(...trajectory.map((q) => q.balance)) - Math.min(...trajectory.map((q) => q.balance)))) * (plotH - 8)
-          return `${x},${yv}`
-        })
-        .join(' ')
+    ? (() => {
+        const minTs = Math.min(...trajectory.map((q) => q.ts))
+        const maxTs = Math.max(...trajectory.map((q) => q.ts))
+        const minBal = Math.min(...trajectory.map((q) => q.balance))
+        const maxBal = Math.max(...trajectory.map((q) => q.balance))
+        const span = Math.max(0.000001, maxBal - minBal)
+        return trajectory
+          .map((p) => {
+            // Time-scaled x-axis: gaps in time render as gaps in the chart
+            const x = PAD_L + plotW * (maxTs === minTs ? 1 : (p.ts - minTs) / (maxTs - minTs))
+            const yv = PAD_T + plotH - 4 - ((p.balance - minBal) / span) * (plotH - 8)
+            return `${x},${yv}`
+          })
+          .join(' ')
+      })()
     : ''
 
   const fmt = (v: number) => v.toLocaleString(lang, { maximumFractionDigits: 2 })
@@ -268,9 +278,11 @@ export default function Analytics({
           <text x={PAD_L - 6} y={y(yMax) + 3} fontSize="8" fill="#8b90a0" textAnchor="end">
             {fmt(yMax)}
           </text>
-          <text x={PAD_L - 6} y={y(yMin) + 3} fontSize="8" fill="#8b90a0" textAnchor="end">
-            {fmt(yMin)}
-          </text>
+          {hasNeg && (
+            <text x={PAD_L - 6} y={y(yMin) + 3} fontSize="8" fill="#8b90a0" textAnchor="end">
+              {fmt(yMin)}
+            </text>
+          )}
           <text x={PAD_L - 6} y={y(0) + 3} fontSize="8" fill="#8b90a0" textAnchor="end">
             0
           </text>
