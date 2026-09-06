@@ -5,7 +5,7 @@ import {
   getNimiqBalance,
   getNimiqTransactions,
   getEvmBalances,
-  getFiatRates,
+  getAllFiatRates,
   formatLuna,
   formatUnits,
   type NimiqTx,
@@ -18,8 +18,10 @@ type View = 'dashboard' | 'history' | 'receipts' | 'export'
 
 const RATES_KEY = 'nimbooks:rates'
 
+// chain.ts owns this key and writes { asset: { rates: {usd,myr}, at } }.
+// Read that schema for the no-flash initial state.
 interface RateCache {
-  [asset: string]: { usd: number; at: number }
+  [asset: string]: { rates?: { usd?: number; myr?: number }; at?: number }
 }
 
 function readRates(): RateCache {
@@ -27,14 +29,6 @@ function readRates(): RateCache {
     return JSON.parse(localStorage.getItem(RATES_KEY) ?? '{}')
   } catch {
     return {}
-  }
-}
-
-function writeRates(cache: RateCache) {
-  try {
-    localStorage.setItem(RATES_KEY, JSON.stringify(cache))
-  } catch {
-    /* ignore */
   }
 }
 
@@ -92,10 +86,10 @@ export default function App() {
     const cached = readRates()
     setRates((p) => ({
       ...p,
-      nim: cached.nim?.usd ?? 0,
-      usdt: cached.usdt?.usd ?? 1,
-      eth: cached.eth?.usd ?? 0,
-      pol: cached.pol?.usd ?? 0,
+      nim: cached.nim?.rates?.usd ?? 0,
+      usdt: cached.usdt?.rates?.usd ?? 1,
+      eth: cached.eth?.rates?.usd ?? 0,
+      pol: cached.pol?.rates?.usd ?? 0,
     }))
     // Fetch fresh rates (single consolidated request)
     fetchRates()
@@ -103,21 +97,8 @@ export default function App() {
 
   const fetchRates = useCallback(async () => {
     try {
-      const [nim, usdt, eth, pol] = await Promise.all([
-        getFiatRates('nim'),
-        getFiatRates('usdt'),
-        getFiatRates('eth'),
-        getFiatRates('pol'),
-      ])
-      const next = { nim: nim.usd, usdt: usdt.usd, eth: eth.usd, pol: pol.usd }
-      setRates(next)
-      const cache: RateCache = {
-        nim: { usd: nim.usd, at: Date.now() },
-        usdt: { usd: usdt.usd, at: Date.now() },
-        eth: { usd: eth.usd, at: Date.now() },
-        pol: { usd: pol.usd, at: Date.now() },
-      }
-      writeRates(cache)
+      const all = await getAllFiatRates()
+      setRates({ nim: all.nim.usd, usdt: all.usdt.usd, eth: all.eth.usd, pol: all.pol.usd })
     } catch (e) {
       console.warn('Rate fetch failed:', e)
       setError('Live rates unavailable — showing cached values.')
@@ -169,6 +150,25 @@ export default function App() {
       setError('Browser login failed: ' + (e as Error).message)
     } finally {
       setHubConnecting(false)
+    }
+  }
+
+  const connectDemo = async () => {
+    setConnecting(true)
+    setError(null)
+    try {
+      // Public mainnet address with real activity — read-only demo mode.
+      const acc: WalletAccount = {
+        nimiqAddress: 'NQ02 31N6 3KM5 T6G5 22TN EPF5 5XPY RLHK RMB3',
+        provider: 'hub',
+      }
+      setAccount(acc)
+      await refresh(acc)
+      setToast('Demo mode — read-only sample wallet.')
+    } catch (e) {
+      setError('Demo load failed: ' + (e as Error).message)
+    } finally {
+      setConnecting(false)
     }
   }
 
@@ -349,6 +349,9 @@ export default function App() {
           <button className="btn-secondary" onClick={connectWithHub} disabled={connecting || hubConnecting}>
             {hubConnecting ? 'Opening Nimiq Hub…' : 'Continue with Nimiq Hub'}
           </button>
+          <button className="btn-ghost" onClick={connectDemo} disabled={connecting || hubConnecting}>
+            Try with a sample wallet
+          </button>
           {error && <p className="error">{error}</p>}
           <p className="hint">
             In Nimiq Pay you also get balances, history, and signed receipts — or use{' '}
@@ -485,6 +488,7 @@ export default function App() {
                   <div className="tx-sub">
                     {tx.timestamp ? new Date(tx.timestamp).toLocaleString(lang) : '—'} ·{' '}
                     {tx.hash.slice(0, 10)}…
+                    {tx.executionResult === false && <span className="tx-failed"> · failed</span>}
                   </div>
                   {tx.data && <div className="tx-memo">memo: {tx.data}</div>}
                   <button

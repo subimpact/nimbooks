@@ -102,6 +102,26 @@ export function canonicalPayload(r: Omit<SignedReceipt, 'publicKey' | 'signature
 // Support BOTH schemes so receipts verify regardless of which provider signed.
 const NIMIQ_MSG_PREFIX = '\x16Nimiq Signed Message:\n'
 
+// Some WebViews / older browsers lack WebCrypto Ed25519. Probe once so we can
+// distinguish "browser can't check" (inconclusive) from "signature is bad" (invalid).
+let ed25519Supported: boolean | null = null
+async function probeEd25519(): Promise<boolean> {
+  if (ed25519Supported !== null) return ed25519Supported
+  try {
+    const key = await crypto.subtle.importKey(
+      'raw',
+      new Uint8Array(32),
+      { name: 'Ed25519' },
+      false,
+      ['verify']
+    )
+    ed25519Supported = !!key
+  } catch {
+    ed25519Supported = false
+  }
+  return ed25519Supported
+}
+
 export async function verifyEd25519(
   publicKeyHex: string,
   message: string,
@@ -171,7 +191,18 @@ export async function verifyReceiptFull(receipt: SignedReceipt): Promise<{
   signerBound: boolean
   details: string
 }> {
-  // 1. Signature check — accepts raw Ed25519 OR the Nimiq Signed Message scheme
+  // 1. Signature check — accepts raw Ed25519 OR the Nimiq Signed Message scheme.
+  //    If the browser/WebView can't do Ed25519 at all, say so (inconclusive)
+  //    instead of accusing a genuine receipt of forgery.
+  if (!(await probeEd25519())) {
+    return {
+      status: 'inconclusive',
+      signatureValid: false,
+      onChainValid: false,
+      signerBound: false,
+      details: 'Your browser cannot check Ed25519 signatures — open this link in an updated browser.',
+    }
+  }
   const payload = canonicalPayload(receipt)
   const signatureValid = await verifyEitherScheme(receipt.publicKey, payload, receipt.signature)
   if (!signatureValid) {
@@ -214,11 +245,18 @@ export async function verifyReceiptFull(receipt: SignedReceipt): Promise<{
     const senderMatch = tx.sender.replace(/\s+/g, '').toUpperCase() === normSender
     const recipientMatch = tx.recipient.replace(/\s+/g, '').toUpperCase() === normRecipient
     const amountMatch = String(tx.value) === String(receipt.amount)
+    // A failed (reverted) tx must NOT verify as a valid payment.
+    const executedMatch = tx.executionResult !== false
+    // Asset: v1 receipts are NIM-only — a receipt claiming USDT over a NIM tx is forged.
+    const assetMatch = receipt.asset === 'NIM'
+    // Timestamp: the claimed time must be within 60s of the on-chain block time.
+    const txTsSec = tx.timestamp ? Math.floor(tx.timestamp / 1000) : null
+    const timestampMatch = txTsSec === null || Math.abs(txTsSec - receipt.timestamp) <= 60
     // Memo: if the receipt claims a memo, the on-chain tx MUST carry the same data.
     // (Previously `!tx.data` bypassed the check — a receipt could claim a memo the chain never had.)
     const memoMatch = !receipt.memo ? true : !!tx.data && receipt.memo === tx.data
 
-    if (senderMatch && recipientMatch && amountMatch && memoMatch) {
+    if (senderMatch && recipientMatch && amountMatch && executedMatch && assetMatch && timestampMatch && memoMatch) {
       return {
         status: 'valid',
         signatureValid: true,

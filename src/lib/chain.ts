@@ -15,6 +15,7 @@ export interface NimiqTx {
   data?: string
   blockNumber?: number
   proof?: string
+  executionResult?: boolean
 }
 
 async function rpcCall(method: string, params: unknown[], timeoutMs = 10000): Promise<any> {
@@ -60,6 +61,7 @@ export async function getNimiqTransactions(address: string, max = 50): Promise<N
       data: t.recipientData || t.senderData || undefined,
       blockNumber: t.blockNumber ?? t.blockHeight,
       proof: t.proof ?? undefined,
+      executionResult: t.executionResult,
     }))
   } catch (e) {
     console.warn('getNimiqTransactions failed:', e)
@@ -81,6 +83,7 @@ export async function getNimiqTransactionByHash(hash: string): Promise<NimiqTx |
       data: t.recipientData || t.senderData || undefined,
       blockNumber: t.blockNumber ?? t.blockHeight,
       proof: t.proof ?? undefined,
+      executionResult: t.executionResult,
     }
   } catch (e) {
     console.warn('getNimiqTransactionByHash failed:', e)
@@ -220,6 +223,49 @@ export async function getFiatRates(asset: 'nim' | 'usdt' | 'usdc' | 'eth' | 'pol
       writeRateCache(cache)
     }
     return rates
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+// Single consolidated CoinGecko request for all tracked assets — one call,
+// one cache entry. Prevents 429 rate-limit storms from 4 parallel requests.
+export async function getAllFiatRates(): Promise<Record<'nim' | 'usdt' | 'eth' | 'pol', FiatRates>> {
+  const cache = readRateCache()
+  const fresh = (a: string) => {
+    const c = cache[a]
+    return c && Date.now() - c.at < CACHE_TTL ? c.rates : null
+  }
+  const nim = fresh('nim')
+  const usdt = fresh('usdt')
+  const eth = fresh('eth')
+  const pol = fresh('pol')
+  if (nim && usdt && eth && pol) return { nim, usdt, eth, pol }
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 8000)
+  try {
+    const res = await fetch(
+      'https://api.coingecko.com/api/v3/simple/price?ids=nimiq-2,tether,ethereum,matic-network&vs_currencies=usd,myr',
+      { signal: controller.signal }
+    )
+    if (!res.ok) throw new Error(`CoinGecko HTTP ${res.status}`)
+    const json = await res.json()
+    const now = Date.now()
+    const out = {
+      nim: { usd: json['nimiq-2']?.usd ?? 0, myr: json['nimiq-2']?.myr ?? 0 },
+      usdt: { usd: json['tether']?.usd ?? 0, myr: json['tether']?.myr ?? 0 },
+      eth: { usd: json['ethereum']?.usd ?? 0, myr: json['ethereum']?.myr ?? 0 },
+      pol: { usd: json['matic-network']?.usd ?? 0, myr: json['matic-network']?.myr ?? 0 },
+    }
+    // Cache only if the response actually carried rates (avoid caching 429/empty)
+    if (out.nim.usd > 0) {
+      for (const k of ['nim', 'usdt', 'eth', 'pol'] as const) {
+        cache[k] = { rates: out[k], at: now }
+      }
+      writeRateCache(cache)
+    }
+    return out
   } finally {
     clearTimeout(timer)
   }
