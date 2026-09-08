@@ -1318,6 +1318,13 @@ export default function App() {
           <button className="btn-ghost-lg" onClick={connectDemo} disabled={connecting || hubConnecting}>
             Try with a sample wallet
           </button>
+          <ul className="feature-list">
+            <li>Balance &amp; history with live fiat values — 37 currencies</li>
+            <li>Stake, unstake &amp; track rewards</li>
+            <li>Payment requests (invoices) that settle on-chain</li>
+            <li>Signed receipts — verifiable proof of payment</li>
+            <li>Tax-ready CSV statements &amp; exports</li>
+          </ul>
           {error && <p className="error">{error}</p>}
         </main>
       </div>
