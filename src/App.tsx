@@ -781,7 +781,7 @@ export default function App() {
                       }
                     }}
                   >
-                    NIM: {addr.slice(0, 12)}…
+                    NIM: {addr}
                   </button>
                 )
               })()}
@@ -814,7 +814,7 @@ export default function App() {
                       }
                     }}
                   >
-                    EVM: {addr.slice(0, 10)}…
+                    EVM: {addr}
                   </button>
                 )
               })()}
