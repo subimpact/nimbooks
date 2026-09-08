@@ -185,6 +185,25 @@ export default function App() {
   const [unstaking, setUnstaking] = useState(false)
   const [unstakeError, setUnstakeError] = useState<string | null>(null)
   const [unstakeHash, setUnstakeHash] = useState<string | null>(null)
+  // A retire-stake tx is submitted but only takes effect at the next election
+  // block (~12h). Until the staker record reflects it, show it as pending.
+  const [pendingUnstake, setPendingUnstake] = useState<{
+    amountNim: number
+    hash: string
+    submittedAt: number
+  } | null>(null)
+  // Persist across reloads: the retire tx takes effect at the next election
+  // block, which can be hours away — the pending state must survive a
+  // WebView refresh.
+  const PENDING_UNSTAKE_KEY = 'nimbooks:pendingUnstake'
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(PENDING_UNSTAKE_KEY)
+      if (raw) setPendingUnstake(JSON.parse(raw))
+    } catch {
+      /* corrupt — ignore */
+    }
+  }, [])
   const [validators, setValidators] = useState<ValidatorInfo[]>([])
   const [validatorsLoading, setValidatorsLoading] = useState(false)
   const [validatorsError, setValidatorsError] = useState<string | null>(null)
@@ -453,12 +472,34 @@ export default function App() {
           console.warn('HTLC holdings lookup failed:', e)
           setHtlcHoldings([])
         }
+        let freshHolding: StakingHolding | null = null
         try {
-          setStakingHolding(await getStakingHolding(acc.nimiqAddress))
+          freshHolding = await getStakingHolding(acc.nimiqAddress)
+          setStakingHolding(freshHolding)
         } catch (e) {
           console.warn('Staking holding lookup failed:', e)
           setStakingHolding(null)
         }
+        // Pending unstake resolution: once the staker record shows the retire
+        // took effect (inactive balance appeared, or active dropped by the
+        // pending amount), the pending marker has served its purpose. Also
+        // expire it after ~2 epochs (24h) as a safety net.
+        setPendingUnstake((prev) => {
+          if (!prev) return prev
+          const resolved =
+            (freshHolding && Number(freshHolding.inactive) > 0) ||
+            (freshHolding && Number(freshHolding.active) < prev.amountNim * 100000) ||
+            Date.now() - prev.submittedAt > 2 * 12 * 60 * 60 * 1000
+          if (resolved) {
+            try {
+              localStorage.removeItem(PENDING_UNSTAKE_KEY)
+            } catch {
+              /* ignore */
+            }
+            return null
+          }
+          return prev
+        })
         try {
           setVestingHoldings(await getVestingHoldings(acc.nimiqAddress, txs))
         } catch (e) {
@@ -695,6 +736,16 @@ export default function App() {
           return
         }
         setUnstakeHash(retire.hash)
+        // The retire only takes effect at the next election block (~12h) —
+        // persist a pending marker so Overview/History can show it until the
+        // staker record flips to inactive.
+        const pending = { amountNim: retireNim, hash: retire.hash, submittedAt: Date.now() }
+        setPendingUnstake(pending)
+        try {
+          localStorage.setItem(PENDING_UNSTAKE_KEY, JSON.stringify(pending))
+        } catch {
+          /* storage full — in-memory only */
+        }
         remainingNim -= retireNim
       }
       // 3. Anything left was already cooling down (inactive) — no tx needed,
@@ -1145,6 +1196,16 @@ export default function App() {
 
             <div className="card">
               <span className="label">NIM balance</span>
+              {pendingUnstake && (
+                <div className="pending-unstake-banner">
+                  <span className="pending-dot" aria-hidden="true" />
+                  <span>
+                    Unstaking {formatLuna(String(pendingUnstake.amountNim * 100000), lang)} NIM —
+                    takes effect at the next election block (up to ~12h), then a
+                    reporting window before it's withdrawable.
+                  </span>
+                </div>
+              )}
               {nimBalance === null ? (
                 <span className="value dim">…</span>
               ) : offBalanceLuna > 0 ? (
@@ -1376,6 +1437,24 @@ export default function App() {
                 <p className="hint small">
                   Forged, reverted, or non-existent transactions fail verification.
                 </p>
+              </div>
+            )}
+            {pendingUnstake && (
+              <div className="tx pending-tx">
+                <div className="tx-main">
+                  <span className="out">
+                    ▼ unstaking
+                    <span className="tx-kind unstake"> · pending</span>
+                  </span>
+                  <span className="tx-amount">
+                    {formatLuna(String(pendingUnstake.amountNim * 100000), lang)} NIM
+                  </span>
+                </div>
+                <div className="tx-sub">
+                  Submitted {new Date(pendingUnstake.submittedAt).toLocaleString(lang)} · takes
+                  effect at the next election block (up to ~12h) ·{' '}
+                  <span className="mono">{pendingUnstake.hash.slice(0, 10)}…</span>
+                </div>
               </div>
             )}
             {stakingHolding && (Number(stakingHolding.active) > 0 || Number(stakingHolding.inactive) > 0 || Number(stakingHolding.retired) > 0) && (

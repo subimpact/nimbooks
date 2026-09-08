@@ -1265,6 +1265,38 @@ a.btn-ghost.btn-link {
 .statement-actions .btn-secondary {
   width: 100%;
 }
+.pending-unstake-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--warn, #e8a33d);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--warn, #e8a33d) 10%, transparent);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.pending-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: var(--warn, #e8a33d);
+  animation: pending-pulse 1.6s ease-in-out infinite;
+}
+@keyframes pending-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.pending-tx {
+  opacity: 0.85;
+  border-left: 2px solid var(--warn, #e8a33d);
+}
+.tx-kind.unstake {
+  color: var(--warn, #e8a33d);
+}
 .stake-empty {
   margin-top: 4px;
   padding: 10px 12px;
