@@ -1343,7 +1343,11 @@ a.btn-ghost.btn-link {
   opacity: 0.85;
   border-left: 2px solid var(--warn, #e8a33d);
 }
-.tx-kind.unstake {
+.tx-kind.unstake,
+/* The three legs of an unstake, recorded locally (lib/stakingLog.ts) */
+.tx-kind.deactivate,
+.tx-kind.retire,
+.tx-kind.withdraw {
   color: var(--warn, #e8a33d);
 }
 .stake-empty {
