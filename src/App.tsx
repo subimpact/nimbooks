@@ -764,7 +764,20 @@ export default function App() {
                         await navigator.clipboard.writeText(addr)
                         setToast('NIM address copied!')
                       } catch {
-                        setError('Could not copy — long-press the address instead.')
+                        // Fallback for browsers without async clipboard (older mobile)
+                        try {
+                          const ta = document.createElement('textarea')
+                          ta.value = addr
+                          ta.style.position = 'fixed'
+                          ta.style.opacity = '0'
+                          document.body.appendChild(ta)
+                          ta.select()
+                          document.execCommand('copy')
+                          document.body.removeChild(ta)
+                          setToast('NIM address copied!')
+                        } catch {
+                          setError('Could not copy — long-press the address instead.')
+                        }
                       }
                     }}
                   >
@@ -784,7 +797,20 @@ export default function App() {
                         await navigator.clipboard.writeText(addr)
                         setToast('EVM address copied!')
                       } catch {
-                        setError('Could not copy — long-press the address instead.')
+                        // Fallback for browsers without async clipboard (older mobile)
+                        try {
+                          const ta = document.createElement('textarea')
+                          ta.value = addr
+                          ta.style.position = 'fixed'
+                          ta.style.opacity = '0'
+                          document.body.appendChild(ta)
+                          ta.select()
+                          document.execCommand('copy')
+                          document.body.removeChild(ta)
+                          setToast('EVM address copied!')
+                        } catch {
+                          setError('Could not copy — long-press the address instead.')
+                        }
                       }
                     }}
                   >
