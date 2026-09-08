@@ -1264,6 +1264,44 @@ a.btn-ghost.btn-link {
   padding: 12px;
   background: var(--card);
 }
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  padding: 20px;
+}
+.confirm-dialog {
+  width: 100%;
+  max-width: 340px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+}
+.confirm-title {
+  margin: 0 0 6px;
+  font-size: 16px;
+}
+.confirm-amount {
+  margin: 0 0 10px;
+  font-size: 24px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.confirm-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+.confirm-actions .btn-ghost,
+.confirm-actions .btn-primary {
+  flex: 1;
+}
 
 /* Currency picker — flag grid matching the Nimiq wallet's Reference
    currency selector (wallet.nimiq.com settings). */

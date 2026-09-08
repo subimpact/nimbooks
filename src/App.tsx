@@ -176,6 +176,7 @@ export default function App() {
   const [shownQrId, setShownQrId] = useState<string | null>(null)
   const [stakeOpen, setStakeOpen] = useState(false)
   const [unstakeOpen, setUnstakeOpen] = useState(false)
+  const [confirmUnstakeOpen, setConfirmUnstakeOpen] = useState(false)
   const [unstakeAmount, setUnstakeAmount] = useState('')
   const [unstaking, setUnstaking] = useState(false)
   const [unstakeError, setUnstakeError] = useState<string | null>(null)
@@ -609,6 +610,28 @@ export default function App() {
   const retiredLuna = Number(stakingHolding?.retired || 0)
   const maxUnstakeableLuna = retireableLuna + inactiveLuna + retiredLuna
   const unstakeMaxNim = maxUnstakeableLuna / 100000
+
+  // Unstake timing (protocol): retire-stake takes effect at the NEXT election
+  // block (epoch boundary, ~12h), then the reporting window (1 epoch, ~12h)
+  // must pass before the funds become withdrawable. Worst case ≈ 2 epochs
+  // (~24h); typical ≈ 1–2 epochs depending on where in the epoch you are.
+  const unstakeEstimate = useMemo(() => {
+    const now = Date.now()
+    const epochMs = 12 * 60 * 60 * 1000
+    // Next election block is at most one epoch away; add the reporting window.
+    const worstMs = 2 * epochMs
+    const worst = new Date(now + worstMs)
+    return {
+      worstLabel: worst.toLocaleDateString(lang, {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+      worstMs,
+    }
+  }, [lang])
 
   const submitUnstake = async () => {
     const amountNim = Number(unstakeAmount)
@@ -1914,11 +1937,48 @@ export default function App() {
                         )}
                         <button
                           className="btn-primary stake-submit"
-                          onClick={submitUnstake}
+                          onClick={() => setConfirmUnstakeOpen(true)}
                           disabled={!canStake() || unstaking || !(Number(unstakeAmount) > 0)}
                         >
                           {unstaking ? 'Submitting…' : 'Unstake'}
                         </button>
+                        {confirmUnstakeOpen && (
+                          <div className="confirm-overlay" onClick={() => setConfirmUnstakeOpen(false)}>
+                            <div className="confirm-dialog" onClick={(e) => e.stopPropagation()}>
+                              <h3 className="confirm-title">Confirm unstake</h3>
+                              <p className="confirm-amount">
+                                {Number(unstakeAmount).toLocaleString(lang)} NIM
+                              </p>
+                              <p className="hint small">
+                                Your stake stops earning immediately. It becomes withdrawable
+                                after the reporting window — by{' '}
+                                <strong>{unstakeEstimate.worstLabel}</strong> at the latest
+                                (up to ~24h, depending on where the epoch boundary falls).
+                              </p>
+                              <p className="hint small">
+                                You'll need one more transaction to withdraw it once the
+                                cooldown finishes.
+                              </p>
+                              <div className="confirm-actions">
+                                <button
+                                  className="btn-ghost"
+                                  onClick={() => setConfirmUnstakeOpen(false)}
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  className="btn-primary"
+                                  onClick={() => {
+                                    setConfirmUnstakeOpen(false)
+                                    void submitUnstake()
+                                  }}
+                                >
+                                  Confirm unstake
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </>
