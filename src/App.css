@@ -1226,6 +1226,18 @@ a.btn-ghost.btn-link {
   border-radius: var(--radius-sm);
   background: var(--card);
 }
+.stake-empty {
+  margin-top: 4px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+}
+.stake-empty-addr {
+  font-size: 12px;
+  word-break: break-all;
+  margin: 6px 0;
+}
 .unstake-box {
   margin-top: 4px;
   border: 1px dashed var(--border);

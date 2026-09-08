@@ -1754,35 +1754,56 @@ export default function App() {
                 <label className="label stake-section" htmlFor="stakeAmount">
                   Amount (NIM)
                 </label>
-                <div className="stake-slider-row">
-                  <input
-                    id="stakeAmount"
-                    className="stake-slider"
-                    type="range"
-                    min={0}
-                    max={stakeMaxNim}
-                    step={0.1}
-                    value={Math.min(stakeAmountNim, stakeMaxNim)}
-                    onChange={(e) => setStakeAmount(e.target.value)}
-                    aria-label="Stake amount"
-                  />
-                  <span className="stake-slider-value">
-                    {stakeAmountValid ? stakeAmountNim.toLocaleString(lang) : '0'} NIM
-                    {stakeMaxNim > 0 && (
-                      <span className="stake-pct">
-                        {' '}
-                        ({Math.round((stakeAmountNim / stakeMaxNim) * 100)}%)
+                {stakeMaxNim > 0 ? (
+                  <>
+                    <div className="stake-slider-row">
+                      <input
+                        id="stakeAmount"
+                        className="stake-slider"
+                        type="range"
+                        min={0}
+                        max={stakeMaxNim}
+                        step={0.1}
+                        value={Math.min(stakeAmountNim, stakeMaxNim)}
+                        onChange={(e) => setStakeAmount(e.target.value)}
+                        aria-label="Stake amount"
+                      />
+                      <span className="stake-slider-value">
+                        {stakeAmountValid ? stakeAmountNim.toLocaleString(lang) : '0'} NIM
+                        {stakeMaxNim > 0 && (
+                          <span className="stake-pct">
+                            {' '}
+                            ({Math.round((stakeAmountNim / stakeMaxNim) * 100)}%)
+                          </span>
+                        )}
                       </span>
-                    )}
-                  </span>
-                </div>
-                <span className="hint small">
-                  {stakeAmountValid
-                    ? `≈ ${formatFiat(stakeAmountNim * shown.nim, currency)} · ${Math.round(
-                        stakeAmountNim * 100000
-                      ).toLocaleString(lang)} Luna`
-                    : `Available to stake: ${formatLuna(String(stakeMaxLuna), lang)} NIM`}
-                </span>
+                    </div>
+                    <span className="hint small">
+                      {stakeAmountValid
+                        ? `≈ ${formatFiat(stakeAmountNim * shown.nim, currency)} · ${Math.round(
+                            stakeAmountNim * 100000
+                          ).toLocaleString(lang)} Luna`
+                        : `Available to stake: ${formatLuna(String(stakeMaxLuna), lang)} NIM`}
+                    </span>
+                  </>
+                ) : (
+                  <div className="stake-empty">
+                    <p className="hint small">
+                      No spendable NIM in this wallet to stake. Send NIM to this address first:
+                    </p>
+                    <p className="mono stake-empty-addr">{account?.nimiqAddress}</p>
+                    <button
+                      className="btn-small"
+                      onClick={() => {
+                        if (account?.nimiqAddress) {
+                          navigator.clipboard?.writeText(account.nimiqAddress).catch(() => {})
+                        }
+                      }}
+                    >
+                      Copy address
+                    </button>
+                  </div>
+                )}
 
                 {stakeError && <p className="hint small warn">{stakeError}</p>}
                 {stakeHash && (
