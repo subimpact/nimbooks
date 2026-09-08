@@ -4,7 +4,7 @@
 
 NimBooks is a Nimiq Pay Mini App that answers the question every payments wallet user eventually asks: *"What do I actually have, and what happened to it?"*
 
-It shows your NIM balance and transaction history with fiat values, exports CSV statements for tax records, issues **payment requests (invoices)** that settle on-chain and reconcile themselves, and lets you create **cryptographically signed proof-of-payment receipts** that anyone can verify on a public page.
+It shows your NIM balance and transaction history with fiat values, lets you **stake and unstake** with a validator picker, exports CSV statements for tax records, issues **payment requests (invoices)** that settle on-chain and reconcile themselves, and lets you create **cryptographically signed proof-of-payment receipts** that anyone can verify on a public page.
 
 **Live:** https://nimbooks.subimpact.net (legacy: https://nimbooks.pages.dev redirects)
 
@@ -14,21 +14,26 @@ It shows your NIM balance and transaction history with fiat values, exports CSV 
 
 ## Features
 
-- **NIM balance + full transaction history** with fiat conversion (USD)
+- **NIM balance + full transaction history** with fiat conversion in **37 currencies** (currency switcher, remembered per device)
+- **Staking** — stake and unstake with a validator picker (live APY estimates, pool fee and reliability), reward rollups in history, and an HTLC-aware balance breakdown (Available / Locked in swaps / Staked / Unstaking / Ready to withdraw / Vesting)
 - **Payment requests (invoices)** — amount + memo + optional expiry → shareable link and QR; the payer settles it in-app, and the tagged transaction (`nimbooks:invoice:<id>`) marks the request paid automatically when it lands on-chain
 - **EVM balances** — native + USDT across Polygon, Base, Arbitrum, Optimism, Ethereum (via public RPCs)
 - **Signed receipts** — `signMessage` attestation over `{txHash, amount, memo, timestamp}` → shareable verification link
 - **Public verification page** — Ed25519 signature check + signer-address binding + on-chain cross-check by transaction hash
-- **CSV export** — accountant-ready statement downloads (formula-injection safe, UTF-8 BOM)
+- **CSV export** — accountant-ready statement downloads (formula-injection safe, UTF-8 BOM); statements aggregate daily CoinGecko UTC closes
+- **Download via link** — Nimiq Pay's WebView can't save files, so exports there go through a gzip-in-URL Pages Function that serves the CSV with `Content-Disposition`, plus QR and clipboard fallbacks
 - **Account-scoped receipt storage** — receipts are partitioned per wallet address
 
 ## Tech
 
 - React 19 + TypeScript + Vite
 - `@nimiq/mini-app-sdk` (v0.1.0) — `init()`, `listAccounts()`, `sign()`, `sendBasicTransactionWithData()`, `requestDeviceIdentifier()`
-- `viem` — multi-chain EVM balance reads via public RPCs (no chain-switching needed)
-- Nimiq public RPC (`rpc.nimiqwatch.com`) — balance + transaction history
-- CoinGecko API — fiat rates (cached in localStorage, 5 min TTL)
+- `@nimiq/hub-api` — the desktop path: sign-in, checkout and staking transactions when there's no Nimiq Pay provider to talk to
+- `viem` — multi-chain EVM balance reads via public RPCs (no chain-switching needed); lazy-loaded via dynamic `import()`, so it code-splits out of the initial bundle and only downloads when EVM balances are read
+- Nimiq public RPC (`rpc.nimiqwatch.com`) — balance + transaction history + staker records
+- Nimiq validators API — validator list, pool fees and reliability scores (cached 10 min)
+- CoinGecko API — fiat rates (cached in localStorage, 5 min TTL) and daily UTC closes for statements (12 h TTL)
+- Cloudflare Pages Function (`functions/export/[[file]].ts`) — serves an export link's gzipped CSV back with `Content-Disposition`, so Nimiq Pay users get a real file
 - WebCrypto Ed25519 + `blakejs` — receipt signing/verification and Nimiq address derivation
 
 ## Architecture
@@ -36,16 +41,24 @@ It shows your NIM balance and transaction history with fiat values, exports CSV 
 ```
 src/
 ├── lib/
-│   ├── wallet.ts    # Wallet adapter — Nimiq provider calls ONLY here (portable to Telegram/Farcaster)
-│   ├── chain.ts     # Nimiq RPC + EVM balance (viem) + fiat rate clients
-│   ├── receipt.ts   # Receipt encode/decode + Ed25519 verify + signer binding + on-chain cross-check
-│   ├── invoice.ts   # Payment requests — exact Luna maths, link encoding, per-account storage
-│   ├── qr.ts        # Dependency-free QR encoder (byte mode, ECC L/M, versions 1–40)
-│   ├── device.ts    # One-path-per-device detection (Nimiq Pay on mobile, Hub on desktop)
-│   └── global.d.ts  # window.ethereum / window.nimiqPay types
-├── App.tsx          # Main mini app (Overview / History / Receipts / Request / Export)
-├── InvoicePage.tsx  # Public payment-request page (#/invoice/<request>)
-└── VerifyPage.tsx   # Public receipt verification page (#/verify/<receipt>)
+│   ├── wallet.ts        # Wallet adapter — Nimiq provider calls ONLY here (portable to Telegram/Farcaster)
+│   ├── chain.ts         # Nimiq RPC + fiat rates + validator registry + tx classification
+│   ├── evm.ts           # EVM balance reads (viem) — dynamically imported, own bundle chunk
+│   ├── stakingEvents.ts # Staking reward rollups synthesized into the history feed
+│   ├── statement.ts     # Tax-year statement — daily aggregation against CoinGecko UTC closes
+│   ├── downloadLink.ts  # gzip-in-URL export links for Nimiq Pay's WebView
+│   ├── receipt.ts       # Receipt encode/decode + Ed25519 verify + signer binding + on-chain cross-check
+│   ├── invoice.ts       # Payment requests — exact Luna maths, link encoding, per-account storage
+│   ├── qr.ts            # Dependency-free QR encoder (byte mode, ECC L/M, versions 1–40)
+│   ├── device.ts        # One-path-per-device detection (Nimiq Pay on mobile, Hub on desktop)
+│   ├── theme.ts         # Light/dark preference
+│   └── global.d.ts      # window.ethereum / window.nimiqPay types
+├── App.tsx              # Main mini app (Overview / History / Receipts / Request / Export)
+├── InvoicePage.tsx      # Public payment-request page (#/invoice/<request>)
+└── VerifyPage.tsx       # Public receipt verification page (#/verify/<receipt>)
+
+functions/
+└── export/[[file]].ts   # Pages Function — decodes an export link and serves the CSV as a download
 ```
 
 The wallet layer is behind an adapter interface — swapping Nimiq Pay for Telegram Mini Apps later means replacing one file.
@@ -77,7 +90,7 @@ npm install
 npm run dev
 ```
 
-Open in a browser for the connect screen (providers only inject inside Nimiq Pay). For the full experience, deploy and open via `nimiqpay://miniapp?url=https://nimbooks.subimpact.net`.
+In a desktop browser you get the Nimiq Hub sign-in path, or "Try with a sample wallet" for a read-only tour. The Nimiq Pay provider only injects inside the app itself — for the full experience, deploy and open via `nimiqpay://miniapp?url=https://nimbooks.subimpact.net`.
 
 ## Build
 
