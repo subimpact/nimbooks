@@ -395,9 +395,13 @@ export default function App() {
     const isInNimiqPay = typeof window !== 'undefined' && !!window.nimiqPay
     // Mobile = touch-primary device (phone/tablet) → Nimiq Pay is the natural
     // wallet. Desktop → Nimiq Hub browser login is the primary path.
+    // Real phones always report touch capability — pointer:coarse alone fails
+    // in some WebViews and desktop-mode browsers, so check all touch signals.
     const isMobile =
       typeof window !== 'undefined' &&
       (window.matchMedia?.('(pointer: coarse)').matches ||
+        navigator.maxTouchPoints > 0 ||
+        'ontouchstart' in window ||
         /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent))
     return (
       <div className="app">
