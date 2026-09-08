@@ -289,15 +289,18 @@ a:focus-visible {
 }
 .tab {
   flex: 1;
-  padding: 10px 0;
+  min-width: 0;
+  padding: 10px 2px;
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   transition: background 0.15s ease, color 0.15s ease;
 }
 .tab:hover {

@@ -119,7 +119,15 @@ export async function getNimiqTransactionHistory(address: string, maxTotal = 100
   const all: NimiqTx[] = []
   let cursor: string | null = null
   for (let i = 0; i < 20; i++) {
-    const page = await getNimiqTransactions(address, 50, cursor)
+    let page: NimiqTx[]
+    try {
+      page = await getNimiqTransactions(address, 50, cursor)
+    } catch (e) {
+      // A mid-pagination failure (rate limit, flaky network) must not wipe the
+      // whole history — return what we already have so the user sees txs.
+      console.warn(`History pagination stopped at page ${i + 1}:`, e)
+      break
+    }
     if (!page.length) break
     all.push(...page)
     if (all.length >= maxTotal) break
