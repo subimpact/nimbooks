@@ -22,6 +22,7 @@ import {
   getStakingHolding,
   getVestingHoldings,
   getNimiqTransactionHistory,
+  waitForTxMined,
   getEvmBalances,
   getAllFiatRates,
   getValidators,
@@ -141,6 +142,25 @@ function pendingUnstakeKeyFor(address: string | null | undefined): string | null
   return address ? `nimbooks:pendingUnstake:${address.replace(/\s+/g, '')}` : null
 }
 
+// A submitted tx is not a mined tx: one that never makes it into a block is
+// dropped when its validity window passes, and nothing on chain records the
+// attempt. Every stake/unstake submit therefore starts a short verification
+// poll, and this is the state the panel renders off.
+type TxVerify = 'checking' | 'confirmed' | 'expired' | 'unknown'
+// Long enough to confirm a healthy tx (Nimiq mines in seconds), short enough
+// that a dead one surfaces while the user is still looking at the panel. The
+// interval matches the auto-refresh cadence — nimiqwatch 429s on faster polls.
+const TX_VERIFY_TIMEOUT_MS = 90_000
+const TX_VERIFY_INTERVAL_MS = 10_000
+
+// "submitted" only ever means "handed to the network" — don't claim more than
+// the verification poll has actually established.
+function txVerifyLabel(state: TxVerify | null): string {
+  if (state === 'confirmed') return 'confirmed on chain ✓'
+  if (state === 'unknown') return 'submitted — could not confirm, check History'
+  return 'submitted — confirming…'
+}
+
 export default function App() {
   const [account, setAccount] = useState<WalletAccount | null>(null)
   const [connecting, setConnecting] = useState(false)
@@ -195,6 +215,10 @@ export default function App() {
   const [unstaking, setUnstaking] = useState(false)
   const [unstakeError, setUnstakeError] = useState<string | null>(null)
   const [unstakeHash, setUnstakeHash] = useState<string | null>(null)
+  const [unstakeVerify, setUnstakeVerify] = useState<TxVerify | null>(null)
+  // The hash the verification poll is allowed to report on — a second submit
+  // supersedes the first, and a stale poll must not overwrite its result.
+  const unstakeVerifyRef = useRef<string | null>(null)
   // A retire-stake tx is submitted but only takes effect at the next election
   // block (~12h). Until the staker record reflects it, show it as pending.
   const [pendingUnstake, setPendingUnstake] = useState<{
@@ -230,6 +254,8 @@ export default function App() {
   const [staking, setStaking] = useState(false)
   const [stakeError, setStakeError] = useState<string | null>(null)
   const [stakeHash, setStakeHash] = useState<string | null>(null)
+  const [stakeVerify, setStakeVerify] = useState<TxVerify | null>(null)
+  const stakeVerifyRef = useRef<string | null>(null)
 
   const toggleTheme = useCallback(() => {
     setTheme((t) => {
@@ -655,7 +681,30 @@ export default function App() {
   const openStake = () => {
     setStakeError(null)
     setStakeHash(null)
+    setStakeVerify(null)
     setStakeOpen(true)
+  }
+
+  // Watch a submitted stake tx until it shows up on chain. Fire-and-forget:
+  // the panel stays usable while it runs, and a tx that never lands turns into
+  // an error instead of a hash the user keeps waiting on.
+  const verifyStakeTx = (hash: string) => {
+    stakeVerifyRef.current = hash
+    setStakeVerify('checking')
+    void (async () => {
+      const result = await waitForTxMined(hash, {
+        intervalMs: TX_VERIFY_INTERVAL_MS,
+        timeoutMs: TX_VERIFY_TIMEOUT_MS,
+      })
+      if (stakeVerifyRef.current !== hash) return // superseded by a newer submit
+      setStakeVerify(result)
+      if (result !== 'expired') return
+      // 'unknown' is not a failure — the RPC never answered, so say only that.
+      setStakeError(
+        'Stake transaction was not mined — it never reached the chain. Please try again.'
+      )
+      setToast('Stake transaction was not mined ✗')
+    })()
   }
 
   const submitStake = async () => {
@@ -673,6 +722,7 @@ export default function App() {
     setStaking(true)
     setStakeError(null)
     setStakeHash(null)
+    setStakeVerify(null)
     try {
       const result = await stakeNim(firstStake ? selectedValidator : null, stakeAmountNim)
       if (!result.ok) {
@@ -680,6 +730,7 @@ export default function App() {
         return
       }
       setStakeHash(result.hash)
+      verifyStakeTx(result.hash)
       setStakeAmount('')
       clearTxCache() // the stake tx must show up on the next History load
       if (account) await refresh(account)
@@ -741,6 +792,34 @@ export default function App() {
     }
   }, [lang])
 
+  // Same watch for the unstake side, plus the pending marker: a retire that
+  // never mined must not leave a banner counting down to an election block it
+  // will never reach. Only a definitive "not found" clears it — an RPC that
+  // never answered leaves the banner and its 72h backstop alone.
+  const verifyUnstakeTx = (hash: string) => {
+    unstakeVerifyRef.current = hash
+    setUnstakeVerify('checking')
+    void (async () => {
+      const result = await waitForTxMined(hash, {
+        intervalMs: TX_VERIFY_INTERVAL_MS,
+        timeoutMs: TX_VERIFY_TIMEOUT_MS,
+      })
+      if (unstakeVerifyRef.current !== hash) return // superseded by a newer submit
+      setUnstakeVerify(result)
+      if (result !== 'expired') return
+      setPendingUnstake(null)
+      try {
+        if (pendingUnstakeKey) localStorage.removeItem(pendingUnstakeKey)
+      } catch {
+        /* ignore */
+      }
+      setUnstakeError(
+        'Unstake transaction was not mined — it never reached the chain. Please try again.'
+      )
+      setToast('Unstake transaction was not mined ✗')
+    })()
+  }
+
   const submitUnstake = async () => {
     const amountNim = Number(unstakeAmount)
     if (!Number.isFinite(amountNim) || amountNim <= 0) {
@@ -756,6 +835,7 @@ export default function App() {
     setUnstaking(true)
     setUnstakeError(null)
     setUnstakeHash(null)
+    setUnstakeVerify(null)
     try {
       let remainingNim = amountNim
       // 1. Withdraw anything already fully cooled (retired → basic balance).
@@ -767,6 +847,7 @@ export default function App() {
           return
         }
         setUnstakeHash(remove.hash)
+        verifyUnstakeTx(remove.hash)
         remainingNim -= removeNim
       }
       // 2. Retire the rest from ACTIVE stake into the cooldown. This is the
@@ -790,6 +871,7 @@ export default function App() {
         } catch {
           /* storage full — in-memory only */
         }
+        verifyUnstakeTx(retire.hash)
         remainingNim -= retireNim
       }
       // 3. Anything left was already cooling down (inactive) — no tx needed,
@@ -1066,6 +1148,13 @@ export default function App() {
     setStakeAmount('')
     setStakeError(null)
     setStakeHash(null)
+    // Drop any in-flight verification: its result belongs to the old account.
+    setStakeVerify(null)
+    stakeVerifyRef.current = null
+    setUnstakeHash(null)
+    setUnstakeError(null)
+    setUnstakeVerify(null)
+    unstakeVerifyRef.current = null
     // The display currency is a device preference, not account data — it stays.
   }
 
@@ -2248,9 +2337,10 @@ export default function App() {
                 )}
 
                 {stakeError && <p className="hint small warn">{stakeError}</p>}
-                {stakeHash && (
+                {stakeHash && stakeVerify !== 'expired' && (
                   <p className="hint small ok">
-                    Stake submitted ✓ <span className="mono">{stakeHash.slice(0, 20)}…</span>
+                    Stake {txVerifyLabel(stakeVerify)}{' '}
+                    <span className="mono">{stakeHash.slice(0, 20)}…</span>
                   </p>
                 )}
 
@@ -2303,9 +2393,9 @@ export default function App() {
                             ` ${formatLuna(String(retiredLuna), lang)} NIM already withdrawable.`}
                         </span>
                         {unstakeError && <p className="hint small warn">{unstakeError}</p>}
-                        {unstakeHash && (
+                        {unstakeHash && unstakeVerify !== 'expired' && (
                           <p className="hint small ok">
-                            Unstake submitted ✓{' '}
+                            Unstake {txVerifyLabel(unstakeVerify)}{' '}
                             <span className="mono">{unstakeHash.slice(0, 20)}…</span>
                           </p>
                         )}
