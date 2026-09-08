@@ -14,6 +14,7 @@ import {
 } from './lib/wallet'
 import {
   getNimiqBalance,
+  getHtlcHoldings,
   getNimiqTransactionHistory,
   getEvmBalances,
   getAllFiatRates,
@@ -24,6 +25,7 @@ import {
   explorerTxUrl,
   type NimiqTx,
   type EvmBalance,
+  type HtlcHolding,
 } from './lib/chain'
 import { encodeReceipt, type SignedReceipt } from './lib/receipt'
 import {
@@ -98,6 +100,7 @@ export default function App() {
   const [analyticsPeriod, setAnalyticsPeriod] = useState<AnalyticsPeriod>(30)
   const [nimBalance, setNimBalance] = useState<string | null>(null)
   const [nimTxs, setNimTxs] = useState<NimiqTx[]>([])
+  const [htlcHoldings, setHtlcHoldings] = useState<HtlcHolding[]>([])
   const [evmBalances, setEvmBalances] = useState<EvmBalance[]>([])
   const [rates, setRates] = useState<{ nim: number; usdt: number; eth: number; pol: number }>({
     nim: 0,
@@ -352,6 +355,15 @@ export default function App() {
         ])
         setNimBalance(bal)
         setNimTxs(txs)
+        // Nimiq Pay parks in-flight transfers in HTLC contracts, where they
+        // are invisible to the basic balance — add them up separately. Best
+        // effort: a failed lookup must not take the balance view down with it.
+        try {
+          setHtlcHoldings(await getHtlcHoldings(acc.nimiqAddress, txs))
+        } catch (e) {
+          console.warn('HTLC holdings lookup failed:', e)
+          setHtlcHoldings([])
+        }
       }
       if (acc.evmAddress) {
         const evm = await getEvmBalances(acc.evmAddress)
@@ -364,9 +376,16 @@ export default function App() {
     }
   }
 
+  // Luna locked in pending swaps — sits outside the basic account balance.
+  const lockedLuna = useMemo(
+    () => htlcHoldings.reduce((sum, h) => sum + (Number(h.balance) || 0), 0),
+    [htlcHoldings]
+  )
+  const totalNimLuna = (Number(nimBalance) || 0) + lockedLuna
+
   const totalUsd = useMemo(() => {
     let total = 0
-    if (nimBalance !== null) total += (Number(nimBalance) / 100000) * rates.nim
+    if (nimBalance !== null) total += (((Number(nimBalance) || 0) + lockedLuna) / 100000) * rates.nim
     for (const b of evmBalances) {
       const val = Number(b.balance) / 10 ** b.decimals
       if (!Number.isFinite(val)) continue
@@ -375,7 +394,7 @@ export default function App() {
       else total += val * rates.eth
     }
     return Number.isFinite(total) ? total : 0
-  }, [nimBalance, evmBalances, rates])
+  }, [nimBalance, lockedLuna, evmBalances, rates])
 
   const makeReceipt = async (tx: NimiqTx) => {
     if (!account?.nimiqAddress) return
@@ -456,7 +475,9 @@ export default function App() {
             new Date(t.timestamp ?? Date.now()).toISOString(),
             t.hash,
             isOut ? 'sent' : 'received',
-            classifyTx(t, own),
+            // An HTLC-funding tx is a swap leg, not a plain payment — classifyTx
+            // only sees addresses, so the contract type wins here.
+            t.toType === 2 ? 'swap' : classifyTx(t, own),
             t.sender,
             t.recipient,
             (Number(t.value) / 100000).toFixed(5), // raw decimals — no locale separators (accounting-safe)
@@ -506,6 +527,7 @@ export default function App() {
     setAccount(null)
     setNimBalance(null)
     setNimTxs([])
+    setHtlcHoldings([])
     setEvmBalances([])
     setReceipts([])
     setError(null)
@@ -721,6 +743,26 @@ export default function App() {
               <span className="label">NIM balance</span>
               {nimBalance === null ? (
                 <span className="value dim">…</span>
+              ) : lockedLuna > 0 ? (
+                // Funds in a pending swap are still the user's — break the
+                // total down so a 0 basic balance doesn't read as "no money".
+                <>
+                  <div className="balance-breakdown">
+                    <div className="row">
+                      <span>Available</span>
+                      <span>{formatLuna(nimBalance, lang)} NIM</span>
+                    </div>
+                    <div className="row">
+                      <span>Locked in swaps</span>
+                      <span>{formatLuna(String(lockedLuna), lang)} NIM</span>
+                    </div>
+                    <div className="row strong">
+                      <span>Total</span>
+                      <span>{formatLuna(String(totalNimLuna), lang)} NIM</span>
+                    </div>
+                  </div>
+                  <span className="sub">≈ ${((totalNimLuna / 100000) * rates.nim).toFixed(4)}</span>
+                </>
               ) : (
                 <>
                   <span className="value">{formatLuna(nimBalance, lang)} NIM</span>
@@ -869,6 +911,7 @@ export default function App() {
                       {kind !== 'payment' && kind !== 'unknown' && (
                         <span className={`tx-kind ${kind}`}> · {kind}</span>
                       )}
+                      {tx.toType === 2 && <span className="tx-kind swap"> · swap</span>}
                     </span>
                     <span className="tx-amount">{formatLuna(tx.value, lang)} NIM</span>
                   </div>
