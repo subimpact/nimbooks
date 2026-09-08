@@ -1326,6 +1326,14 @@ a.btn-ghost.btn-link {
   margin-left: auto;
   white-space: nowrap;
 }
+/* Sits where the action button would, while the retire isn't valid yet. */
+.pending-unstake-banner .banner-hint {
+  flex: none;
+  margin-left: auto;
+  white-space: nowrap;
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+}
 .pending-dot {
   flex: none;
   width: 8px;
