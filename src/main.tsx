@@ -3,6 +3,10 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App'
 import VerifyPage from './VerifyPage'
+import { applyTheme, getInitialTheme } from './lib/theme'
+
+// Apply the saved/system theme before first paint to avoid a flash.
+applyTheme(getInitialTheme())
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state = { error: null as Error | null }

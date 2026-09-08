@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import './App.css'
+import { applyTheme, getInitialTheme, type Theme } from './lib/theme'
 import { connectWallet, connectHub, getDeviceId, getLanguage, signReceipt, type WalletAccount } from './lib/wallet'
 import {
   getNimiqBalance,
@@ -75,6 +76,15 @@ export default function App() {
   const [signingHash, setSigningHash] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [toast, setToast] = useState<string | null>(null)
+  const [theme, setTheme] = useState<Theme>(getInitialTheme)
+
+  const toggleTheme = useCallback(() => {
+    setTheme((t) => {
+      const next = t === 'dark' ? 'light' : 'dark'
+      applyTheme(next)
+      return next
+    })
+  }, [])
 
   const receiptsKey = useMemo(
     () => (account?.nimiqAddress ? `nimbooks:receipts:${account.nimiqAddress}` : 'nimbooks:receipts'),
@@ -364,6 +374,13 @@ export default function App() {
     return (
       <div className="app">
         <header className="hero">
+          <button
+            className="btn-ghost theme-toggle"
+            onClick={toggleTheme}
+            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          >
+            {theme === 'dark' ? '☀️' : '🌙'}
+          </button>
           <div className="logo">📒</div>
           <h1>NimBooks</h1>
           <p className="tagline">The books for your Nimiq wallet.</p>
@@ -414,6 +431,13 @@ export default function App() {
       <header className="topbar">
         <div className="logo small">📒</div>
         <h1>NimBooks</h1>
+        <button
+          className="btn-ghost"
+          onClick={toggleTheme}
+          title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+        >
+          {theme === 'dark' ? '☀️' : '🌙'}
+        </button>
         <button className="btn-ghost" onClick={() => refresh(account)} disabled={loading}>
           {loading ? '…' : '↻'}
         </button>
