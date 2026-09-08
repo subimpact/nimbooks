@@ -135,6 +135,12 @@ function isValidReceipt(r: unknown): r is SignedReceipt {
   )
 }
 
+// The pending-unstake marker is per address, not per device: a shared WebView
+// must not show one account's pending retire on another's balance.
+function pendingUnstakeKeyFor(address: string | null | undefined): string | null {
+  return address ? `nimbooks:pendingUnstake:${address.replace(/\s+/g, '')}` : null
+}
+
 export default function App() {
   const [account, setAccount] = useState<WalletAccount | null>(null)
   const [connecting, setConnecting] = useState(false)
@@ -198,16 +204,24 @@ export default function App() {
   } | null>(null)
   // Persist across reloads: the retire tx takes effect at the next election
   // block, which can be hours away — the pending state must survive a
-  // WebView refresh.
-  const PENDING_UNSTAKE_KEY = 'nimbooks:pendingUnstake'
+  // WebView refresh. Scoped per address so a second account in the same
+  // WebView never inherits the first one's pending marker.
+  const pendingUnstakeKey = useMemo(
+    () => pendingUnstakeKeyFor(account?.nimiqAddress),
+    [account?.nimiqAddress]
+  )
+  // Loads once the account is known, not on mount — the key doesn't exist yet
+  // before that. Re-runs on account switch, and clears when the new address
+  // has no marker, so a pending retire never bleeds across accounts.
   useEffect(() => {
+    if (!pendingUnstakeKey) return
     try {
-      const raw = localStorage.getItem(PENDING_UNSTAKE_KEY)
-      if (raw) setPendingUnstake(JSON.parse(raw))
+      const raw = localStorage.getItem(pendingUnstakeKey)
+      setPendingUnstake(raw ? JSON.parse(raw) : null)
     } catch {
       /* corrupt — ignore */
     }
-  }, [])
+  }, [pendingUnstakeKey])
   const [validators, setValidators] = useState<ValidatorInfo[]>([])
   const [validatorsLoading, setValidatorsLoading] = useState(false)
   const [validatorsError, setValidatorsError] = useState<string | null>(null)
@@ -484,19 +498,24 @@ export default function App() {
           console.warn('Staking holding lookup failed:', e)
           setStakingHolding(null)
         }
-        // Pending unstake resolution: once the staker record shows the retire
-        // took effect (inactive balance appeared, or active dropped by the
-        // pending amount), the pending marker has served its purpose. Also
-        // expire it after ~2 epochs (24h) as a safety net.
+        // Pending unstake resolution: the marker clears when the staker record
+        // shows the retire took effect (inactive balance appeared, or active
+        // dropped by the pending amount) — the chain flip is the only real
+        // signal. A delayed election block must not silently drop the banner,
+        // so the time bound is a generous 72h (6 epochs) backstop for a marker
+        // that got stuck, nothing more.
         setPendingUnstake((prev) => {
           if (!prev) return prev
           const resolved =
             (freshHolding && Number(freshHolding.inactive) > 0) ||
             (freshHolding && Number(freshHolding.active) < prev.amountNim * 100000) ||
-            Date.now() - prev.submittedAt > 2 * 12 * 60 * 60 * 1000
+            Date.now() - prev.submittedAt > 72 * 60 * 60 * 1000
           if (resolved) {
             try {
-              localStorage.removeItem(PENDING_UNSTAKE_KEY)
+              // Keyed off the account being refreshed, not the `account`
+              // state — on first connect the state isn't set yet.
+              const key = pendingUnstakeKeyFor(acc.nimiqAddress)
+              if (key) localStorage.removeItem(key)
             } catch {
               /* ignore */
             }
@@ -679,6 +698,27 @@ export default function App() {
   const maxUnstakeableLuna = retireableLuna + inactiveLuna + retiredLuna
   const unstakeMaxNim = maxUnstakeableLuna / 100000
 
+  // Anything in flight out of stake, whichever way we can know about it. The
+  // pre-election limbo is only knowable from the local marker (no chain field
+  // and no event exposes a submitted retire), but everything after the
+  // election block is readable straight off the staker record — so a lost or
+  // never-written marker still gets a banner instead of silence.
+  const unstakeActivity = useMemo(() => {
+    if (pendingUnstake) {
+      return {
+        kind: 'pending' as const,
+        amountNim: pendingUnstake.amountNim,
+        hash: pendingUnstake.hash,
+        submittedAt: pendingUnstake.submittedAt,
+      }
+    }
+    const inactive = Number(stakingHolding?.inactive || 0)
+    const retired = Number(stakingHolding?.retired || 0)
+    if (inactive > 0) return { kind: 'cooling' as const, amountNim: inactive / 100000 }
+    if (retired > 0) return { kind: 'ready' as const, amountNim: retired / 100000 }
+    return null
+  }, [pendingUnstake, stakingHolding])
+
   // Unstake timing (protocol): retire-stake takes effect at the NEXT election
   // block (epoch boundary, ~12h), then the reporting window (1 epoch, ~12h)
   // must pass before the funds become withdrawable. Worst case ≈ 2 epochs
@@ -746,7 +786,7 @@ export default function App() {
         const pending = { amountNim: retireNim, hash: retire.hash, submittedAt: Date.now() }
         setPendingUnstake(pending)
         try {
-          localStorage.setItem(PENDING_UNSTAKE_KEY, JSON.stringify(pending))
+          if (pendingUnstakeKey) localStorage.setItem(pendingUnstakeKey, JSON.stringify(pending))
         } catch {
           /* storage full — in-memory only */
         }
@@ -1262,13 +1302,29 @@ export default function App() {
 
             <div className="card">
               <span className="label">NIM balance</span>
-              {pendingUnstake && (
+              {unstakeActivity && (
                 <div className="pending-unstake-banner" role="status">
                   <span className="pending-dot" aria-hidden="true" />
                   <span>
-                    Unstaking {formatLuna(String(pendingUnstake.amountNim * 100000), lang)} NIM —
-                    takes effect at the next election block (up to ~12h), then a
-                    reporting window before it's withdrawable.
+                    {unstakeActivity.kind === 'pending' && (
+                      <>
+                        Unstaking {formatLuna(String(unstakeActivity.amountNim * 100000), lang)} NIM
+                        — takes effect at the next election block (up to ~12h), then a
+                        reporting window before it's withdrawable.
+                      </>
+                    )}
+                    {unstakeActivity.kind === 'cooling' && (
+                      <>
+                        {formatLuna(String(unstakeActivity.amountNim * 100000), lang)} NIM is
+                        cooling down — withdrawable after the reporting window.
+                      </>
+                    )}
+                    {unstakeActivity.kind === 'ready' && (
+                      <>
+                        {formatLuna(String(unstakeActivity.amountNim * 100000), lang)} NIM is
+                        ready to withdraw — use Unstake to move it to your balance.
+                      </>
+                    )}
                   </span>
                 </div>
               )}
@@ -1505,7 +1561,11 @@ export default function App() {
                 </p>
               </div>
             )}
-            {pendingUnstake && (
+            {/* Only the pre-election limbo gets a synthetic History row — it
+                has a tx hash and a submit time to show. Cooling/ready are
+                states, not transactions, and the staker-record note below
+                already reports them. */}
+            {unstakeActivity?.kind === 'pending' && (
               <div className="tx pending-tx">
                 <div className="tx-main">
                   <span className="out">
@@ -1513,13 +1573,13 @@ export default function App() {
                     <span className="tx-kind unstake"> · pending</span>
                   </span>
                   <span className="tx-amount">
-                    {formatLuna(String(pendingUnstake.amountNim * 100000), lang)} NIM
+                    {formatLuna(String(unstakeActivity.amountNim * 100000), lang)} NIM
                   </span>
                 </div>
                 <div className="tx-sub">
-                  Submitted {new Date(pendingUnstake.submittedAt).toLocaleString(lang)} · takes
+                  Submitted {new Date(unstakeActivity.submittedAt).toLocaleString(lang)} · takes
                   effect at the next election block (up to ~12h) ·{' '}
-                  <span className="mono">{pendingUnstake.hash.slice(0, 10)}…</span>
+                  <span className="mono">{unstakeActivity.hash.slice(0, 10)}…</span>
                 </div>
               </div>
             )}
