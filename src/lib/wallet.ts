@@ -7,6 +7,7 @@ import type { NimiqProvider } from '@nimiq/mini-app-sdk'
 import HubApi from '@nimiq/hub-api'
 import type { SignedReceipt } from './receipt'
 import { canonicalPayload } from './receipt'
+import { broadcastRawTransaction, encodeMemo } from './chain'
 
 export interface WalletAccount {
   nimiqAddress?: string
@@ -17,9 +18,19 @@ export interface WalletAccount {
 let nimiqProvider: NimiqProvider | null = null
 let hubApi: HubApi | null = null
 let activeProvider: 'pay' | 'hub' | 'demo' = 'pay'
+let currentAccount: WalletAccount | null = null
 
 export function isDemoMode(): boolean {
   return activeProvider === 'demo'
+}
+
+/**
+ * The account connected in this session, if any. Lets a hash-route page (e.g.
+ * an invoice link opened from inside the app) reuse the live connection
+ * instead of asking the user to connect again.
+ */
+export function getConnectedAccount(): WalletAccount | null {
+  return currentAccount
 }
 
 function getHub(): HubApi {
@@ -60,6 +71,7 @@ export async function connectWallet(): Promise<WalletAccount> {
     console.warn('EVM provider unavailable:', e)
   }
 
+  currentAccount = account
   return account
 }
 
@@ -69,14 +81,22 @@ export async function connectHub(): Promise<WalletAccount> {
   const result = await getHub().chooseAddress({ appName: 'NimBooks' })
   if (!result?.address) throw new Error('No address returned from Nimiq Hub.')
   activeProvider = 'hub'
-  return { nimiqAddress: result.address, provider: 'hub' }
+  currentAccount = { nimiqAddress: result.address, provider: 'hub' }
+  return currentAccount
 }
 
 // Read-only demo mode: sets the module-level provider so signing is
 // correctly disabled (a demo address is not owned by the user).
 export function connectDemoAccount(address: string): WalletAccount {
   activeProvider = 'demo'
-  return { nimiqAddress: address, provider: 'demo' }
+  currentAccount = { nimiqAddress: address, provider: 'demo' }
+  return currentAccount
+}
+
+/** Forget the session connection (used by the app's disconnect button). */
+export function disconnectWallet(): void {
+  currentAccount = null
+  activeProvider = 'pay'
 }
 
 export async function getDeviceId(): Promise<string | null> {
@@ -124,6 +144,82 @@ export async function signMessage(
     console.error('Nimiq Pay sign failed:', e)
     throw new Error('Nimiq Pay signing failed: ' + (e instanceof Error ? e.message : String(e)))
   }
+}
+
+// --- Sending ---
+
+export interface SendNimParams {
+  recipient: string
+  amountLuna: string // string in, so callers never do float maths on Luna
+  memo?: string // plain UTF-8; hex-encoded here for the chain
+  fee?: number
+  from?: string // connected address — pins the sender in the Hub flow
+}
+
+export interface SendNimResult {
+  /** Known immediately for Hub; recovered from history afterwards for Nimiq Pay. */
+  hash: string | null
+  serializedTx?: string
+}
+
+/** Can the active provider sign and send a transaction? */
+export function canSend(): boolean {
+  if (activeProvider === 'demo') return false
+  if (activeProvider === 'hub') return true
+  return !!nimiqProvider
+}
+
+export async function sendNim({
+  recipient,
+  amountLuna,
+  memo,
+  fee = 0,
+  from,
+}: SendNimParams): Promise<SendNimResult> {
+  if (activeProvider === 'demo') {
+    throw new Error('Demo mode is read-only — connect your wallet to send NIM.')
+  }
+  const value = Number(amountLuna)
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error('Invalid amount.')
+  }
+  const to = recipient.replace(/\s+/g, '').toUpperCase()
+
+  if (activeProvider === 'hub') {
+    // Nimiq Hub: the checkout flow signs and sends. `forceSender` keeps the
+    // payment on the address the user connected with.
+    const result = await getHub().checkout({
+      appName: 'NimBooks',
+      recipient: to,
+      value,
+      fee,
+      ...(memo ? { extraData: new TextEncoder().encode(memo) } : {}),
+      ...(from ? { sender: from.replace(/\s+/g, ''), forceSender: true } : {}),
+    })
+    if (!result || !('hash' in result)) {
+      throw new Error('Nimiq Hub did not return a signed transaction.')
+    }
+    // Re-broadcast defensively: harmless when the Hub already sent it (same
+    // hash ⇒ applied at most once), decisive when it only signed.
+    try {
+      await broadcastRawTransaction(result.serializedTx)
+    } catch (e) {
+      console.warn('Re-broadcast after Hub checkout skipped:', e)
+    }
+    return { hash: result.hash, serializedTx: result.serializedTx }
+  }
+
+  if (!nimiqProvider) throw new Error('No Nimiq wallet connected.')
+  const res = memo
+    ? await nimiqProvider.sendBasicTransactionWithData({ recipient: to, value, fee, data: encodeMemo(memo) })
+    : await nimiqProvider.sendBasicTransaction({ recipient: to, value, fee })
+  if (typeof res !== 'string') {
+    const message = res && typeof res === 'object' && 'error' in res ? res.error?.message : null
+    throw new Error(message || 'Transaction was rejected.')
+  }
+  // Nimiq Pay returns the serialized transaction, not a hash — the caller
+  // recovers the hash from history (chain.findSentTx).
+  return { hash: null, serializedTx: res }
 }
 
 export async function signReceipt(

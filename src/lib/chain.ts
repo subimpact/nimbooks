@@ -111,6 +111,16 @@ function writeTxCache(address: string, txs: NimiqTx[]) {
   }
 }
 
+// Drop the cached history — called after sending a transaction so the next
+// refresh shows it instead of serving a 2-minute-old list.
+export function clearTxCache() {
+  try {
+    localStorage.removeItem(TX_CACHE_KEY)
+  } catch {
+    /* storage unavailable */
+  }
+}
+
 export async function getNimiqTransactionHistory(address: string, maxTotal = 1000): Promise<NimiqTx[]> {
   // Serve from cache when fresh — repeat visits cost zero RPC calls.
   const cached = readTxCache(address)
@@ -170,6 +180,49 @@ export async function getNimiqTransactionByHash(hash: string): Promise<NimiqTx |
 export async function getNimiqBlockNumber(): Promise<number> {
   const data = await rpcCall('getBlockNumber', [])
   return Number(data)
+}
+
+/**
+ * Push an already-signed transaction to the network. Used as a belt-and-braces
+ * step after Nimiq Hub checkout: re-broadcasting the identical serialized
+ * transaction is a no-op (same hash, applied at most once), but it covers the
+ * case where the signer only signed and left broadcasting to the app.
+ */
+export async function broadcastRawTransaction(serializedTx: string): Promise<string> {
+  return String(await rpcCall('sendRawTransaction', [serializedTx]))
+}
+
+/**
+ * Locate a just-sent transaction in the sender's history. Nimiq Pay returns a
+ * serialized transaction rather than a hash, so the hash is recovered by
+ * matching recipient + value + data against fresh (uncached) history pages.
+ */
+export async function findSentTx(
+  from: string,
+  recipient: string,
+  valueLuna: string,
+  dataHex?: string,
+  attempts = 6,
+  delayMs = 2500
+): Promise<NimiqTx | null> {
+  const wantRecipient = cleanAddress(recipient).toUpperCase()
+  const wantData = (dataHex ?? '').toLowerCase()
+  for (let i = 0; i < attempts; i++) {
+    if (i > 0) await new Promise((r) => setTimeout(r, delayMs))
+    try {
+      const txs = await getNimiqTransactions(from, 20, null)
+      const match = txs.find(
+        (t) =>
+          cleanAddress(t.recipient).toUpperCase() === wantRecipient &&
+          String(t.value) === String(valueLuna) &&
+          (!wantData || (t.data ?? '').toLowerCase() === wantData)
+      )
+      if (match) return match
+    } catch (e) {
+      console.warn('findSentTx poll failed:', e)
+    }
+  }
+  return null
 }
 
 // --- EVM side (per-chain public RPCs via viem — no window.ethereum chain-switching needed) ---
@@ -388,6 +441,13 @@ export function decodeMemo(data?: string): string {
   } catch {
     return data
   }
+}
+
+// Inverse of decodeMemo: UTF-8 text → hex, the form Nimiq tx data takes.
+export function encodeMemo(text: string): string {
+  return Array.from(new TextEncoder().encode(text))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('')
 }
 
 export function explorerTxUrl(hash: string): string {
