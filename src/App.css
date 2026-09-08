@@ -267,6 +267,10 @@ a:focus-visible {
   margin-bottom: 16px;
   overflow-x: auto;
   position: fixed;
+  /* Plain bottom first — if env() is unsupported (older WebViews), the whole
+     calc() is dropped and the dock silently floats off-screen below the page.
+     Declaring the simple value first keeps it visible everywhere. */
+  bottom: 12px;
   bottom: calc(12px + env(safe-area-inset-bottom));
   left: 0;
   right: 0;
@@ -274,6 +278,8 @@ a:focus-visible {
   margin-right: auto;
   width: calc(100% - 24px);
   max-width: 456px;
+  /* Solid background fallback — color-mix() unsupported → keep it opaque. */
+  background: var(--bg-elev);
   background: color-mix(in srgb, var(--bg-elev) 92%, transparent);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
@@ -398,16 +404,21 @@ a:focus-visible {
   font-weight: 700;
   font-size: 15px;
 }
-.tx-sub {
-  color: var(--muted);
-  font-size: 11px;
-  margin-top: 4px;
-}
 .tx-memo {
   color: var(--accent-2);
   font-size: 12px;
   margin-top: 4px;
   font-style: italic;
+  /* Long hex memos must wrap inside the card, never spill out. */
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.tx-sub {
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .empty {
   color: var(--muted);

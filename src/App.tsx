@@ -402,6 +402,7 @@ export default function App() {
       (window.matchMedia?.('(pointer: coarse)').matches ||
         navigator.maxTouchPoints > 0 ||
         'ontouchstart' in window ||
+        window.innerWidth < 768 ||
         /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent))
     return (
       <div className="app">
