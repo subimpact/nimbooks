@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import './App.css'
 import { decodeReceipt, verifyReceiptFull, type SignedReceipt } from './lib/receipt'
 import { formatLuna } from './lib/chain'
+import { applyTheme, getInitialTheme, type Theme } from './lib/theme'
 
 type PageState = 'checking' | 'valid' | 'invalid' | 'inconclusive' | 'error'
 
@@ -9,6 +10,15 @@ export default function VerifyPage() {
   const [receipt, setReceipt] = useState<SignedReceipt | null>(null)
   const [status, setStatus] = useState<PageState>('checking')
   const [details, setDetails] = useState('')
+  const [theme, setTheme] = useState<Theme>(getInitialTheme)
+
+  const toggleTheme = () => {
+    setTheme((t) => {
+      const next = t === 'dark' ? 'light' : 'dark'
+      applyTheme(next)
+      return next
+    })
+  }
 
   useEffect(() => {
     const hash = window.location.hash
@@ -37,6 +47,13 @@ export default function VerifyPage() {
         <header className="topbar">
           <div className="logo small">📒</div>
           <h1>NimBooks</h1>
+          <button
+            className="btn-ghost"
+            onClick={toggleTheme}
+            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          >
+            {theme === 'dark' ? '☀️' : '🌙'}
+          </button>
           <a className="btn-ghost btn-link" href="/" title="Back to NimBooks">
             ← Back
           </a>
@@ -54,6 +71,13 @@ export default function VerifyPage() {
         <header className="topbar">
           <div className="logo small">📒</div>
           <h1>NimBooks</h1>
+          <button
+            className="btn-ghost"
+            onClick={toggleTheme}
+            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          >
+            {theme === 'dark' ? '☀️' : '🌙'}
+          </button>
           <a className="btn-ghost btn-link" href="/" title="Back to NimBooks">
             ← Back
           </a>
@@ -77,6 +101,13 @@ export default function VerifyPage() {
       <header className="topbar">
         <div className="logo small">📒</div>
         <h1>NimBooks</h1>
+        <button
+          className="btn-ghost"
+          onClick={toggleTheme}
+          title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+        >
+          {theme === 'dark' ? '☀️' : '🌙'}
+        </button>
         <a className="btn-ghost btn-link" href="/" title="Back to NimBooks">
           ← Back
         </a>

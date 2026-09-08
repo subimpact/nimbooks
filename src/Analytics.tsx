@@ -232,7 +232,7 @@ export default function Analytics({
         <span className="label">Daily net flow (NIM)</span>
         <svg viewBox={`0 0 ${W} ${H}`} className="chart" role="img" aria-label="Daily net flow chart">
           {/* zero line */}
-          <line x1={PAD_L} y1={y(0)} x2={W - 4} y2={y(0)} stroke="#3a3f52" strokeWidth="1" />
+          <line x1={PAD_L} y1={y(0)} x2={W - 4} y2={y(0)} stroke="var(--chart-grid)" strokeWidth="1" />
           {/* gridlines */}
           {[0.25, 0.5, 0.75].map((f) => (
             <line
@@ -241,7 +241,7 @@ export default function Analytics({
               y1={y(yMin + yRange * f)}
               x2={W - 4}
               y2={y(yMin + yRange * f)}
-              stroke="#222634"
+              stroke="var(--chart-axis)"
               strokeWidth="1"
               strokeDasharray="3 4"
             />
@@ -261,13 +261,13 @@ export default function Analytics({
                   width={barW}
                   height={barH}
                   rx="1.5"
-                  fill={net >= 0 ? '#3ddc84' : '#ff5c5c'}
+                  fill={net >= 0 ? 'var(--green)' : 'var(--red)'}
                   opacity="0.9"
                 >
                   <title>{`${p.label}: ${formatLuna(Math.abs(net) * 100000, lang)} NIM ${net >= 0 ? 'received' : 'sent'}`}</title>
                 </rect>
                 {n <= 16 && (
-                  <text x={x + barW / 2} y={H - 6} fontSize="8" fill="#8b90a0" textAnchor="middle">
+                  <text x={x + barW / 2} y={H - 6} fontSize="8" fill="var(--muted)" textAnchor="middle">
                     {p.label}
                   </text>
                 )}
@@ -275,15 +275,15 @@ export default function Analytics({
             )
           })}
           {/* y labels */}
-          <text x={PAD_L - 6} y={y(yMax) + 3} fontSize="8" fill="#8b90a0" textAnchor="end">
+          <text x={PAD_L - 6} y={y(yMax) + 3} fontSize="8" fill="var(--muted)" textAnchor="end">
             {fmt(yMax)}
           </text>
           {hasNeg && (
-            <text x={PAD_L - 6} y={y(yMin) + 3} fontSize="8" fill="#8b90a0" textAnchor="end">
+            <text x={PAD_L - 6} y={y(yMin) + 3} fontSize="8" fill="var(--muted)" textAnchor="end">
               {fmt(yMin)}
             </text>
           )}
-          <text x={PAD_L - 6} y={y(0) + 3} fontSize="8" fill="#8b90a0" textAnchor="end">
+          <text x={PAD_L - 6} y={y(0) + 3} fontSize="8" fill="var(--muted)" textAnchor="end">
             0
           </text>
         </svg>
@@ -293,13 +293,13 @@ export default function Analytics({
         <div className="card chart-card">
           <span className="label">Balance trajectory (NIM, from history)</span>
           <svg viewBox={`0 0 ${W} ${H}`} className="chart" role="img" aria-label="Balance trajectory chart">
-            <polyline points={trajPoints} fill="none" stroke="#e9a23b" strokeWidth="2" strokeLinejoin="round" />
+            <polyline points={trajPoints} fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinejoin="round" />
             {/* area fill */}
-            <polygon points={`${PAD_L},${PAD_T + plotH} ${trajPoints} ${W - 4},${PAD_T + plotH}`} fill="#e9a23b" opacity="0.08" />
-            <text x={PAD_L - 6} y={PAD_T + 10} fontSize="8" fill="#8b90a0" textAnchor="end">
+            <polygon points={`${PAD_L},${PAD_T + plotH} ${trajPoints} ${W - 4},${PAD_T + plotH}`} fill="var(--accent)" opacity="0.08" />
+            <text x={PAD_L - 6} y={PAD_T + 10} fontSize="8" fill="var(--muted)" textAnchor="end">
               {fmt(Math.max(...trajectory.map((q) => q.balance)))}
             </text>
-            <text x={PAD_L - 6} y={PAD_T + plotH - 4} fontSize="8" fill="#8b90a0" textAnchor="end">
+            <text x={PAD_L - 6} y={PAD_T + plotH - 4} fontSize="8" fill="var(--muted)" textAnchor="end">
               {fmt(Math.min(...trajectory.map((q) => q.balance)))}
             </text>
           </svg>
