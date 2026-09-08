@@ -1196,6 +1196,25 @@ a.btn-ghost.btn-link {
   margin-top: 10px;
   width: 100%;
 }
+.refresh-btn {
+  position: relative;
+}
+.refresh-countdown {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--accent, #07c1ff);
+  color: #001018;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
 .stake-slider-row {
   display: flex;
   align-items: center;
