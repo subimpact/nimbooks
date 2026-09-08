@@ -1346,7 +1346,10 @@ export default function App() {
                   <strong>Vesting</strong> — time-locked funds that release on a schedule.
                 </p>
                 <p>
-                  <strong>Reward</strong> — validator reward payments.
+                  <strong>Reward</strong> — validator payouts on your stake. These are paid every
+                  few minutes and restaked automatically, so NimBooks sums them into one row per
+                  day per validator. They come from a separate staking index that closes each UTC
+                  day, so today's rewards appear tomorrow, and the last 90 days are covered.
                 </p>
               </div>
             )}
@@ -1365,8 +1368,9 @@ export default function App() {
             )}
             {stakingHolding && (Number(stakingHolding.active) > 0 || Number(stakingHolding.inactive) > 0 || Number(stakingHolding.retired) > 0) && (
               <p className="hint small stake-history-note">
-                Staking transactions are not exposed by the public chain index, so they
-                don't appear below — your staker record is live:{' '}
+                Stake and unstake transactions are not exposed by the public chain index, so
+                they don't appear below (reward payouts do, one row per day) — your staker
+                record is live:{' '}
                 <strong>
                   {formatLuna(stakingHolding.active, lang)} NIM active
                   {Number(stakingHolding.inactive) > 0 &&
@@ -1628,10 +1632,10 @@ export default function App() {
               Download your NIM transaction history as CSV — ready for your accountant or tax
               records.
             </p>
-            <button className="btn-primary" onClick={exportCsv} disabled={nimTxs.length === 0}>
-              Download CSV ({nimTxs.length} transactions)
+            <button className="btn-primary" onClick={exportCsv} disabled={allTxs.length === 0}>
+              Download CSV ({allTxs.length} transactions)
             </button>
-            <button className="btn-secondary" onClick={copyCsv} disabled={nimTxs.length === 0}>
+            <button className="btn-secondary" onClick={copyCsv} disabled={allTxs.length === 0}>
               Copy CSV to clipboard
             </button>
 
@@ -1702,7 +1706,7 @@ export default function App() {
                   </button>
                 </>
               )}
-              {!statementLoading && !statement && nimTxs.length === 0 && (
+              {!statementLoading && !statement && allTxs.length === 0 && (
                 <p className="hint small">No transactions loaded yet — statements appear here.</p>
               )}
             </div>

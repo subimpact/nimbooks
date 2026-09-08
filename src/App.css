@@ -729,6 +729,10 @@ a.btn-ghost.btn-link {
   color: var(--red);
   font-size: 12px;
 }
+/* Reward rollups have no chain hash — the payer's name takes the link's place */
+.tx-synthetic {
+  color: var(--muted);
+}
 .tx-kind {
   font-size: 11px;
   font-weight: 600;
