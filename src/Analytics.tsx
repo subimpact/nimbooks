@@ -101,6 +101,8 @@ export default function Analytics({
     let largestIn = 0
     let largestOut = 0
     for (const tx of txs) {
+      // Failed/reverted txs are not real transfers — exclude from analytics
+      if (tx.executionResult === false) continue
       const ts = tx.timestamp ?? now
       if (ts < cutoff) continue
       const v = Number(tx.value) / 100000
@@ -325,7 +327,7 @@ export default function Analytics({
         </div>
       </div>
 
-      <p className="hint small">Based on the loaded transaction history (up to 50 txs).</p>
+      <p className="hint small">Based on the loaded transaction history (up to 1000 txs).</p>
     </section>
   )
 }

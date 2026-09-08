@@ -11,12 +11,16 @@ import { canonicalPayload } from './receipt'
 export interface WalletAccount {
   nimiqAddress?: string
   evmAddress?: string
-  provider: 'pay' | 'hub'
+  provider: 'pay' | 'hub' | 'demo'
 }
 
 let nimiqProvider: NimiqProvider | null = null
 let hubApi: HubApi | null = null
-let activeProvider: 'pay' | 'hub' = 'pay'
+let activeProvider: 'pay' | 'hub' | 'demo' = 'pay'
+
+export function isDemoMode(): boolean {
+  return activeProvider === 'demo'
+}
 
 function getHub(): HubApi {
   if (!hubApi) hubApi = new HubApi('https://hub.nimiq.com')
@@ -68,6 +72,13 @@ export async function connectHub(): Promise<WalletAccount> {
   return { nimiqAddress: result.address, provider: 'hub' }
 }
 
+// Read-only demo mode: sets the module-level provider so signing is
+// correctly disabled (a demo address is not owned by the user).
+export function connectDemoAccount(address: string): WalletAccount {
+  activeProvider = 'demo'
+  return { nimiqAddress: address, provider: 'demo' }
+}
+
 export async function getDeviceId(): Promise<string | null> {
   try {
     return await requestDeviceIdentifier({ reason: 'Save your statement preferences on this device' })
@@ -84,6 +95,10 @@ export async function signMessage(
   message: string,
   signer?: string
 ): Promise<{ publicKey: string; signature: string } | null> {
+  // Demo mode is read-only — never attempt to sign with a wallet we don't own.
+  if (activeProvider === 'demo') {
+    throw new Error('Demo mode is read-only — connect your wallet to sign receipts.')
+  }
   // Hub-connected users sign via the Nimiq keyguard (Nimiq Signed Message scheme)
   if (activeProvider === 'hub') {
     try {
@@ -120,17 +135,4 @@ export async function signReceipt(
   const sig = await signMessage(payload, signer)
   if (!sig) return null
   return { ...receipt, publicKey: sig.publicKey, signature: sig.signature }
-}
-
-export function verifyReceipt(receipt: SignedReceipt): boolean {
-  // Client-side structural check; real verification happens on the
-  // public verification page (server-side Ed25519 verify).
-  return !!(
-    receipt.txHash &&
-    receipt.sender &&
-    receipt.recipient &&
-    receipt.amount &&
-    receipt.signature &&
-    receipt.publicKey
-  )
 }

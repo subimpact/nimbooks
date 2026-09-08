@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import './App.css'
 import { decodeReceipt, verifyReceiptFull, type SignedReceipt } from './lib/receipt'
-import { formatLuna } from './lib/chain'
+import { formatLuna, decodeMemo, explorerTxUrl } from './lib/chain'
 import { applyTheme, getInitialTheme, type Theme } from './lib/theme'
 
 type PageState = 'checking' | 'valid' | 'invalid' | 'inconclusive' | 'error'
@@ -54,7 +54,7 @@ export default function VerifyPage() {
           >
             {theme === 'dark' ? '☀️' : '🌙'}
           </button>
-          <a className="btn-ghost btn-link" href="/" title="Back to NimBooks">
+          <a className="btn-ghost btn-link" href="#/" title="Back to NimBooks">
             ← Back
           </a>
         </header>
@@ -78,7 +78,7 @@ export default function VerifyPage() {
           >
             {theme === 'dark' ? '☀️' : '🌙'}
           </button>
-          <a className="btn-ghost btn-link" href="/" title="Back to NimBooks">
+          <a className="btn-ghost btn-link" href="#/" title="Back to NimBooks">
             ← Back
           </a>
         </header>
@@ -108,7 +108,7 @@ export default function VerifyPage() {
         >
           {theme === 'dark' ? '☀️' : '🌙'}
         </button>
-        <a className="btn-ghost btn-link" href="/" title="Back to NimBooks">
+        <a className="btn-ghost btn-link" href="#/" title="Back to NimBooks">
           ← Back
         </a>
       </header>
@@ -142,17 +142,17 @@ export default function VerifyPage() {
             <span className="value mono">{receipt.txHash}</span>
             <a
               className="hint small"
-              href={`https://explorer.nimiq.com/transactions/${receipt.txHash}`}
+              href={explorerTxUrl(receipt.txHash)}
               target="_blank"
               rel="noopener noreferrer"
             >
-              View on Nimiq Explorer ↗
+              View on Nimiq Watch ↗
             </a>
           </div>
           {receipt.memo && (
             <div>
               <span className="label">Memo</span>
-              <span className="value">{receipt.memo}</span>
+              <span className="value">{decodeMemo(receipt.memo)}</span>
             </div>
           )}
         </div>
