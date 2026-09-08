@@ -16,7 +16,9 @@ export interface NimiqTx {
   blockNumber?: number
   proof?: string
   executionResult?: boolean
-  toType?: number // 0 = basic account, 2 = HTLC contract creation (Nimiq Pay swaps)
+  // Recipient account type: 0 = basic, 1 = vesting contract, 2 = HTLC
+  // (Nimiq Pay swaps), 3 = the staking contract.
+  toType?: number
 }
 
 async function rpcCall(method: string, params: unknown[], timeoutMs = 10000): Promise<any> {
@@ -67,9 +69,25 @@ export interface HtlcHolding {
 }
 
 // One RPC call per contract, so bound the fan-out. Candidates are ordered
-// newest-first: recent HTLCs are the ones plausibly still funded.
-const MAX_HTLC_LOOKUPS = 10
-const HTLC_LOOKUP_DELAY = 150 // ms — nimiqwatch 429s on unpaced bursts
+// newest-first: recent contracts are the ones plausibly still funded.
+const MAX_CONTRACT_LOOKUPS = 10
+const CONTRACT_LOOKUP_DELAY = 150 // ms — nimiqwatch 429s on unpaced bursts
+
+// Distinct contract addresses the user has funded, newest-first, capped at the
+// fan-out budget. `toType` selects the contract flavour (1 = vesting, 2 = HTLC).
+function contractCandidates(txs: NimiqTx[], toType: number): string[] {
+  const candidates: string[] = []
+  const seen = new Set<string>()
+  for (const tx of [...txs].sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))) {
+    if (tx.toType !== toType || !tx.recipient) continue
+    const key = cleanAddress(tx.recipient).toUpperCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    candidates.push(tx.recipient)
+    if (candidates.length >= MAX_CONTRACT_LOOKUPS) break
+  }
+  return candidates
+}
 
 /**
  * Sum up the user's funds sitting in HTLC contracts, discovered from their own
@@ -82,20 +100,11 @@ const HTLC_LOOKUP_DELAY = 150 // ms — nimiqwatch 429s on unpaced bursts
  */
 export async function getHtlcHoldings(ownAddress: string, txs: NimiqTx[]): Promise<HtlcHolding[]> {
   const own = cleanAddress(ownAddress).toUpperCase()
-  const candidates: string[] = []
-  const seen = new Set<string>()
-  for (const tx of [...txs].sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))) {
-    if (tx.toType !== 2 || !tx.recipient) continue
-    const key = cleanAddress(tx.recipient).toUpperCase()
-    if (seen.has(key)) continue
-    seen.add(key)
-    candidates.push(tx.recipient)
-    if (candidates.length >= MAX_HTLC_LOOKUPS) break
-  }
+  const candidates = contractCandidates(txs, 2)
 
   const holdings: HtlcHolding[] = []
   for (let i = 0; i < candidates.length; i++) {
-    if (i > 0) await new Promise((r) => setTimeout(r, HTLC_LOOKUP_DELAY))
+    if (i > 0) await new Promise((r) => setTimeout(r, CONTRACT_LOOKUP_DELAY))
     try {
       const data = await rpcCall('getAccountByAddress', [cleanAddress(candidates[i])])
       if (data?.type !== 'htlc') continue // already settled → pruned to 'basic'
@@ -115,6 +124,89 @@ export async function getHtlcHoldings(ownAddress: string, txs: NimiqTx[]): Promi
     } catch (e) {
       // A rate limit or flaky lookup must not cost the user their balance view
       console.warn('HTLC lookup failed for', candidates[i], e)
+    }
+  }
+  return holdings
+}
+
+// --- Staking holdings (NIM delegated to a validator) ---
+
+// Staked NIM leaves the basic account and lives in the staking contract, so
+// `getNimiqBalance` reads it as spent. It is still the user's money — three
+// buckets of it: `active` (earning), `inactive` (unstaking, cooling down) and
+// `retired` (ready to withdraw).
+export interface StakingHolding {
+  address: string
+  active: string // Luna
+  inactive: string // Luna
+  retired: string // Luna
+  delegation: string // validator address, '' when unknown
+}
+
+/**
+ * Look up the user's staker record. Returns null when the address has never
+ * staked — the RPC answers "No staker with address: …" as an error, not an
+ * empty result, so a throw here is the normal not-a-staker path.
+ */
+export async function getStakingHolding(ownAddress: string): Promise<StakingHolding | null> {
+  try {
+    const data = await rpcCall('getStakerByAddress', [cleanAddress(ownAddress)])
+    if (typeof data?.balance !== 'number') return null
+    return {
+      address: ownAddress,
+      active: String(data.balance),
+      inactive: String(data.inactiveBalance ?? 0),
+      retired: String(data.retiredBalance ?? 0),
+      delegation: data.delegation ?? '',
+    }
+  } catch (e) {
+    // "No staker with address: …" is the answer for every user who has never
+    // staked — the common case, not a fault. Only surface real failures.
+    const msg = e instanceof Error ? e.message : String(e)
+    if (!/no staker with address/i.test(msg)) console.warn('Staker lookup failed:', e)
+    return null
+  }
+}
+
+// --- Vesting holdings (time-locked funds released on a schedule) ---
+
+export interface VestingHolding {
+  address: string
+  balance: string // Luna still held by the contract
+  totalAmount: string // Luna the contract was created with
+  owner: string
+}
+
+/**
+ * Sum up funds parked in vesting contracts the user funded or owns, discovered
+ * from their history (`toType === 1`). Same shape as `getHtlcHoldings`:
+ * bounded fan-out, paced calls, best effort.
+ */
+export async function getVestingHoldings(
+  ownAddress: string,
+  txs: NimiqTx[]
+): Promise<VestingHolding[]> {
+  const own = cleanAddress(ownAddress).toUpperCase()
+  const candidates = contractCandidates(txs, 1)
+
+  const holdings: VestingHolding[] = []
+  for (let i = 0; i < candidates.length; i++) {
+    if (i > 0) await new Promise((r) => setTimeout(r, CONTRACT_LOOKUP_DELAY))
+    try {
+      const data = await rpcCall('getAccountByAddress', [cleanAddress(candidates[i])])
+      if (data?.type !== 'vesting') continue // fully released → pruned to 'basic'
+      const isOurs =
+        cleanAddress(data.owner ?? '').toUpperCase() === own ||
+        cleanAddress(data.recipient ?? '').toUpperCase() === own
+      if (!isOurs) continue
+      holdings.push({
+        address: data.address ?? candidates[i],
+        balance: String(data.balance ?? '0'),
+        totalAmount: String(data.vestingTotalAmount ?? data.balance ?? 0),
+        owner: data.owner ?? '',
+      })
+    } catch (e) {
+      console.warn('Vesting lookup failed for', candidates[i], e)
     }
   }
   return holdings
@@ -500,6 +592,28 @@ export function classifyTx(tx: NimiqTx, ownAddress: string): TxKind {
   if (sender.startsWith(cleanAddress(VALIDATOR_REWARD_PREFIX).toUpperCase())) return 'reward'
   if (sender === own || recipient === own) return 'payment'
   return 'unknown'
+}
+
+// `classifyTx` only sees addresses, so a contract-funding tx reads as a plain
+// payment to it. The recipient account type settles those cases.
+export type TxLabel = TxKind | 'swap' | 'vesting'
+
+/**
+ * Human-readable transaction type, shared by the history chips and the CSV
+ * `kind` column so the two can never disagree.
+ */
+export function txLabel(tx: NimiqTx, ownAddress: string): TxLabel {
+  // Staking: `toType` marks the deposit leg; the withdrawal leg is an ordinary
+  // tx *from* the staking contract, which classifyTx recognises by sender.
+  if (tx.toType === 3) return classifyTx(tx, ownAddress) === 'unstake' ? 'unstake' : 'stake'
+  if (tx.toType === 2) return 'swap'
+  if (tx.toType === 1) return 'vesting'
+  return classifyTx(tx, ownAddress)
+}
+
+// Types worth calling out in the UI — a plain payment needs no chip.
+export function isLabelledTxKind(label: TxLabel): boolean {
+  return label !== 'payment' && label !== 'unknown' && label !== 'fee'
 }
 
 // Decode Nimiq tx data: hex → UTF-8 when possible, else raw hex
