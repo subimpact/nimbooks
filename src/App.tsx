@@ -981,7 +981,14 @@ export default function App() {
     try {
       const link = await buildDownloadLink(e.csv, e.filename)
       if (!link) {
-        setToast('CSV too large for a link — use Copy CSV instead.')
+        // The link is the only working download route in Pay, so don't leave the
+        // user empty-handed — put the CSV somewhere they can actually get at it.
+        try {
+          await navigator.clipboard.writeText(e.csv)
+          setToast('CSV too large for a link — copied to clipboard instead ✓')
+        } catch {
+          setError('CSV too large for a link — use Copy CSV instead.')
+        }
         return
       }
       setDownloadLink(link)
@@ -1760,23 +1767,25 @@ export default function App() {
               Download your NIM transaction history as CSV — ready for your accountant or tax
               records.
             </p>
-            <button className="btn-primary" onClick={exportCsv} disabled={allTxs.length === 0}>
-              Download CSV ({allTxs.length} transactions)
-            </button>
-            <button className="btn-secondary" onClick={copyCsv} disabled={allTxs.length === 0}>
-              Copy CSV to clipboard
-            </button>
-            {/* Pay's WebView can't save files; desktop/Hub users already get a
-                real download, so this route only appears where it's needed. */}
-            {inNimiqPay && (
+            {/* Pay's WebView can't save files at all, so the link route replaces
+                the (silently dead) direct download there. Desktop/Hub users
+                already get a real download and keep it. */}
+            {inNimiqPay ? (
               <button
-                className="btn-secondary"
+                className="btn-primary"
                 onClick={() => void getDownloadLink('history')}
                 disabled={allTxs.length === 0 || linkBusy}
               >
-                {linkBusy ? 'Building link…' : 'Get download link'}
+                {linkBusy ? 'Building link…' : `Download via link (${allTxs.length} transactions)`}
+              </button>
+            ) : (
+              <button className="btn-primary" onClick={exportCsv} disabled={allTxs.length === 0}>
+                Download CSV ({allTxs.length} transactions)
               </button>
             )}
+            <button className="btn-secondary" onClick={copyCsv} disabled={allTxs.length === 0}>
+              Copy CSV to clipboard
+            </button>
 
             <div className="card statement-card">
               <span className="label">Tax-year statement</span>
@@ -1841,9 +1850,19 @@ export default function App() {
                     </div>
                   </div>
                   <div className="statement-actions">
-                    <button className="btn-primary" onClick={exportStatementCsv}>
-                      Download statement CSV ({statement.period})
-                    </button>
+                    {inNimiqPay ? (
+                      <button
+                        className="btn-primary"
+                        onClick={() => void getDownloadLink('statement')}
+                        disabled={linkBusy}
+                      >
+                        {linkBusy ? 'Building link…' : `Download via link (${statement.period})`}
+                      </button>
+                    ) : (
+                      <button className="btn-primary" onClick={exportStatementCsv}>
+                        Download statement CSV ({statement.period})
+                      </button>
+                    )}
                     <button
                       className="btn-secondary"
                       onClick={async () => {
@@ -1860,15 +1879,6 @@ export default function App() {
                     >
                       Copy CSV
                     </button>
-                    {inNimiqPay && (
-                      <button
-                        className="btn-secondary"
-                        onClick={() => void getDownloadLink('statement')}
-                        disabled={linkBusy}
-                      >
-                        {linkBusy ? 'Building link…' : 'Get download link'}
-                      </button>
-                    )}
                   </div>
                 </>
               )}
