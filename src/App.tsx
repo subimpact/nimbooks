@@ -15,17 +15,22 @@ import {
 import {
   getNimiqBalance,
   getHtlcHoldings,
+  getStakingHolding,
+  getVestingHoldings,
   getNimiqTransactionHistory,
   getEvmBalances,
   getAllFiatRates,
   formatLuna,
   formatUnits,
-  classifyTx,
+  isLabelledTxKind,
+  txLabel,
   decodeMemo,
   explorerTxUrl,
   type NimiqTx,
   type EvmBalance,
   type HtlcHolding,
+  type StakingHolding,
+  type VestingHolding,
 } from './lib/chain'
 import { encodeReceipt, type SignedReceipt } from './lib/receipt'
 import {
@@ -101,6 +106,8 @@ export default function App() {
   const [nimBalance, setNimBalance] = useState<string | null>(null)
   const [nimTxs, setNimTxs] = useState<NimiqTx[]>([])
   const [htlcHoldings, setHtlcHoldings] = useState<HtlcHolding[]>([])
+  const [stakingHolding, setStakingHolding] = useState<StakingHolding | null>(null)
+  const [vestingHoldings, setVestingHoldings] = useState<VestingHolding[]>([])
   const [evmBalances, setEvmBalances] = useState<EvmBalance[]>([])
   const [rates, setRates] = useState<{ nim: number; usdt: number; eth: number; pol: number }>({
     nim: 0,
@@ -117,6 +124,7 @@ export default function App() {
   const [toast, setToast] = useState<string | null>(null)
   const [theme, setTheme] = useState<Theme>(getInitialTheme)
   const [showReceiptHelp, setShowReceiptHelp] = useState(false)
+  const [showTypeHelp, setShowTypeHelp] = useState(false)
   const [visibleTxCount, setVisibleTxCount] = useState(50)
   const [statementYear, setStatementYear] = useState<string>('all')
   const [statement, setStatement] = useState<Statement | null>(null)
@@ -355,14 +363,26 @@ export default function App() {
         ])
         setNimBalance(bal)
         setNimTxs(txs)
-        // Nimiq Pay parks in-flight transfers in HTLC contracts, where they
-        // are invisible to the basic balance — add them up separately. Best
-        // effort: a failed lookup must not take the balance view down with it.
+        // Swapped, staked and vesting NIM all sit outside the basic account,
+        // where the plain balance can't see them — add each up separately.
+        // Best effort: a failed lookup must not take the balance view down.
         try {
           setHtlcHoldings(await getHtlcHoldings(acc.nimiqAddress, txs))
         } catch (e) {
           console.warn('HTLC holdings lookup failed:', e)
           setHtlcHoldings([])
+        }
+        try {
+          setStakingHolding(await getStakingHolding(acc.nimiqAddress))
+        } catch (e) {
+          console.warn('Staking holding lookup failed:', e)
+          setStakingHolding(null)
+        }
+        try {
+          setVestingHoldings(await getVestingHoldings(acc.nimiqAddress, txs))
+        } catch (e) {
+          console.warn('Vesting holdings lookup failed:', e)
+          setVestingHoldings([])
         }
       }
       if (acc.evmAddress) {
@@ -381,11 +401,23 @@ export default function App() {
     () => htlcHoldings.reduce((sum, h) => sum + (Number(h.balance) || 0), 0),
     [htlcHoldings]
   )
-  const totalNimLuna = (Number(nimBalance) || 0) + lockedLuna
+  // Delegated NIM, including the buckets on their way back out: inactive is
+  // cooling down and retired is withdrawable, but both are still the user's.
+  const stakedLuna =
+    (Number(stakingHolding?.active) || 0) +
+    (Number(stakingHolding?.inactive) || 0) +
+    (Number(stakingHolding?.retired) || 0)
+  const vestedLuna = useMemo(
+    () => vestingHoldings.reduce((sum, v) => sum + (Number(v.balance) || 0), 0),
+    [vestingHoldings]
+  )
+  const offBalanceLuna = lockedLuna + stakedLuna + vestedLuna
+  const totalNimLuna = (Number(nimBalance) || 0) + offBalanceLuna
 
   const totalUsd = useMemo(() => {
     let total = 0
-    if (nimBalance !== null) total += (((Number(nimBalance) || 0) + lockedLuna) / 100000) * rates.nim
+    if (nimBalance !== null)
+      total += (((Number(nimBalance) || 0) + offBalanceLuna) / 100000) * rates.nim
     for (const b of evmBalances) {
       const val = Number(b.balance) / 10 ** b.decimals
       if (!Number.isFinite(val)) continue
@@ -394,7 +426,7 @@ export default function App() {
       else total += val * rates.eth
     }
     return Number.isFinite(total) ? total : 0
-  }, [nimBalance, lockedLuna, evmBalances, rates])
+  }, [nimBalance, offBalanceLuna, evmBalances, rates])
 
   const makeReceipt = async (tx: NimiqTx) => {
     if (!account?.nimiqAddress) return
@@ -475,9 +507,7 @@ export default function App() {
             new Date(t.timestamp ?? Date.now()).toISOString(),
             t.hash,
             isOut ? 'sent' : 'received',
-            // An HTLC-funding tx is a swap leg, not a plain payment — classifyTx
-            // only sees addresses, so the contract type wins here.
-            t.toType === 2 ? 'swap' : classifyTx(t, own),
+            txLabel(t, own),
             t.sender,
             t.recipient,
             (Number(t.value) / 100000).toFixed(5), // raw decimals — no locale separators (accounting-safe)
@@ -528,6 +558,8 @@ export default function App() {
     setNimBalance(null)
     setNimTxs([])
     setHtlcHoldings([])
+    setStakingHolding(null)
+    setVestingHoldings([])
     setEvmBalances([])
     setReceipts([])
     setError(null)
@@ -743,19 +775,42 @@ export default function App() {
               <span className="label">NIM balance</span>
               {nimBalance === null ? (
                 <span className="value dim">…</span>
-              ) : lockedLuna > 0 ? (
-                // Funds in a pending swap are still the user's — break the
-                // total down so a 0 basic balance doesn't read as "no money".
+              ) : offBalanceLuna > 0 ? (
+                // Swapped, staked and vesting funds are still the user's —
+                // break the total down so a 0 basic balance doesn't read as
+                // "no money".
                 <>
                   <div className="balance-breakdown">
                     <div className="row">
                       <span>Available</span>
                       <span>{formatLuna(nimBalance, lang)} NIM</span>
                     </div>
-                    <div className="row">
-                      <span>Locked in swaps</span>
-                      <span>{formatLuna(String(lockedLuna), lang)} NIM</span>
-                    </div>
+                    {lockedLuna > 0 && (
+                      <div className="row">
+                        <span>Locked in swaps</span>
+                        <span>{formatLuna(String(lockedLuna), lang)} NIM</span>
+                      </div>
+                    )}
+                    {stakedLuna > 0 && (
+                      <div className="row">
+                        <span>
+                          Staked
+                          {stakingHolding?.delegation && (
+                            <span className="delegate-to">
+                              {' '}
+                              → {stakingHolding.delegation.slice(0, 12)}…
+                            </span>
+                          )}
+                        </span>
+                        <span>{formatLuna(String(stakedLuna), lang)} NIM</span>
+                      </div>
+                    )}
+                    {vestedLuna > 0 && (
+                      <div className="row">
+                        <span>Vesting</span>
+                        <span>{formatLuna(String(vestedLuna), lang)} NIM</span>
+                      </div>
+                    )}
                     <div className="row strong">
                       <span>Total</span>
                       <span>{formatLuna(String(totalNimLuna), lang)} NIM</span>
@@ -877,10 +932,40 @@ export default function App() {
           <section className="history">
             <div className="section-head">
               <h2>NIM transactions</h2>
-              <button className="btn-link-inline" onClick={() => setShowReceiptHelp((v) => !v)}>
-                {showReceiptHelp ? 'Hide' : 'What is a signed receipt?'}
-              </button>
+              <div className="help-toggles">
+                <button className="btn-link-inline" onClick={() => setShowTypeHelp((v) => !v)}>
+                  {showTypeHelp ? 'Hide' : 'What are these types?'}
+                </button>
+                <button className="btn-link-inline" onClick={() => setShowReceiptHelp((v) => !v)}>
+                  {showReceiptHelp ? 'Hide' : 'What is a signed receipt?'}
+                </button>
+              </div>
             </div>
+            {showTypeHelp && (
+              <div className="card help-card">
+                <p>
+                  <strong>Basic transfer</strong> — a normal payment between two wallets. Money
+                  moves straight from sender to recipient.
+                </p>
+                <p>
+                  <strong>Swap (HTLC)</strong> — an atomic swap. Your wallet locks funds in a
+                  contract; the counterparty claims them with a secret, or they refund to you
+                  after the timeout. Nimiq Pay routes some transfers through these — while
+                  locked, the funds are still yours. This is normal, not a drainer.
+                </p>
+                <p>
+                  <strong>Stake / Unstake</strong> — you delegated NIM to a validator, or withdrew
+                  it. Staked NIM lives in the staking contract rather than your basic balance —
+                  NimBooks counts it in the balance card.
+                </p>
+                <p>
+                  <strong>Vesting</strong> — time-locked funds that release on a schedule.
+                </p>
+                <p>
+                  <strong>Reward</strong> — validator reward payments.
+                </p>
+              </div>
+            )}
             {showReceiptHelp && (
               <div className="card help-card">
                 <p>
@@ -900,7 +985,7 @@ export default function App() {
             )}
             {nimTxs.slice(0, visibleTxCount).map((tx) => {
               const isOut = tx.sender.replace(/\s+/g, '').toUpperCase() === account.nimiqAddress?.replace(/\s+/g, '').toUpperCase()
-              const kind = classifyTx(tx, account.nimiqAddress ?? '')
+              const label = txLabel(tx, account.nimiqAddress ?? '')
               const memo = decodeMemo(tx.data)
               const demo = isDemoMode()
               return (
@@ -908,10 +993,9 @@ export default function App() {
                   <div className="tx-main">
                     <span className={isOut ? 'out' : 'in'}>
                       {isOut ? '▼ sent' : '▲ received'}
-                      {kind !== 'payment' && kind !== 'unknown' && (
-                        <span className={`tx-kind ${kind}`}> · {kind}</span>
+                      {isLabelledTxKind(label) && (
+                        <span className={`tx-kind ${label}`}> · {label}</span>
                       )}
-                      {tx.toType === 2 && <span className="tx-kind swap"> · swap</span>}
                     </span>
                     <span className="tx-amount">{formatLuna(tx.value, lang)} NIM</span>
                   </div>
