@@ -345,6 +345,45 @@ export async function getNimiqTransactionByHash(hash: string): Promise<NimiqTx |
   }
 }
 
+/**
+ * Poll the tx index until a submitted transaction shows up, or the budget runs
+ * out. "Submitted" is not "mined": a Nimiq tx that misses its validity window
+ * (~2h) is dropped from the mempool without a trace, so a flow that only shows
+ * the hash leaves the user waiting on something that will never land.
+ *
+ * - 'confirmed' — the index returned the tx (`executionResult` carries success)
+ * - 'expired'   — every lookup came back a definitive "not found"
+ * - 'unknown'   — at least one lookup failed on the RPC itself, so absence
+ *                 proves nothing; the caller must keep any pending state.
+ *
+ * `timeoutMs` is a polling budget, not the validity window: a caller that only
+ * waits a minute gets 'expired' for the overwhelmingly common failure (never
+ * broadcast / rejected outright), not proof the window has passed.
+ */
+export async function waitForTxMined(
+  hash: string,
+  opts: { intervalMs?: number; timeoutMs?: number } = {}
+): Promise<'confirmed' | 'expired' | 'unknown'> {
+  const intervalMs = opts.intervalMs ?? 15000
+  const timeoutMs = opts.timeoutMs ?? 2 * 60 * 60 * 1000 // tx validity window
+  const deadline = Date.now() + timeoutMs
+  let rpcFailed = false
+  for (;;) {
+    try {
+      // Resolves null only for a definitive "Transaction not found".
+      if (await getNimiqTransactionByHash(hash)) return 'confirmed'
+    } catch (e) {
+      // Network/rate-limit trouble — keep polling, but never report 'expired'
+      // off a lookup that never actually answered.
+      rpcFailed = true
+      console.warn('waitForTxMined lookup failed:', e)
+    }
+    if (Date.now() + intervalMs >= deadline) break
+    await new Promise((r) => setTimeout(r, intervalMs))
+  }
+  return rpcFailed ? 'unknown' : 'expired'
+}
+
 export async function getNimiqBlockNumber(): Promise<number> {
   const data = await rpcCall('getBlockNumber', [])
   return Number(data)
