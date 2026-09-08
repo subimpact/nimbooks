@@ -463,10 +463,98 @@ export async function getEvmBalances(address: string): Promise<EvmBalance[]> {
 
 // --- Fiat conversion ---
 
+// Display currencies offered by the currency switcher. CoinGecko returns all
+// of them in the one consolidated request, so an extra currency costs no extra
+// API call (and no extra 429 risk).
+// The same set as the Nimiq Wallet's currency picker (verified against
+// wallet.nimiq.com settings), minus CRC/GMD/GTQ/XOF — CoinGecko does not
+// publish those four, so they would always read 0.
+export type CurrencyCode =
+  | 'aed' | 'ars' | 'aud' | 'brl' | 'cad' | 'chf' | 'clp' | 'cny'
+  | 'czk' | 'dkk' | 'eur' | 'gbp' | 'hkd' | 'huf' | 'idr' | 'ils'
+  | 'inr' | 'jpy' | 'krw' | 'mxn' | 'myr' | 'ngn' | 'nok' | 'nzd'
+  | 'php' | 'pkr' | 'pln' | 'rub' | 'sek' | 'sgd' | 'thb' | 'try'
+  | 'twd' | 'uah' | 'usd' | 'vnd' | 'zar'
+
+export const CURRENCIES: { code: CurrencyCode; label: string; symbol: string; flag: string }[] = [
+  { code: 'aed', label: 'AED', symbol: 'AED ', flag: 'AE' },
+  { code: 'ars', label: 'ARS', symbol: 'ARS ', flag: 'AR' },
+  { code: 'aud', label: 'AUD', symbol: 'A$', flag: 'AU' },
+  { code: 'brl', label: 'BRL', symbol: 'R$', flag: 'BR' },
+  { code: 'cad', label: 'CAD', symbol: 'C$', flag: 'CA' },
+  { code: 'chf', label: 'CHF', symbol: 'Fr ', flag: 'CH' },
+  { code: 'clp', label: 'CLP', symbol: 'CLP ', flag: 'CL' },
+  { code: 'cny', label: 'CNY', symbol: '¥', flag: 'CN' },
+  { code: 'czk', label: 'CZK', symbol: 'Kč ', flag: 'CZ' },
+  { code: 'dkk', label: 'DKK', symbol: 'kr ', flag: 'DK' },
+  { code: 'eur', label: 'EUR', symbol: '€', flag: 'EU' },
+  { code: 'gbp', label: 'GBP', symbol: '£', flag: 'GB' },
+  { code: 'hkd', label: 'HKD', symbol: 'HK$', flag: 'HK' },
+  { code: 'huf', label: 'HUF', symbol: 'Ft ', flag: 'HU' },
+  { code: 'idr', label: 'IDR', symbol: 'Rp ', flag: 'ID' },
+  { code: 'ils', label: 'ILS', symbol: '₪', flag: 'IL' },
+  { code: 'inr', label: 'INR', symbol: '₹', flag: 'IN' },
+  { code: 'jpy', label: 'JPY', symbol: '¥', flag: 'JP' },
+  { code: 'krw', label: 'KRW', symbol: '₩', flag: 'KR' },
+  { code: 'mxn', label: 'MXN', symbol: 'MX$', flag: 'MX' },
+  { code: 'myr', label: 'MYR', symbol: 'RM', flag: 'MY' },
+  { code: 'ngn', label: 'NGN', symbol: '₦', flag: 'NG' },
+  { code: 'nok', label: 'NOK', symbol: 'kr ', flag: 'NO' },
+  { code: 'nzd', label: 'NZD', symbol: 'NZ$', flag: 'NZ' },
+  { code: 'php', label: 'PHP', symbol: '₱', flag: 'PH' },
+  { code: 'pkr', label: 'PKR', symbol: '₨ ', flag: 'PK' },
+  { code: 'pln', label: 'PLN', symbol: 'zł ', flag: 'PL' },
+  { code: 'rub', label: 'RUB', symbol: '₽', flag: 'RU' },
+  { code: 'sek', label: 'SEK', symbol: 'kr ', flag: 'SE' },
+  { code: 'sgd', label: 'SGD', symbol: 'S$', flag: 'SG' },
+  { code: 'thb', label: 'THB', symbol: '฿', flag: 'TH' },
+  { code: 'try', label: 'TRY', symbol: '₺', flag: 'TR' },
+  { code: 'twd', label: 'TWD', symbol: 'NT$', flag: 'TW' },
+  { code: 'uah', label: 'UAH', symbol: '₴', flag: 'UA' },
+  { code: 'usd', label: 'USD', symbol: '$', flag: 'US' },
+  { code: 'vnd', label: 'VND', symbol: '₫', flag: 'VN' },
+  { code: 'zar', label: 'ZAR', symbol: 'R ', flag: 'ZA' },
+]
+
+const VS_CURRENCIES = CURRENCIES.map((c) => c.code).join(',')
+
 export interface FiatRates {
-  usd: number
-  myr: number
-  [key: string]: number
+  [code: string]: number
+}
+
+const CURRENCY_KEY = 'nimbooks:currency'
+
+/** The user's display currency, remembered across sessions (default USD). */
+export function loadCurrency(): CurrencyCode {
+  try {
+    const saved = localStorage.getItem(CURRENCY_KEY)
+    if (CURRENCIES.some((c) => c.code === saved)) return saved as CurrencyCode
+  } catch {
+    /* storage unavailable */
+  }
+  return 'usd'
+}
+
+export function saveCurrency(code: CurrencyCode): void {
+  try {
+    localStorage.setItem(CURRENCY_KEY, code)
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+export function currencySymbol(code: CurrencyCode): string {
+  return CURRENCIES.find((c) => c.code === code)?.symbol ?? '$'
+}
+
+/**
+ * Money for display. Sub-cent amounts get 4 decimals so a small NIM balance
+ * never reads as "$0.00"; pass `decimals` to pin the precision instead.
+ */
+export function formatFiat(amount: number, code: CurrencyCode, decimals?: number): string {
+  const n = Number.isFinite(amount) ? amount : 0
+  const dp = decimals ?? (n > 0 && n < 0.01 ? 4 : 2)
+  return `${currencySymbol(code)}${n.toFixed(dp)}`
 }
 
 const RATE_CACHE_KEY = 'nimbooks:rates'
@@ -488,10 +576,25 @@ function writeRateCache(cache: Record<string, { rates: FiatRates; at: number }>)
   }
 }
 
+// Rates cached before a currency was added carry only the old keys; serving
+// them would leave the new currency reading 0 until the TTL expired.
+function hasAllCurrencies(rates: FiatRates | undefined): boolean {
+  return !!rates && CURRENCIES.every((c) => typeof rates[c.code] === 'number')
+}
+
+function pickRates(entry: any): FiatRates {
+  const rates: FiatRates = {}
+  for (const c of CURRENCIES) {
+    const v = entry?.[c.code]
+    rates[c.code] = typeof v === 'number' && Number.isFinite(v) ? v : 0
+  }
+  return rates
+}
+
 export async function getFiatRates(asset: 'nim' | 'usdt' | 'usdc' | 'eth' | 'pol'): Promise<FiatRates> {
   const cache = readRateCache()
   const cached = cache[asset]
-  if (cached && Date.now() - cached.at < CACHE_TTL) return cached.rates
+  if (cached && hasAllCurrencies(cached.rates) && Date.now() - cached.at < CACHE_TTL) return cached.rates
 
   const id =
     asset === 'nim'
@@ -507,12 +610,12 @@ export async function getFiatRates(asset: 'nim' | 'usdt' | 'usdc' | 'eth' | 'pol
   const timer = setTimeout(() => controller.abort(), 8000)
   try {
     const res = await fetch(
-      `https://api.coingecko.com/api/v3/simple/price?ids=${id}&vs_currencies=usd,myr`,
+      `https://api.coingecko.com/api/v3/simple/price?ids=${id}&vs_currencies=${VS_CURRENCIES}`,
       { signal: controller.signal }
     )
     if (!res.ok) throw new Error(`CoinGecko HTTP ${res.status}`)
     const json = await res.json()
-    const rates: FiatRates = { usd: json[id]?.usd ?? 0, myr: json[id]?.myr ?? 0 }
+    const rates: FiatRates = pickRates(json[id])
     if (rates.usd > 0) {
       cache[asset] = { rates, at: Date.now() }
       writeRateCache(cache)
@@ -529,7 +632,7 @@ export async function getAllFiatRates(): Promise<Record<'nim' | 'usdt' | 'eth' |
   const cache = readRateCache()
   const fresh = (a: string) => {
     const c = cache[a]
-    return c && Date.now() - c.at < CACHE_TTL ? c.rates : null
+    return c && hasAllCurrencies(c.rates) && Date.now() - c.at < CACHE_TTL ? c.rates : null
   }
   const nim = fresh('nim')
   const usdt = fresh('usdt')
@@ -541,17 +644,17 @@ export async function getAllFiatRates(): Promise<Record<'nim' | 'usdt' | 'eth' |
   const timer = setTimeout(() => controller.abort(), 8000)
   try {
     const res = await fetch(
-      'https://api.coingecko.com/api/v3/simple/price?ids=nimiq-2,tether,ethereum,matic-network&vs_currencies=usd,myr',
+      `https://api.coingecko.com/api/v3/simple/price?ids=nimiq-2,tether,ethereum,matic-network&vs_currencies=${VS_CURRENCIES}`,
       { signal: controller.signal }
     )
     if (!res.ok) throw new Error(`CoinGecko HTTP ${res.status}`)
     const json = await res.json()
     const now = Date.now()
     const out = {
-      nim: { usd: json['nimiq-2']?.usd ?? 0, myr: json['nimiq-2']?.myr ?? 0 },
-      usdt: { usd: json['tether']?.usd ?? 0, myr: json['tether']?.myr ?? 0 },
-      eth: { usd: json['ethereum']?.usd ?? 0, myr: json['ethereum']?.myr ?? 0 },
-      pol: { usd: json['matic-network']?.usd ?? 0, myr: json['matic-network']?.myr ?? 0 },
+      nim: pickRates(json['nimiq-2']),
+      usdt: pickRates(json['tether']),
+      eth: pickRates(json['ethereum']),
+      pol: pickRates(json['matic-network']),
     }
     // Cache only if the response actually carried rates (avoid caching 429/empty)
     if (out.nim.usd > 0) {
@@ -564,6 +667,168 @@ export async function getAllFiatRates(): Promise<Record<'nim' | 'usdt' | 'eth' |
   } finally {
     clearTimeout(timer)
   }
+}
+
+// --- Validator registry (official Nimiq validators API) ---
+
+// Delegating needs a validator address, and a raw address list is useless to a
+// user: fee and reliability are what make one pool a better home for their NIM
+// than another. `reliability: null` means the API has no score for the current
+// epoch — the node is not producing blocks, so a stake there earns nothing.
+export interface ValidatorInfo {
+  id: number
+  name: string
+  address: string
+  fee: number | null // 0.01 = 1%; null when the pool publishes no fee
+  reliability: number | null // null = not producing (no score this epoch)
+  payoutType?: string
+  isListed: boolean
+  balance: number // Luna staked with this validator (for network total)
+  annualReward: number | null // net annual yield after fee, as a fraction (0.0831 = 8.31% p.a.)
+}
+
+const VALIDATORS_URL = 'https://validators-api-main.je-cf9.workers.dev/api/v1/validators/'
+const VALIDATORS_CACHE_KEY = 'nimbooks:validators'
+const VALIDATORS_TTL = 10 * 60 * 1000 // 10 min — pool scores move by the epoch
+
+// --- Annual yield math, ported verbatim from the Nimiq wallet's
+// AlbatrossMath.calculateStakingReward (wallet.nimiq.com source, verified
+// against its displayed yields: within 0.02 % of Moon Pool 7.99 % etc.). ---
+const TOTAL_SUPPLY = 21e14 // total NIM supply in Luna
+const SUPPLY_DECAY = 0.9999999999960264 // supply decay per ms
+const GENESIS_DATE = Date.UTC(2024, 10, 19, 16, 0, 0) // mainnet genesis
+const GENESIS_SUPPLY = 12_893_109_654_06244
+
+function supplyAtTime(ms: number): number {
+  const t = ms - GENESIS_DATE
+  return TOTAL_SUPPLY - (TOTAL_SUPPLY - GENESIS_SUPPLY) * Math.pow(SUPPLY_DECAY, t)
+}
+
+/** Net annual yield for a validator, in the wallet's convention (fraction). */
+export function annualRewardFor(fee: number | null, networkStakeLuna: number): number | null {
+  if (fee === null || !(networkStakeLuna > 0)) return null
+  const now = Date.now()
+  const emission = supplyAtTime(now + 365 * 86400000) - supplyAtTime(now)
+  return (emission / networkStakeLuna) * (1 - fee)
+}
+
+interface ValidatorCacheEntry {
+  at: number
+  validators: ValidatorInfo[]
+}
+
+/**
+ * Best home for a stake first: reliability descending, non-producing pools
+ * (null score) last, ties broken by name so the order is stable between loads.
+ */
+export function sortValidators(list: ValidatorInfo[]): ValidatorInfo[] {
+  return [...list].sort((a, b) => {
+    const ar = a.reliability
+    const br = b.reliability
+    if (ar === null && br !== null) return 1
+    if (br === null && ar !== null) return -1
+    if (ar !== null && br !== null && ar !== br) return br - ar
+    return a.name.localeCompare(b.name)
+  })
+}
+
+export async function getValidators(): Promise<ValidatorInfo[]> {
+  // A stale list still beats an empty picker if the API is down.
+  let stale: ValidatorInfo[] | null = null
+  try {
+    const raw = localStorage.getItem(VALIDATORS_CACHE_KEY)
+    if (raw) {
+      const entry = JSON.parse(raw) as ValidatorCacheEntry
+      if (Array.isArray(entry.validators) && entry.validators.length > 0) {
+        if (Date.now() - entry.at < VALIDATORS_TTL) return sortValidators(entry.validators)
+        stale = entry.validators
+      }
+    }
+  } catch {
+    /* unreadable cache — refetch */
+  }
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 10000)
+  try {
+    const res = await fetch(VALIDATORS_URL, { signal: controller.signal })
+    if (!res.ok) throw new Error(`Validators API HTTP ${res.status}`)
+    const json = await res.json()
+    if (!Array.isArray(json)) throw new Error('Validators API returned no list')
+    // Keep only the fields the picker needs: the raw payload inlines logo
+    // images (~1.4 MB for 24 validators) and would blow the storage quota.
+    const raw: any[] = json.filter((v: any) => v?.address)
+    // The yield formula divides by the network's TOTAL active stake (all
+    // validators on chain), but the API only lists registered pools. Each
+    // listed validator's `dominanceRatio` = its balance / network total, so
+    // back out the network total from any validator with both fields.
+    const inferred = raw
+      .map((v: any) => ({
+        bal: Number(v.balance) || 0,
+        dom: Number(v.dominanceRatio) || 0,
+      }))
+      .filter((x) => x.bal > 0 && x.dom > 0)
+      .map((x) => x.bal / x.dom)
+    const networkStakeLuna =
+      inferred.length > 0 ? inferred.reduce((a, b) => a + b, 0) / inferred.length : 0
+    const validators: ValidatorInfo[] = raw.map((v) => {
+      const fee = typeof v?.fee === 'number' ? v.fee : null
+      const balance = Number(v.balance) || 0
+      return {
+        id: Number(v?.id),
+        name: String(v?.name || v?.address || 'Unknown validator'),
+        address: String(v?.address ?? ''),
+        fee,
+        reliability: typeof v?.score?.reliability === 'number' ? v.score.reliability : null,
+        payoutType: typeof v?.payoutType === 'string' ? v.payoutType : undefined,
+        isListed: v?.isListed !== false,
+        balance,
+        // Same convention as the Nimiq wallet's validator list: annual yield
+        // on the network's total active stake, net of this pool's fee.
+        annualReward: annualRewardFor(fee, networkStakeLuna),
+      }
+    })
+    if (validators.length === 0) throw new Error('Validators API returned no validators')
+    try {
+      localStorage.setItem(
+        VALIDATORS_CACHE_KEY,
+        JSON.stringify({ at: Date.now(), validators } satisfies ValidatorCacheEntry)
+      )
+    } catch {
+      /* storage full — the list just isn't cached */
+    }
+    return sortValidators(validators)
+  } catch (e) {
+    if (stale) {
+      console.warn('Validators refresh failed — serving cached list:', e)
+      return sortValidators(stale)
+    }
+    throw e
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/** Pool fee as a percentage string ("1%", "3.33%"), or null when unpublished. */
+export function formatValidatorFee(fee: number | null): string | null {
+  if (fee === null || !Number.isFinite(fee)) return null
+  const pct = fee * 100
+  return `${Number(pct.toFixed(2))}%`
+}
+
+/** Net annual yield ("8.31% p.a."), matching the wallet's presentation. */
+export function formatValidatorReward(annualReward: number | null): string | null {
+  if (annualReward === null || !Number.isFinite(annualReward) || annualReward <= 0) return null
+  return `${Number((annualReward * 100).toFixed(2))}% p.a.`
+}
+
+/**
+ * Reliability as a percentage. The API can return marginally over 1.0
+ * (a pool producing slightly above its expected share), so clamp at 100%.
+ */
+export function formatValidatorReliability(reliability: number | null): string | null {
+  if (reliability === null || !Number.isFinite(reliability)) return null
+  return `${Math.min(100, Math.max(0, reliability * 100)).toFixed(1)}%`
 }
 
 export function formatLuna(luna: string | number, locale = 'en'): string {

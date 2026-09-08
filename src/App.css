@@ -960,6 +960,280 @@ a.btn-ghost.btn-link {
   margin-top: 6px;
 }
 
+/* Modal / bottom sheet (stake panel, currency switcher).
+   Sheet-anchored on purpose: at 390px the thumb is at the bottom of the
+   screen, and the sheet sits over the floating tab dock (z-index 20). */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.55);
+  animation: overlay-in 0.15s ease-out;
+}
+.modal {
+  width: 100%;
+  max-width: 456px;
+  max-height: 82vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  padding: 16px;
+  margin-bottom: 0;
+  margin-bottom: env(safe-area-inset-bottom);
+  animation: sheet-up 0.2s ease-out;
+}
+.modal.small {
+  max-height: 70vh;
+}
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes sheet-up {
+  from {
+    transform: translateY(16px);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.modal-head h2 {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.modal .label {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 6px;
+}
+/* Hints in the sheet always own their line — they sit under full-width
+   inputs and option lists. */
+.modal .hint,
+.modal .hint.small {
+  display: block;
+}
+.modal .hint.small.warn {
+  color: var(--red);
+}
+.modal .hint.small.ok {
+  color: var(--green);
+  font-weight: 400;
+}
+.modal .empty {
+  margin: 8px 0;
+}
+
+/* Radio-style option rows — currency list and validator picker */
+.option-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.validator-list {
+  max-height: 40vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+}
+.option-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.option-row.selected {
+  border-color: var(--accent);
+  background: var(--card-2);
+}
+.option-row.inactive strong {
+  color: var(--muted);
+}
+.option-row:disabled {
+  cursor: default;
+}
+.option-row:disabled:not(.selected) {
+  opacity: 0.55;
+}
+/* Radio dot — the rows are buttons (see App.tsx) so they need their own mark */
+.option-dot {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 3px;
+  border: 2px solid var(--border);
+  border-radius: 50%;
+}
+.option-row.selected .option-dot {
+  border-color: var(--accent);
+  background: var(--accent);
+  /* Ring of card colour between border and centre — a filled radio dot */
+  box-shadow: inset 0 0 0 2px var(--card-2);
+}
+.option-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-size: 14px;
+}
+.option-main strong {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.option-meta {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.badge.inactive {
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--error-bg);
+  border: 1px solid var(--bad-border);
+  color: var(--red);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+/* Stake panel */
+.stake-status {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  margin-bottom: 14px;
+}
+.stake-status .value {
+  display: block;
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.stake-status .sub {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+.modal .label.stake-section {
+  margin-top: 16px;
+}
+.modal .input {
+  margin-top: 2px;
+}
+.btn-primary.stake-submit {
+  margin-top: 14px;
+}
+
+/* Currency picker — flag grid matching the Nimiq wallet's Reference
+   currency selector (wallet.nimiq.com settings). */
+.currency-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
+  gap: 8px;
+  max-height: 44vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.currency-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 6px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.currency-tile.selected {
+  border-color: var(--accent);
+  background: var(--card-2);
+}
+.currency-flag {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  overflow: hidden;
+  border-radius: 50%;
+}
+.currency-flag img {
+  width: 28px;
+  height: 28px;
+  object-fit: cover;
+  border-radius: 50%;
+}
+.currency-code {
+  line-height: 1;
+}
+.modal a.btn-primary.btn-link {
+  width: 100%;
+  text-align: center;
+  margin-top: 12px;
+}
+
+/* Total value doubles as the currency switcher — a button that keeps the
+   card's typography (.card .value) and drops the button chrome. */
+.value-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+.value-btn:active {
+  opacity: 0.7;
+}
+
 /* Print: clean receipt slip, no chrome */
 @media print {
   body {
@@ -975,7 +1249,8 @@ a.btn-ghost.btn-link {
   .btn-small,
   .theme-toggle,
   .error-banner,
-  .toast {
+  .toast,
+  .modal-overlay {
     display: none !important;
   }
   .app,

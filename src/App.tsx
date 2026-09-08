@@ -7,6 +7,8 @@ import {
   connectDemoAccount,
   disconnectWallet,
   isDemoMode,
+  canStake,
+  stakeNim,
   getDeviceId,
   getLanguage,
   signReceipt,
@@ -20,16 +22,28 @@ import {
   getNimiqTransactionHistory,
   getEvmBalances,
   getAllFiatRates,
+  getValidators,
+  clearTxCache,
   formatLuna,
   formatUnits,
+  formatFiat,
+  formatValidatorFee,
+  formatValidatorReward,
+  formatValidatorReliability,
   isLabelledTxKind,
   txLabel,
   decodeMemo,
   explorerTxUrl,
+  loadCurrency,
+  saveCurrency,
+  CURRENCIES,
+  type CurrencyCode,
+  type FiatRates,
   type NimiqTx,
   type EvmBalance,
   type HtlcHolding,
   type StakingHolding,
+  type ValidatorInfo,
   type VestingHolding,
 } from './lib/chain'
 import { encodeReceipt, type SignedReceipt } from './lib/receipt'
@@ -62,10 +76,10 @@ type View = 'dashboard' | 'history' | 'receipts' | 'request' | 'export'
 
 const RATES_KEY = 'nimbooks:rates'
 
-// chain.ts owns this key and writes { asset: { rates: {usd,myr}, at } }.
+// chain.ts owns this key and writes { asset: { rates: {usd,myr,eur,…}, at } }.
 // Read that schema for the no-flash initial state.
 interface RateCache {
-  [asset: string]: { rates?: { usd?: number; myr?: number }; at?: number }
+  [asset: string]: { rates?: Partial<FiatRates>; at?: number }
 }
 
 function readRates(): RateCache {
@@ -74,6 +88,26 @@ function readRates(): RateCache {
   } catch {
     return {}
   }
+}
+
+type RateAsset = 'nim' | 'usdt' | 'eth' | 'pol'
+
+const ZERO_RATES: FiatRates = { usd: 0, myr: 0, eur: 0, sgd: 0, gbp: 0 }
+
+// Overlay whatever the cache holds onto the placeholder rates: a cache written
+// before a currency was added carries only the older keys.
+function mergeRates(base: FiatRates, cached?: Partial<FiatRates>): FiatRates {
+  if (!cached) return base
+  const out = { ...base }
+  for (const c of CURRENCIES) {
+    const v = cached[c.code]
+    if (typeof v === 'number') out[c.code] = v
+  }
+  return out
+}
+
+function cleanAddr(address: string): string {
+  return address.replace(/\s+/g, '').toUpperCase()
 }
 
 function sanitizeCsvCell(val: unknown): string {
@@ -109,12 +143,16 @@ export default function App() {
   const [stakingHolding, setStakingHolding] = useState<StakingHolding | null>(null)
   const [vestingHoldings, setVestingHoldings] = useState<VestingHolding[]>([])
   const [evmBalances, setEvmBalances] = useState<EvmBalance[]>([])
-  const [rates, setRates] = useState<{ nim: number; usdt: number; eth: number; pol: number }>({
-    nim: 0,
-    usdt: 1,
-    eth: 0,
-    pol: 0,
+  // Full rate table per asset — one entry per display currency, so switching
+  // currency is instant and costs no extra request.
+  const [fiat, setFiat] = useState<Record<RateAsset, FiatRates>>({
+    nim: ZERO_RATES,
+    usdt: { ...ZERO_RATES, usd: 1 },
+    eth: ZERO_RATES,
+    pol: ZERO_RATES,
   })
+  const [currency, setCurrency] = useState<CurrencyCode>(loadCurrency)
+  const [currencyOpen, setCurrencyOpen] = useState(false)
   const [deviceId, setDeviceId] = useState<string | null>(null)
   const [lang, setLang] = useState<string>('en')
   const [receipts, setReceipts] = useState<SignedReceipt[]>([])
@@ -134,6 +172,15 @@ export default function App() {
   const [memoInput, setMemoInput] = useState('')
   const [expiryIdx, setExpiryIdx] = useState(0)
   const [shownQrId, setShownQrId] = useState<string | null>(null)
+  const [stakeOpen, setStakeOpen] = useState(false)
+  const [validators, setValidators] = useState<ValidatorInfo[]>([])
+  const [validatorsLoading, setValidatorsLoading] = useState(false)
+  const [validatorsError, setValidatorsError] = useState<string | null>(null)
+  const [selectedValidator, setSelectedValidator] = useState<string | null>(null)
+  const [stakeAmount, setStakeAmount] = useState('')
+  const [staking, setStaking] = useState(false)
+  const [stakeError, setStakeError] = useState<string | null>(null)
+  const [stakeHash, setStakeHash] = useState<string | null>(null)
 
   const toggleTheme = useCallback(() => {
     setTheme((t) => {
@@ -151,7 +198,7 @@ export default function App() {
   const fetchRates = useCallback(async () => {
     try {
       const all = await getAllFiatRates()
-      setRates({ nim: all.nim.usd, usdt: all.usdt.usd, eth: all.eth.usd, pol: all.pol.usd })
+      setFiat({ nim: all.nim, usdt: all.usdt, eth: all.eth, pol: all.pol })
     } catch (e) {
       console.warn('Rate fetch failed:', e)
       setError('Live rates unavailable — showing cached values.')
@@ -162,16 +209,38 @@ export default function App() {
     setLang(getLanguage() ?? navigator.language.split('-')[0] ?? 'en')
     // Load rates from localStorage cache immediately (no flash of $0)
     const cached = readRates()
-    setRates((p) => ({
-      ...p,
-      nim: cached.nim?.rates?.usd ?? 0,
-      usdt: cached.usdt?.rates?.usd ?? 1,
-      eth: cached.eth?.rates?.usd ?? 0,
-      pol: cached.pol?.rates?.usd ?? 0,
+    setFiat((p) => ({
+      nim: mergeRates(ZERO_RATES, cached.nim?.rates),
+      usdt: mergeRates(p.usdt, cached.usdt?.rates),
+      eth: mergeRates(ZERO_RATES, cached.eth?.rates),
+      pol: mergeRates(ZERO_RATES, cached.pol?.rates),
     }))
     // Fetch fresh rates (single consolidated request)
     fetchRates()
   }, [fetchRates])
+
+  // USD is the accounting currency: the CSV export and the tax-year statement
+  // stay in USD whatever the user picked for display (see buildCsv).
+  const rates = useMemo(
+    () => ({ nim: fiat.nim.usd, usdt: fiat.usdt.usd, eth: fiat.eth.usd, pol: fiat.pol.usd }),
+    [fiat]
+  )
+  // Display rates — the currency chosen by tapping the total value.
+  const shown = useMemo(
+    () => ({
+      nim: fiat.nim[currency] ?? 0,
+      usdt: fiat.usdt[currency] ?? 0,
+      eth: fiat.eth[currency] ?? 0,
+      pol: fiat.pol[currency] ?? 0,
+    }),
+    [fiat, currency]
+  )
+
+  const pickCurrency = useCallback((code: CurrencyCode) => {
+    setCurrency(code)
+    saveCurrency(code)
+    setCurrencyOpen(false)
+  }, [])
 
   // Toasts auto-dismiss after 4s (tap still dismisses immediately)
   useEffect(() => {
@@ -414,19 +483,107 @@ export default function App() {
   const offBalanceLuna = lockedLuna + stakedLuna + vestedLuna
   const totalNimLuna = (Number(nimBalance) || 0) + offBalanceLuna
 
-  const totalUsd = useMemo(() => {
+  const totalFiat = useMemo(() => {
     let total = 0
     if (nimBalance !== null)
-      total += (((Number(nimBalance) || 0) + offBalanceLuna) / 100000) * rates.nim
+      total += (((Number(nimBalance) || 0) + offBalanceLuna) / 100000) * shown.nim
     for (const b of evmBalances) {
       const val = Number(b.balance) / 10 ** b.decimals
       if (!Number.isFinite(val)) continue
-      if (b.symbol === 'USDT') total += val * rates.usdt
-      else if (b.symbol === 'POL') total += val * rates.pol
-      else total += val * rates.eth
+      if (b.symbol === 'USDT') total += val * shown.usdt
+      else if (b.symbol === 'POL') total += val * shown.pol
+      else total += val * shown.eth
     }
     return Number.isFinite(total) ? total : 0
-  }, [nimBalance, offBalanceLuna, evmBalances, rates])
+  }, [nimBalance, offBalanceLuna, evmBalances, shown])
+
+  // --- Staking (Nimiq Pay) ---
+
+  // Fetch the validator list the first time the panel opens (10-min cache in
+  // chain.ts, so reopening it is free).
+  useEffect(() => {
+    if (!stakeOpen || validators.length > 0) return
+    let cancelled = false
+    setValidatorsLoading(true)
+    setValidatorsError(null)
+    ;(async () => {
+      try {
+        const list = await getValidators()
+        if (!cancelled) setValidators(list)
+      } catch (e) {
+        if (cancelled) return
+        console.warn('Validator list failed:', e)
+        setValidatorsError('Validator list unavailable right now — try again shortly.')
+      } finally {
+        if (!cancelled) setValidatorsLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [stakeOpen, validators.length])
+
+  // Escape closes whichever panel is open.
+  useEffect(() => {
+    if (!stakeOpen && !currencyOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      setStakeOpen(false)
+      setCurrencyOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [stakeOpen, currencyOpen])
+
+  // A staker's delegation is fixed when the record is created, so an existing
+  // stake locks the picker to that validator — adding stake can't move it.
+  const hasStaker = !!stakingHolding
+  const lockedDelegation = stakingHolding?.delegation ? cleanAddr(stakingHolding.delegation) : null
+  const activeSelection = lockedDelegation ?? selectedValidator
+  // Only a first stake needs a choice; adding to a staker reuses its delegation.
+  const validatorChosen = hasStaker || !!selectedValidator
+  const currentValidator = useMemo(
+    () => validators.find((v) => cleanAddr(v.address) === lockedDelegation) ?? null,
+    [validators, lockedDelegation]
+  )
+  const stakeAmountNim = Number(stakeAmount)
+  const stakeAmountValid = Number.isFinite(stakeAmountNim) && stakeAmountNim > 0
+
+  const openStake = () => {
+    setStakeError(null)
+    setStakeHash(null)
+    setStakeOpen(true)
+  }
+
+  const submitStake = async () => {
+    if (!stakeAmountValid) {
+      setStakeError('Enter an amount above 0.')
+      return
+    }
+    // No staker record yet → this transaction creates one, and that is the
+    // only moment the validator can be chosen.
+    const firstStake = !stakingHolding
+    if (firstStake && !selectedValidator) {
+      setStakeError('Choose a validator first.')
+      return
+    }
+    setStaking(true)
+    setStakeError(null)
+    setStakeHash(null)
+    try {
+      const result = await stakeNim(firstStake ? selectedValidator : null, stakeAmountNim)
+      if (!result.ok) {
+        setStakeError(result.error)
+        return
+      }
+      setStakeHash(result.hash)
+      setStakeAmount('')
+      clearTxCache() // the stake tx must show up on the next History load
+      if (account) await refresh(account)
+    } finally {
+      setStaking(false)
+    }
+  }
 
   const makeReceipt = async (tx: NimiqTx) => {
     if (!account?.nimiqAddress) return
@@ -493,6 +650,9 @@ export default function App() {
   }
 
   // Shared CSV row builder — one source of truth for export + copy.
+  // Values stay in USD regardless of the display currency: an accountant's
+  // ledger is denominated in one reporting currency, and every daily close in
+  // lib/statement.ts is a USD close. The currency switcher is display only.
   const buildCsv = () => {
     if (!account?.nimiqAddress) return ''
     const own = account.nimiqAddress.replace(/\s+/g, '').toUpperCase()
@@ -571,6 +731,13 @@ export default function App() {
     setAmountInput('')
     setMemoInput('')
     setShownQrId(null)
+    setStakeOpen(false)
+    setCurrencyOpen(false)
+    setSelectedValidator(null)
+    setStakeAmount('')
+    setStakeError(null)
+    setStakeHash(null)
+    // The display currency is a device preference, not account data — it stays.
   }
 
   // Tax-year statement: recompute when txs / account / period change.
@@ -696,6 +863,9 @@ export default function App() {
     )
   }
 
+  const demoMode = isDemoMode()
+  const inNimiqPay = isInNimiqPay()
+
   return (
     <div className="app">
       <header className="topbar">
@@ -707,6 +877,18 @@ export default function App() {
           title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
         >
           {theme === 'dark' ? '☀️' : '🌙'}
+        </button>
+        <button
+          className="btn-ghost"
+          onClick={openStake}
+          disabled={demoMode}
+          title={demoMode ? 'Demo mode is read-only' : 'Stake'}
+          aria-label="Stake"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.52-4.48 10-10 10Z" />
+            <path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12" />
+          </svg>
         </button>
         <button className="btn-ghost" onClick={() => refresh(account)} disabled={loading} title="Refresh" aria-label="Refresh">
           {loading ? (
@@ -765,10 +947,15 @@ export default function App() {
           <section className="dashboard">
             <div className="card total">
               <span className="label">Total value</span>
-              <span className="value">
-                {totalUsd > 0 && totalUsd < 0.01 ? `$${totalUsd.toFixed(4)}` : `$${totalUsd.toFixed(2)}`}
-              </span>
-              <span className="sub">≈ USD · {lang}</span>
+              <button
+                type="button"
+                className="value value-btn"
+                onClick={() => setCurrencyOpen(true)}
+                title="Tap to change currency"
+              >
+                {formatFiat(totalFiat, currency)}
+              </button>
+              <span className="sub">≈ {currency.toUpperCase()} · {lang}</span>
             </div>
 
             <div className="card">
@@ -816,13 +1003,15 @@ export default function App() {
                       <span>{formatLuna(String(totalNimLuna), lang)} NIM</span>
                     </div>
                   </div>
-                  <span className="sub">≈ ${((totalNimLuna / 100000) * rates.nim).toFixed(4)}</span>
+                  <span className="sub">
+                    ≈ {formatFiat((totalNimLuna / 100000) * shown.nim, currency, 4)}
+                  </span>
                 </>
               ) : (
                 <>
                   <span className="value">{formatLuna(nimBalance, lang)} NIM</span>
                   <span className="sub">
-                    ≈ ${((Number(nimBalance) / 100000) * rates.nim).toFixed(4)}
+                    ≈ {formatFiat((Number(nimBalance) / 100000) * shown.nim, currency, 4)}
                   </span>
                 </>
               )}
@@ -1304,6 +1493,203 @@ export default function App() {
           </section>
         )}
       </main>
+
+      {currencyOpen && (
+        <div className="modal-overlay" onClick={() => setCurrencyOpen(false)}>
+          <div
+            className="modal small"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Display currency"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-head">
+              <h2>Display currency</h2>
+              <button className="btn-ghost" onClick={() => setCurrencyOpen(false)} aria-label="Close">
+                ✕
+              </button>
+            </div>
+            <div className="currency-grid" role="radiogroup" aria-label="Display currency">
+              {CURRENCIES.map((c) => (
+                // Buttons rather than <input type="radio">: tapping the tile
+                // that is already selected has to dismiss the sheet too, and a
+                // radio fires no change event for that.
+                <button
+                  key={c.code}
+                  type="button"
+                  role="radio"
+                  aria-checked={c.code === currency}
+                  className={c.code === currency ? 'currency-tile selected' : 'currency-tile'}
+                  onClick={() => pickCurrency(c.code)}
+                >
+                  <span className="currency-flag" aria-hidden="true">
+                    <img
+                      src={`/flags/flag-${c.flag}.svg`}
+                      alt=""
+                      loading="lazy"
+                      width={28}
+                      height={28}
+                    />
+                  </span>
+                  <span className="currency-code">{c.label}</span>
+                </button>
+              ))}
+            </div>
+            <p className="hint small">
+              Display only — CSV exports and the tax-year statement stay in USD.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {stakeOpen && (
+        <div className="modal-overlay" onClick={() => setStakeOpen(false)}>
+          <div
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Stake NIM"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-head">
+              <h2>Stake NIM</h2>
+              <button className="btn-ghost" onClick={() => setStakeOpen(false)} aria-label="Close">
+                ✕
+              </button>
+            </div>
+
+            <div className="stake-status">
+              <span className="label">Your stake</span>
+              {stakingHolding && stakedLuna > 0 ? (
+                <>
+                  <span className="value">{formatLuna(String(stakedLuna), lang)} NIM</span>
+                  <span className="sub">
+                    →{' '}
+                    {currentValidator?.name ??
+                      (lockedDelegation ? `${lockedDelegation.slice(0, 12)}…` : 'unknown validator')}
+                  </span>
+                  {currentValidator && currentValidator.reliability === null && (
+                    <p className="hint small warn">
+                      This validator is not producing rewards right now.
+                    </p>
+                  )}
+                </>
+              ) : (
+                <span className="value dim">No active stake</span>
+              )}
+            </div>
+
+            {!inNimiqPay ? (
+              <>
+                <p className="hint">
+                  Staking is signed by your wallet, so it runs in the Nimiq Pay app. Open NimBooks
+                  there to delegate your NIM.
+                </p>
+                <a
+                  className="btn-primary btn-link"
+                  href={NIMIQ_PAY_APP_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Open in Nimiq Pay →
+                </a>
+              </>
+            ) : (
+              <>
+                <span className="label stake-section">Validator</span>
+                {hasStaker && (
+                  <p className="hint small">
+                    Your stake is already delegated — adding to it keeps the same validator.
+                  </p>
+                )}
+                {validatorsLoading && validators.length === 0 && (
+                  <p className="empty">Loading validators…</p>
+                )}
+                {validatorsError && <p className="hint small warn">{validatorsError}</p>}
+                {validators.length > 0 && (
+                  <div className="option-list validator-list" role="radiogroup" aria-label="Validator">
+                    {validators.map((v) => {
+                      const addr = cleanAddr(v.address)
+                      const fee = formatValidatorFee(v.fee)
+                      const reliability = formatValidatorReliability(v.reliability)
+                      const reward = formatValidatorReward(v.annualReward)
+                      return (
+                        <button
+                          key={addr}
+                          type="button"
+                          role="radio"
+                          aria-checked={activeSelection === addr}
+                          disabled={hasStaker}
+                          onClick={() => setSelectedValidator(addr)}
+                          className={[
+                            'option-row',
+                            activeSelection === addr ? 'selected' : '',
+                            v.reliability === null ? 'inactive' : '',
+                          ]
+                            .filter(Boolean)
+                            .join(' ')}
+                        >
+                          <span className="option-dot" aria-hidden="true" />
+                          <span className="option-main">
+                            <strong>{v.name}</strong>
+                            <span className="option-meta">
+                              {reward ? reward : 'yield n/a'}
+                              {fee ? ` · fee ${fee}` : ''}
+                              {reliability ? ` · reliability ${reliability}` : ''}
+                            </span>
+                            {v.reliability === null && (
+                              <span className="badge inactive">
+                                inactive — not producing rewards
+                              </span>
+                            )}
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+
+                <label className="label stake-section" htmlFor="stakeAmount">
+                  Amount (NIM)
+                </label>
+                <input
+                  id="stakeAmount"
+                  className="input"
+                  type="text"
+                  inputMode="decimal"
+                  autoComplete="off"
+                  placeholder="0.00"
+                  value={stakeAmount}
+                  onChange={(e) => setStakeAmount(e.target.value)}
+                />
+                <span className="hint small">
+                  {stakeAmountValid
+                    ? `≈ ${formatFiat(stakeAmountNim * shown.nim, currency)} · ${Math.round(
+                        stakeAmountNim * 100000
+                      ).toLocaleString(lang)} Luna`
+                    : 'Staked NIM keeps earning while it stays delegated.'}
+                </span>
+
+                {stakeError && <p className="hint small warn">{stakeError}</p>}
+                {stakeHash && (
+                  <p className="hint small ok">
+                    Stake submitted ✓ <span className="mono">{stakeHash.slice(0, 20)}…</span>
+                  </p>
+                )}
+
+                <button
+                  className="btn-primary stake-submit"
+                  onClick={submitStake}
+                  disabled={!canStake() || staking || !stakeAmountValid || !validatorChosen}
+                >
+                  {staking ? 'Submitting…' : hasStaker ? 'Add to stake' : 'Stake'}
+                </button>
+                <p className="hint small">Switching validator and unstaking are coming soon.</p>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
