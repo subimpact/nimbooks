@@ -1832,7 +1832,9 @@ export default function App() {
                 ) : (
                   <div className="stake-empty">
                     <p className="hint small">
-                      No spendable NIM in this wallet to stake. Send NIM to this address first:
+                      {hasStaker
+                        ? `Your ${formatLuna(String(retireableLuna), lang)} NIM is already staked — staked NIM can't be re-staked. To stake more, send NIM to this address first:`
+                        : 'No spendable NIM in this wallet to stake. Send NIM to this address first:'}
                     </p>
                     <p className="mono stake-empty-addr">{account?.nimiqAddress}</p>
                     <button
