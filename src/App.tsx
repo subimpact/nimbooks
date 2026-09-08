@@ -868,6 +868,25 @@ export default function App() {
     }
     setTimeout(revoke, 10000)
     window.addEventListener('pagehide', revoke, { once: true })
+    // Inside Nimiq Pay's WebView there is often no download listener — the
+    // anchor click silently does nothing. Open the CSV in a new window/tab
+    // instead: WebView clients usually route target=_blank to the system
+    // browser, where the user can view and save it. A data: URL is used here
+    // because blob: URLs don't survive the cross-process hop to the system
+    // browser. Clipboard as last resort.
+    if (window.nimiqPay) {
+      const dataUrl = `data:text/csv;charset=utf-8,${encodeURIComponent(csv)}`
+      const opened = window.open(dataUrl, '_blank')
+      if (opened) {
+        return
+      }
+      try {
+        await navigator.clipboard.writeText(csv)
+        setToast('Download may not work in this app — CSV copied to clipboard instead ✓')
+      } catch {
+        /* clipboard also unavailable — nothing more we can do */
+      }
+    }
   }
 
   const exportCsv = () => {
@@ -1701,9 +1720,27 @@ export default function App() {
                       <span>{statement.totals.txCount}</span>
                     </div>
                   </div>
-                  <button className="btn-primary" onClick={exportStatementCsv}>
-                    Download statement CSV ({statement.period})
-                  </button>
+                  <div className="statement-actions">
+                    <button className="btn-primary" onClick={exportStatementCsv}>
+                      Download statement CSV ({statement.period})
+                    </button>
+                    <button
+                      className="btn-secondary"
+                      onClick={async () => {
+                        if (!account?.nimiqAddress || !statement) return
+                        try {
+                          await navigator.clipboard.writeText(
+                            buildStatementCsv(statement, account.nimiqAddress)
+                          )
+                          setToast('Statement CSV copied to clipboard!')
+                        } catch {
+                          setError('Could not copy statement — use Download instead.')
+                        }
+                      }}
+                    >
+                      Copy CSV
+                    </button>
+                  </div>
                 </>
               )}
               {!statementLoading && !statement && allTxs.length === 0 && (
