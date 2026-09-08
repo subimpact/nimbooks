@@ -19,6 +19,11 @@ export interface NimiqTx {
   // Recipient account type: 0 = basic, 1 = vesting contract, 2 = HTLC
   // (Nimiq Pay swaps), 3 = the staking contract.
   toType?: number
+  // Set on rows synthesized from an API that isn't the tx index — staking
+  // reward rollups (lib/stakingEvents.ts). These have no on-chain hash, so
+  // `hash` is a synthetic key: never link it to the explorer or sign it into a
+  // receipt. The value is the kind the row represents.
+  synthetic?: TxKind
 }
 
 async function rpcCall(method: string, params: unknown[], timeoutMs = 10000): Promise<any> {
@@ -847,6 +852,9 @@ const VALIDATOR_REWARD_PREFIX = 'NQ81 C01N BASE'
 export type TxKind = 'payment' | 'stake' | 'unstake' | 'reward' | 'fee' | 'unknown'
 
 export function classifyTx(tx: NimiqTx, ownAddress: string): TxKind {
+  // Synthesized rows carry their kind: a restaked reward is paid by the
+  // validator's own address, which no address rule can tell from a payment.
+  if (tx.synthetic) return tx.synthetic
   const own = cleanAddress(ownAddress).toUpperCase()
   const sender = cleanAddress(tx.sender).toUpperCase()
   const recipient = cleanAddress(tx.recipient).toUpperCase()

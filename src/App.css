@@ -1245,6 +1245,12 @@ a.btn-ghost.btn-link {
   border-radius: var(--radius-sm);
   background: var(--card);
 }
+.unstaking-row {
+  color: var(--muted);
+}
+.unstaking-row span:last-child {
+  color: var(--warn, #e8a33d);
+}
 .stake-empty {
   margin-top: 4px;
   padding: 10px 12px;

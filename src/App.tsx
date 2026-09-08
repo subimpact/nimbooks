@@ -63,6 +63,7 @@ import {
   upsertInvoice,
   type StoredInvoice,
 } from './lib/invoice'
+import { getRestakeRewardTxs, restakeWindow } from './lib/stakingEvents'
 import { isInNimiqPay, isMobileDevice, NIMIQ_PAY_APP_URL } from './lib/device'
 import QrCode from './QrCode'
 import Analytics, { type AnalyticsPeriod } from './Analytics'
@@ -141,6 +142,9 @@ export default function App() {
   const [analyticsPeriod, setAnalyticsPeriod] = useState<AnalyticsPeriod>(30)
   const [nimBalance, setNimBalance] = useState<string | null>(null)
   const [nimTxs, setNimTxs] = useState<NimiqTx[]>([])
+  // Staking rewards, synthesized as History rows (one per UTC day per
+  // validator) from the v2 events API — the tx index doesn't carry them.
+  const [rewardTxs, setRewardTxs] = useState<NimiqTx[]>([])
   const [htlcHoldings, setHtlcHoldings] = useState<HtlcHolding[]>([])
   const [stakingHolding, setStakingHolding] = useState<StakingHolding | null>(null)
   const [vestingHoldings, setVestingHoldings] = useState<VestingHolding[]>([])
@@ -461,6 +465,16 @@ export default function App() {
           console.warn('Vesting holdings lookup failed:', e)
           setVestingHoldings([])
         }
+        // Reward income lives in a separate v2 API (the tx index has no
+        // staking activity at all). Additive and already failure-tolerant —
+        // a non-staker simply has none.
+        try {
+          const { fromMs, toMs } = restakeWindow()
+          setRewardTxs(await getRestakeRewardTxs(acc.nimiqAddress, fromMs, toMs))
+        } catch (e) {
+          console.warn('Restake events lookup failed:', e)
+          setRewardTxs([])
+        }
       }
       if (acc.evmAddress) {
         const evm = await getEvmBalances(acc.evmAddress)
@@ -472,6 +486,15 @@ export default function App() {
       setLoading(false)
     }
   }
+
+  // One ledger for everything that counts as a transaction: indexed txs plus
+  // the synthesized reward rows, newest first. History, the CSV and the
+  // statement all read this, so they can never disagree about income.
+  // (The balance trajectory in Analytics is the exception — see below.)
+  const allTxs = useMemo(() => {
+    if (rewardTxs.length === 0) return nimTxs
+    return [...nimTxs, ...rewardTxs].sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
+  }, [nimTxs, rewardTxs])
 
   // Luna locked in pending swaps — sits outside the basic account balance.
   const lockedLuna = useMemo(
@@ -787,7 +810,7 @@ export default function App() {
     const own = account.nimiqAddress.replace(/\s+/g, '').toUpperCase()
     const rows = [
       ['timestamp', 'txHash', 'type', 'kind', 'sender', 'recipient', 'amountNIM', 'feeNIM', 'valueUSD_indicative', 'memo'],
-      ...nimTxs
+      ...allTxs
         // Failed/reverted txs are not real transfers — exclude from statements
         .filter((t) => t.executionResult !== false)
         .map((t) => {
@@ -870,6 +893,7 @@ export default function App() {
     setAccount(null)
     setNimBalance(null)
     setNimTxs([])
+    setRewardTxs([])
     setHtlcHoldings([])
     setStakingHolding(null)
     setVestingHoldings([])
@@ -1127,7 +1151,7 @@ export default function App() {
                         <span>{formatLuna(String(lockedLuna), lang)} NIM</span>
                       </div>
                     )}
-                    {stakedLuna > 0 && (
+                    {retireableLuna > 0 && (
                       <div className="row">
                         <span>
                           Staked
@@ -1144,7 +1168,19 @@ export default function App() {
                             </span>
                           )}
                         </span>
-                        <span>{formatLuna(String(stakedLuna), lang)} NIM</span>
+                        <span>{formatLuna(String(retireableLuna), lang)} NIM</span>
+                      </div>
+                    )}
+                    {inactiveLuna > 0 && (
+                      <div className="row unstaking-row">
+                        <span>Unstaking (cooling down)</span>
+                        <span>{formatLuna(String(inactiveLuna), lang)} NIM</span>
+                      </div>
+                    )}
+                    {retiredLuna > 0 && (
+                      <div className="row unstaking-row">
+                        <span>Ready to withdraw</span>
+                        <span>{formatLuna(String(retiredLuna), lang)} NIM</span>
                       </div>
                     )}
                     {vestedLuna > 0 && (
