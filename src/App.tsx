@@ -711,7 +711,9 @@ export default function App() {
           <section className="dashboard">
             <div className="card total">
               <span className="label">Total value</span>
-              <span className="value">${totalUsd.toFixed(2)}</span>
+              <span className="value">
+                {totalUsd > 0 && totalUsd < 0.01 ? `$${totalUsd.toFixed(4)}` : `$${totalUsd.toFixed(2)}`}
+              </span>
               <span className="sub">≈ USD · {lang}</span>
             </div>
 
