@@ -263,7 +263,8 @@ a:focus-visible {
 /* Tabs — floating dock overlay, anchored to the bottom, never pushes content */
 .tabs {
   display: flex;
-  gap: 6px;
+  /* 5 tabs have to fit a 320px screen — every pixel of gap counts. */
+  gap: 4px;
   margin-bottom: 16px;
   overflow-x: auto;
   position: fixed;
@@ -296,18 +297,30 @@ a:focus-visible {
 .tab {
   flex: 1;
   min-width: 0;
-  padding: 10px 2px;
+  padding: 10px 1px;
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--muted);
   font-size: 12px;
   font-weight: 600;
+  letter-spacing: -0.01em;
   cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   transition: background 0.15s ease, color 0.15s ease;
+}
+/* Narrow phones (320–360px): shrink the labels rather than clip them. */
+@media (max-width: 374px) {
+  .tabs {
+    gap: 2px;
+    padding: 5px;
+  }
+  .tab {
+    font-size: 11px;
+    letter-spacing: -0.02em;
+  }
 }
 .tab:hover {
   background: var(--card);
@@ -761,6 +774,147 @@ a.btn-ghost.btn-link {
 .statement-summary .row.strong {
   font-weight: 700;
   color: var(--text);
+}
+
+/* Payment requests (Request tab + invoice page) */
+.invoice-form .label {
+  margin-top: 12px;
+}
+.invoice-form .label:first-child {
+  margin-top: 0;
+}
+.input,
+.invoice-form .select {
+  width: 100%;
+  background: var(--bg-elev);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-size: 15px;
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+}
+.input::placeholder {
+  color: var(--muted);
+}
+.input:focus-visible,
+.invoice-form .select:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+  border-color: var(--accent);
+}
+.invoice-form .hint.small {
+  display: block;
+}
+.invoice-form .hint.small.warn {
+  color: var(--red);
+}
+.invoice-form .btn-primary {
+  margin-top: 16px;
+}
+
+.invoice-item {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+}
+.invoice-pill {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  background: var(--card-2);
+  white-space: nowrap;
+}
+.invoice-pill.paid {
+  color: var(--green);
+  border-color: var(--ok-border);
+}
+.invoice-pill.pending {
+  color: var(--accent-2);
+}
+.invoice-pill.expired {
+  color: var(--red);
+  border-color: var(--bad-border);
+}
+.invoice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.invoice-actions .btn-small {
+  margin-top: 8px;
+}
+.btn-small.danger {
+  color: var(--red);
+}
+.invoice-qr {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 12px;
+}
+.qr {
+  display: block;
+  width: 100%;
+  max-width: 200px;
+  height: auto;
+  border-radius: var(--radius-xs);
+  /* White quiet zone is part of the code — keep a light frame in both themes */
+  background: #fff;
+  padding: 6px;
+  box-shadow: var(--shadow);
+}
+.invoice-card .invoice-amount {
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 4px 0 8px;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.invoice-card .invoice-unit {
+  font-size: 18px;
+  color: var(--muted);
+  font-weight: 600;
+}
+.invoice-card .invoice-pill {
+  display: inline-block;
+  margin-bottom: 16px;
+}
+.invoice-confirm {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px 12px;
+  background: var(--bg-elev);
+  margin: 12px 0;
+}
+.invoice-confirm .row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+}
+.invoice-confirm .row:last-child {
+  border-bottom: none;
+}
+.invoice-sent {
+  border: 1px solid var(--ok-border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  margin-top: 12px;
+}
+.invoice-sent .hint.small {
+  margin-top: 6px;
 }
 
 /* Print: clean receipt slip, no chrome */
