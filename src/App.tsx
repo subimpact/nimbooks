@@ -752,16 +752,46 @@ export default function App() {
 
             <div className="card">
               <span className="label">Addresses</span>
-              {account.nimiqAddress && (
-                <div className="addr" title={account.nimiqAddress}>
-                  NIM: {account.nimiqAddress.slice(0, 12)}…
-                </div>
-              )}
-              {account.evmAddress && (
-                <div className="addr" title={account.evmAddress}>
-                  EVM: {account.evmAddress.slice(0, 10)}…
-                </div>
-              )}
+              {account.nimiqAddress && (() => {
+                const addr = account.nimiqAddress
+                return (
+                  <button
+                    type="button"
+                    className="addr"
+                    title="Tap to copy full address"
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(addr)
+                        setToast('NIM address copied!')
+                      } catch {
+                        setError('Could not copy — long-press the address instead.')
+                      }
+                    }}
+                  >
+                    NIM: {addr.slice(0, 12)}…
+                  </button>
+                )
+              })()}
+              {account.evmAddress && (() => {
+                const addr = account.evmAddress
+                return (
+                  <button
+                    type="button"
+                    className="addr"
+                    title="Tap to copy full address"
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(addr)
+                        setToast('EVM address copied!')
+                      } catch {
+                        setError('Could not copy — long-press the address instead.')
+                      }
+                    }}
+                  >
+                    EVM: {addr.slice(0, 10)}…
+                  </button>
+                )
+              })()}
             </div>
 
             <Analytics

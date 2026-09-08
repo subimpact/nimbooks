@@ -380,6 +380,15 @@ a:focus-visible {
   color: var(--muted);
   padding: 4px 0;
   word-break: break-all;
+  background: none;
+  border: none;
+  text-align: left;
+  width: 100%;
+  cursor: pointer;
+  display: block;
+}
+.addr:active {
+  opacity: 0.6;
 }
 
 /* Transactions */
