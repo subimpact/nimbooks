@@ -559,6 +559,10 @@ export default function App() {
   )
   const stakeAmountNim = Number(stakeAmount)
   const stakeAmountValid = Number.isFinite(stakeAmountNim) && stakeAmountNim > 0
+  // Slider ceiling: the liquid NIM balance (basic account) after parked HTLC
+  // funds — staking spends only what the wallet is holding as spendable NIM.
+  const stakeMaxLuna = Math.max(0, (Number(nimBalance) || 0) - lockedLuna)
+  const stakeMaxNim = stakeMaxLuna / 100000
 
   const openStake = () => {
     setStakeError(null)
@@ -596,11 +600,15 @@ export default function App() {
     }
   }
 
-  const retiredLuna = Number(stakingHolding?.retired || 0)
+  // Active stake can be retired into the cooldown right away; inactive is
+  // cooling down; retired has finished cooling and can be withdrawn 1:1.
+  // All three are "un-stakeable" from the user's perspective — the flows are
+  // just different transactions.
+  const retireableLuna = Number(stakingHolding?.active || 0)
   const inactiveLuna = Number(stakingHolding?.inactive || 0)
-  // After the cooldown, retired stake can be withdrawn 1:1 — that is the
-  // amount the withdraw path accepts. Inactive is still cooling down.
-  const withdrawableLuna = retiredLuna
+  const retiredLuna = Number(stakingHolding?.retired || 0)
+  const maxUnstakeableLuna = retireableLuna + inactiveLuna + retiredLuna
+  const unstakeMaxNim = maxUnstakeableLuna / 100000
 
   const submitUnstake = async () => {
     const amountNim = Number(unstakeAmount)
@@ -608,39 +616,53 @@ export default function App() {
       setUnstakeError('Enter an amount above 0.')
       return
     }
-    if (amountNim * 100000 > withdrawableLuna + inactiveLuna) {
+    if (amountNim * 100000 > maxUnstakeableLuna) {
       setUnstakeError(
-        `You can unstake up to ${formatLuna(String(withdrawableLuna + inactiveLuna), lang)} NIM.`
+        `You can unstake up to ${formatLuna(String(maxUnstakeableLuna), lang)} NIM.`
       )
       return
     }
-    // First withdraw anything already retired (freed from cooldown), then
-    // retire fresh stake if more was requested.
     setUnstaking(true)
     setUnstakeError(null)
     setUnstakeHash(null)
     try {
-      if (retiredLuna > 0) {
-        const removeNim = Math.min(amountNim, retiredLuna / 100000)
+      let remainingNim = amountNim
+      // 1. Withdraw anything already fully cooled (retired → basic balance).
+      if (retiredLuna > 0 && remainingNim > 0) {
+        const removeNim = Math.min(remainingNim, retiredLuna / 100000)
         const remove = await unstakeRemove(removeNim)
         if (!remove.ok) {
           setUnstakeError(remove.error)
           return
         }
         setUnstakeHash(remove.hash)
+        remainingNim -= removeNim
       }
-      const remainingNim = amountNim - Math.min(amountNim, retiredLuna / 100000)
-      if (remainingNim > 0) {
-        const retire = await unstakeRetire(remainingNim)
+      // 2. Retire the rest from ACTIVE stake into the cooldown. This is the
+      //    path for live stake — it stops earning and starts the reporting
+      //    window, after which it becomes withdrawable.
+      if (remainingNim > 0 && retireableLuna > 0) {
+        const retireNim = Math.min(remainingNim, retireableLuna / 100000)
+        const retire = await unstakeRetire(retireNim)
         if (!retire.ok) {
           setUnstakeError(retire.error)
           return
         }
         setUnstakeHash(retire.hash)
+        remainingNim -= retireNim
       }
-      setUnstakeAmount('')
-      clearTxCache()
-      if (account) await refresh(account)
+      // 3. Anything left was already cooling down (inactive) — no tx needed,
+      //    it becomes withdrawable on its own after the reporting window.
+      if (remainingNim > 0) {
+        setUnstakeError(
+          `${formatLuna(String(remainingNim * 100000), lang)} NIM is still cooling down — it becomes withdrawable after the reporting window with no action needed.`
+        )
+      }
+      if (remainingNim < amountNim) {
+        setUnstakeAmount('')
+        clearTxCache()
+        if (account) await refresh(account)
+      }
     } finally {
       setUnstaking(false)
     }
@@ -1235,6 +1257,19 @@ export default function App() {
                 </p>
               </div>
             )}
+            {stakingHolding && (Number(stakingHolding.active) > 0 || Number(stakingHolding.inactive) > 0 || Number(stakingHolding.retired) > 0) && (
+              <p className="hint small stake-history-note">
+                Staking transactions are not exposed by the public chain index, so they
+                don't appear below — your staker record is live:{' '}
+                <strong>
+                  {formatLuna(stakingHolding.active, lang)} NIM active
+                  {Number(stakingHolding.inactive) > 0 &&
+                    ` · ${formatLuna(stakingHolding.inactive, lang)} NIM cooling down`}
+                  {Number(stakingHolding.retired) > 0 &&
+                    ` · ${formatLuna(stakingHolding.retired, lang)} NIM withdrawable`}
+                </strong>
+              </p>
+            )}
             {loading && nimTxs.length === 0 && <p className="empty">Loading transactions…</p>}
             {!loading && nimTxs.length === 0 && (
               <p className="empty">No transactions found for this address.</p>
@@ -1719,22 +1754,34 @@ export default function App() {
                 <label className="label stake-section" htmlFor="stakeAmount">
                   Amount (NIM)
                 </label>
-                <input
-                  id="stakeAmount"
-                  className="input"
-                  type="text"
-                  inputMode="decimal"
-                  autoComplete="off"
-                  placeholder="0.00"
-                  value={stakeAmount}
-                  onChange={(e) => setStakeAmount(e.target.value)}
-                />
+                <div className="stake-slider-row">
+                  <input
+                    id="stakeAmount"
+                    className="stake-slider"
+                    type="range"
+                    min={0}
+                    max={stakeMaxNim}
+                    step={0.1}
+                    value={Math.min(stakeAmountNim, stakeMaxNim)}
+                    onChange={(e) => setStakeAmount(e.target.value)}
+                    aria-label="Stake amount"
+                  />
+                  <span className="stake-slider-value">
+                    {stakeAmountValid ? stakeAmountNim.toLocaleString(lang) : '0'} NIM
+                    {stakeMaxNim > 0 && (
+                      <span className="stake-pct">
+                        {' '}
+                        ({Math.round((stakeAmountNim / stakeMaxNim) * 100)}%)
+                      </span>
+                    )}
+                  </span>
+                </div>
                 <span className="hint small">
                   {stakeAmountValid
                     ? `≈ ${formatFiat(stakeAmountNim * shown.nim, currency)} · ${Math.round(
                         stakeAmountNim * 100000
                       ).toLocaleString(lang)} Luna`
-                    : 'Staked NIM keeps earning while it stays delegated.'}
+                    : `Available to stake: ${formatLuna(String(stakeMaxLuna), lang)} NIM`}
                 </span>
 
                 {stakeError && <p className="hint small warn">{stakeError}</p>}
@@ -1763,19 +1810,32 @@ export default function App() {
                     {unstakeOpen && (
                       <div className="unstake-box">
                         <span className="label stake-section">Unstake (NIM)</span>
-                        <input
-                          className="input"
-                          type="text"
-                          inputMode="decimal"
-                          autoComplete="off"
-                          placeholder="0.00"
-                          value={unstakeAmount}
-                          onChange={(e) => setUnstakeAmount(e.target.value)}
-                        />
+                        <div className="stake-slider-row">
+                          <input
+                            id="unstakeAmount"
+                            className="stake-slider"
+                            type="range"
+                            min={0}
+                            max={unstakeMaxNim}
+                            step={0.1}
+                            value={Math.min(Number(unstakeAmount), unstakeMaxNim)}
+                            onChange={(e) => setUnstakeAmount(e.target.value)}
+                            aria-label="Unstake amount"
+                          />
+                          <span className="stake-slider-value">
+                            {unstakeAmount ? Number(unstakeAmount).toLocaleString(lang) : '0'} NIM
+                            {unstakeMaxNim > 0 && (
+                              <span className="stake-pct">
+                                {' '}
+                                ({Math.round((Number(unstakeAmount) / unstakeMaxNim) * 100)}%)
+                              </span>
+                            )}
+                          </span>
+                        </div>
                         <span className="hint small">
                           {inactiveLuna > 0
                             ? `${formatLuna(String(inactiveLuna), lang)} NIM cooling down — becomes withdrawable after the reporting window.`
-                            : 'Unstake moves NIM into a cooldown; after the reporting window the same amount becomes withdrawable.'}
+                            : 'Unstake retires active stake into a cooldown; after the reporting window the same amount becomes withdrawable.'}
                           {retiredLuna > 0 &&
                             ` ${formatLuna(String(retiredLuna), lang)} NIM already withdrawable.`}
                         </span>

@@ -1196,6 +1196,36 @@ a.btn-ghost.btn-link {
   margin-top: 10px;
   width: 100%;
 }
+.stake-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 4px;
+}
+.stake-slider {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--accent, #07c1ff);
+  height: 28px;
+}
+.stake-slider-value {
+  flex: none;
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.stake-pct {
+  color: var(--muted);
+  font-weight: 500;
+}
+.stake-history-note {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+}
 .unstake-box {
   margin-top: 4px;
   border: 1px dashed var(--border);
