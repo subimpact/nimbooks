@@ -1085,7 +1085,7 @@ export default function App() {
                       <span>
                         {(statement.totals.sentNim + statement.totals.feeNim).toFixed(5)} NIM
                         {statement.totals.sentUsd !== null &&
-                          ` · $${(statement.totals.sentUsd + (statement.totals.feeNim * (statement.rows[0]?.closeUsd ?? 0))).toFixed(2)}`}
+                          ` · $${(statement.totals.sentUsd + statement.totals.feeNim * (statement.rows[0]?.closeUsd ?? 0)).toFixed(4)}`}
                       </span>
                     </div>
                     <div className="row">
@@ -1105,7 +1105,7 @@ export default function App() {
                     </div>
                   </div>
                   <button className="btn-primary" onClick={exportStatementCsv}>
-                    Download statement CSV ({statement.rows.length} days)
+                    Download statement CSV ({statement.period})
                   </button>
                 </>
               )}
