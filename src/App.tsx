@@ -5,6 +5,7 @@ import {
   connectWallet,
   connectHub,
   connectDemoAccount,
+  disconnectWallet,
   isDemoMode,
   getDeviceId,
   getLanguage,
@@ -25,6 +26,22 @@ import {
   type EvmBalance,
 } from './lib/chain'
 import { encodeReceipt, type SignedReceipt } from './lib/receipt'
+import {
+  EXPIRY_OPTIONS,
+  MAX_MEMO_CHARS,
+  formatLunaExact,
+  invoiceStatus,
+  invoiceUrl,
+  loadInvoices,
+  newInvoiceId,
+  parseInvoiceMemo,
+  parseNimToLuna,
+  saveInvoices,
+  upsertInvoice,
+  type StoredInvoice,
+} from './lib/invoice'
+import { isInNimiqPay, isMobileDevice, NIMIQ_PAY_APP_URL } from './lib/device'
+import QrCode from './QrCode'
 import Analytics, { type AnalyticsPeriod } from './Analytics'
 import {
   availableStatementYears,
@@ -34,7 +51,7 @@ import {
   type Statement,
 } from './lib/statement'
 
-type View = 'dashboard' | 'history' | 'receipts' | 'export'
+type View = 'dashboard' | 'history' | 'receipts' | 'request' | 'export'
 
 const RATES_KEY = 'nimbooks:rates'
 
@@ -101,6 +118,11 @@ export default function App() {
   const [statementYear, setStatementYear] = useState<string>('all')
   const [statement, setStatement] = useState<Statement | null>(null)
   const [statementLoading, setStatementLoading] = useState(false)
+  const [invoices, setInvoices] = useState<StoredInvoice[]>([])
+  const [amountInput, setAmountInput] = useState('')
+  const [memoInput, setMemoInput] = useState('')
+  const [expiryIdx, setExpiryIdx] = useState(0)
+  const [shownQrId, setShownQrId] = useState<string | null>(null)
 
   const toggleTheme = useCallback(() => {
     setTheme((t) => {
@@ -162,6 +184,110 @@ export default function App() {
       setReceipts([])
     }
   }, [receiptsKey, account?.nimiqAddress])
+
+  // Load payment requests scoped to the connected account
+  useEffect(() => {
+    if (!account?.nimiqAddress) return
+    setInvoices(loadInvoices(account.nimiqAddress))
+  }, [account?.nimiqAddress])
+
+  // Auto-reconcile: a received transaction tagged `nimbooks:invoice:<id>`
+  // marks that request paid without the user lifting a finger.
+  useEffect(() => {
+    if (!account?.nimiqAddress || invoices.length === 0 || nimTxs.length === 0) return
+    let changed = false
+    const next = invoices.map((inv) => {
+      if (inv.paid || inv.role !== 'payee') return inv
+      const payee = inv.payee.replace(/\s+/g, '').toUpperCase()
+      const match = nimTxs.find((t) => {
+        if (t.executionResult === false) return false
+        if (parseInvoiceMemo(decodeMemo(t.data)) !== inv.id) return false
+        if (t.recipient.replace(/\s+/g, '').toUpperCase() !== payee) return false
+        // Underpayments stay open — only a full payment settles the request.
+        return /^\d+$/.test(String(t.value)) && BigInt(t.value) >= BigInt(inv.amountNim)
+      })
+      if (!match) return inv
+      changed = true
+      return { ...inv, paid: true, paidTxHash: match.hash, paidAt: match.timestamp ?? Date.now() }
+    })
+    if (changed) {
+      setInvoices(next)
+      saveInvoices(account.nimiqAddress, next)
+    }
+  }, [nimTxs, invoices, account?.nimiqAddress])
+
+  const createInvoice = () => {
+    if (!account?.nimiqAddress) return
+    const luna = parseNimToLuna(amountInput)
+    if (!luna) {
+      setError('Enter an amount above 0 with at most 5 decimals (max 2,000,000,000 NIM).')
+      return
+    }
+    const memo = memoInput.trim().slice(0, MAX_MEMO_CHARS)
+    const expiry = EXPIRY_OPTIONS[expiryIdx]?.ms ?? null
+    const now = Date.now()
+    const invoice: StoredInvoice = {
+      app: 'nimbooks',
+      v: 1,
+      id: newInvoiceId(),
+      payee: account.nimiqAddress.replace(/\s+/g, '').toUpperCase(),
+      amountNim: luna,
+      ...(memo ? { memo } : {}),
+      createdAt: now,
+      ...(expiry ? { expiresAt: now + expiry } : {}),
+      role: 'payee',
+    }
+    setInvoices(upsertInvoice(account.nimiqAddress, invoice))
+    setAmountInput('')
+    setMemoInput('')
+    setShownQrId(invoice.id)
+    setToast('Payment request created ✓')
+  }
+
+  const shareInvoice = async (invoice: StoredInvoice) => {
+    const url = invoiceUrl(invoice)
+    const amount = formatLunaExact(invoice.amountNim)
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: 'NimBooks payment request',
+          text: `Payment request: ${amount} NIM${invoice.memo ? ` — ${invoice.memo}` : ''}`,
+          url,
+        })
+        return
+      }
+    } catch (e) {
+      // Share sheet cancelled — do NOT fall through to clipboard
+      if (e instanceof Error && e.name === 'AbortError') return
+    }
+    try {
+      await navigator.clipboard.writeText(url)
+      setToast('Payment link copied!')
+    } catch {
+      setError('Could not copy link — open the request and copy it from the address bar.')
+    }
+  }
+
+  const updateInvoices = (next: StoredInvoice[]) => {
+    setInvoices(next)
+    saveInvoices(account?.nimiqAddress, next)
+  }
+
+  const togglePaid = (id: string) => {
+    updateInvoices(
+      invoices.map((i) =>
+        i.id === id
+          ? i.paid
+            ? { ...i, paid: false, paidAt: undefined, paidTxHash: undefined }
+            : { ...i, paid: true, paidAt: Date.now() }
+          : i
+      )
+    )
+  }
+
+  const deleteInvoice = (id: string) => {
+    updateInvoices(invoices.filter((i) => i.id !== id))
+  }
 
   const connect = async () => {
     setConnecting(true)
@@ -376,6 +502,7 @@ export default function App() {
   }
 
   const disconnect = () => {
+    disconnectWallet()
     setAccount(null)
     setNimBalance(null)
     setNimTxs([])
@@ -386,6 +513,10 @@ export default function App() {
     setVisibleTxCount(50)
     setStatement(null)
     setStatementYear('all')
+    setInvoices([])
+    setAmountInput('')
+    setMemoInput('')
+    setShownQrId(null)
   }
 
   // Tax-year statement: recompute when txs / account / period change.
@@ -451,18 +582,9 @@ export default function App() {
   }
 
   if (!account) {
-    const isInNimiqPay = typeof window !== 'undefined' && !!window.nimiqPay
-    // Mobile = touch-primary device (phone/tablet) → Nimiq Pay is the natural
-    // wallet. Desktop → Nimiq Hub browser login is the primary path.
-    // Real phones always report touch capability — pointer:coarse alone fails
-    // in some WebViews and desktop-mode browsers, so check all touch signals.
-    const isMobile =
-      typeof window !== 'undefined' &&
-      (window.matchMedia?.('(pointer: coarse)').matches ||
-        navigator.maxTouchPoints > 0 ||
-        'ontouchstart' in window ||
-        window.innerWidth < 768 ||
-        /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent))
+    // One path per device — see lib/device.ts for the detection rules.
+    const inNimiqPay = isInNimiqPay()
+    const isMobile = isMobileDevice()
     return (
       <div className="app">
         <header className="hero">
@@ -478,7 +600,7 @@ export default function App() {
           <p className="tagline">The books for your Nimiq wallet.</p>
         </header>
         <main className="connect-panel">
-          {isInNimiqPay ? (
+          {inNimiqPay ? (
             <>
               <button className="btn-primary" onClick={connect} disabled={connecting || hubConnecting}>
                 {connecting ? 'Connecting…' : 'Connect Wallet'}
@@ -490,7 +612,7 @@ export default function App() {
             <>
               <a
                 className="btn-primary btn-link"
-                href="https://nimpay.app/miniapps/open/nimbooks.pages.dev"
+                href={NIMIQ_PAY_APP_URL}
                 target="_blank"
                 rel="noopener noreferrer"
               >
@@ -575,6 +697,9 @@ export default function App() {
         </button>
         <button className={view === 'receipts' ? 'tab active' : 'tab'} onClick={() => setView('receipts')}>
           Receipts
+        </button>
+        <button className={view === 'request' ? 'tab active' : 'tab'} onClick={() => setView('request')}>
+          Request
         </button>
         <button className={view === 'export' ? 'tab active' : 'tab'} onClick={() => setView('export')}>
           Export
@@ -759,6 +884,145 @@ export default function App() {
                 </button>
               </div>
             ))}
+          </section>
+        )}
+
+        {view === 'request' && (
+          <section className="request">
+            <h2>Request payment</h2>
+            <p className="hint">
+              Create a payment request, share the link or QR, and NimBooks marks it paid as soon
+              as the tagged transaction lands on-chain.
+            </p>
+
+            <div className="card invoice-form">
+              <label className="label" htmlFor="invoiceAmount">
+                Amount (NIM)
+              </label>
+              <input
+                id="invoiceAmount"
+                className="input"
+                type="text"
+                inputMode="decimal"
+                autoComplete="off"
+                placeholder="0.00"
+                value={amountInput}
+                onChange={(e) => setAmountInput(e.target.value)}
+              />
+              {amountInput.trim() !== '' && !parseNimToLuna(amountInput) && (
+                <span className="hint small warn">
+                  Enter a positive amount with at most 5 decimals (max 2,000,000,000 NIM).
+                </span>
+              )}
+
+              <label className="label" htmlFor="invoiceMemo">
+                What for (optional)
+              </label>
+              <input
+                id="invoiceMemo"
+                className="input"
+                type="text"
+                maxLength={MAX_MEMO_CHARS}
+                autoComplete="off"
+                placeholder="Invoice #42"
+                value={memoInput}
+                onChange={(e) => setMemoInput(e.target.value)}
+              />
+              <span className="hint small">
+                {memoInput.length}/{MAX_MEMO_CHARS} · travels in the request link; the payment
+                itself carries the request reference.
+              </span>
+
+              <label className="label" htmlFor="invoiceExpiry">
+                Expires
+              </label>
+              <select
+                id="invoiceExpiry"
+                className="select"
+                value={expiryIdx}
+                onChange={(e) => setExpiryIdx(Number(e.target.value))}
+              >
+                {EXPIRY_OPTIONS.map((o, i) => (
+                  <option key={o.label} value={i}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                className="btn-primary"
+                onClick={createInvoice}
+                disabled={!account.nimiqAddress || !parseNimToLuna(amountInput)}
+              >
+                Create request
+              </button>
+            </div>
+
+            <h2>Your requests</h2>
+            {invoices.length === 0 && (
+              <p className="empty">
+                No payment requests yet. Create one above, then share the link — the payer settles
+                it in one tap.
+              </p>
+            )}
+            {invoices.map((inv) => {
+              const st = invoiceStatus(inv)
+              const stLabel = { pending: 'Open', paid: 'Paid', expired: 'Expired' }[st]
+              return (
+                <div key={inv.id} className="invoice-item">
+                  <div className="tx-main">
+                    <span className="tx-amount">{formatLunaExact(inv.amountNim)} NIM</span>
+                    <span className={`invoice-pill ${st}`}>{stLabel}</span>
+                  </div>
+                  <div className="tx-sub">
+                    {inv.role === 'payer' ? 'paid by you' : 'requested'} ·{' '}
+                    {new Date(inv.createdAt).toLocaleDateString(lang)}
+                    {inv.expiresAt &&
+                      ` · ${st === 'expired' ? 'expired' : 'expires'} ${new Date(
+                        inv.expiresAt
+                      ).toLocaleDateString(lang)}`}
+                  </div>
+                  {inv.memo && <div className="tx-memo">{inv.memo}</div>}
+                  {inv.paidTxHash && (
+                    <div className="tx-sub">
+                      <a
+                        className="tx-hash-link"
+                        href={explorerTxUrl(inv.paidTxHash)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        {inv.paidTxHash.slice(0, 10)}…
+                      </a>
+                    </div>
+                  )}
+                  <div className="invoice-actions">
+                    <button className="btn-small" onClick={() => shareInvoice(inv)}>
+                      Share link
+                    </button>
+                    <button
+                      className="btn-small"
+                      onClick={() => setShownQrId(shownQrId === inv.id ? null : inv.id)}
+                    >
+                      {shownQrId === inv.id ? 'Hide QR' : 'QR'}
+                    </button>
+                    {inv.role === 'payee' && (
+                      <button className="btn-small" onClick={() => togglePaid(inv.id)}>
+                        {inv.paid ? 'Mark unpaid' : 'Mark paid'}
+                      </button>
+                    )}
+                    <button className="btn-small danger" onClick={() => deleteInvoice(inv.id)}>
+                      Delete
+                    </button>
+                  </div>
+                  {shownQrId === inv.id && (
+                    <div className="invoice-qr">
+                      <QrCode value={invoiceUrl(inv)} size={180} />
+                      <p className="hint small">Scan to open this payment request.</p>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </section>
         )}
 
