@@ -768,21 +768,45 @@ export default function App() {
     )
   }
 
-  const exportCsv = () => {
-    if (!account?.nimiqAddress) return
-    const csv = buildCsv()
+  const downloadCsv = async (filename: string, csv: string) => {
+    // Mobile-first: Web Share API with a real file (works in Android Chrome,
+    // iOS Safari 15+, and most WebViews). Anchor-download silently no-ops in
+    // many mobile WebViews (e.g. Nimiq Pay), so it is only a fallback.
+    const file = new File([csv], filename, { type: 'text/csv;charset=utf-8' })
+    if (navigator.share && navigator.canShare?.({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: filename })
+        return
+      } catch (e) {
+        // AbortError = user cancelled — that's fine, stop.
+        if (e instanceof DOMException && e.name === 'AbortError') return
+        // Anything else: fall through to the anchor download.
+      }
+    }
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `nimbooks-${account.nimiqAddress.replace(/\s+/g, '').slice(0, 8)}.csv`
+    a.download = filename
+    a.rel = 'noopener'
     document.body.appendChild(a)
     a.click()
-    // Defer revoke so the download completes
-    setTimeout(() => {
+    // Keep the object URL alive long enough for slow mobile downloads; revoke
+    // on pagehide as a safety net.
+    const revoke = () => {
       document.body.removeChild(a)
       URL.revokeObjectURL(url)
-    }, 1000)
+    }
+    setTimeout(revoke, 10000)
+    window.addEventListener('pagehide', revoke, { once: true })
+  }
+
+  const exportCsv = () => {
+    if (!account?.nimiqAddress) return
+    void downloadCsv(
+      `nimbooks-${account.nimiqAddress.replace(/\s+/g, '').slice(0, 8)}.csv`,
+      buildCsv()
+    )
   }
 
   const copyCsv = async () => {
@@ -856,18 +880,11 @@ export default function App() {
   const exportStatementCsv = () => {
     if (!account?.nimiqAddress || !statement) return
     const csv = buildStatementCsv(statement, account.nimiqAddress)
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
     const label = statementYear === 'all' ? 'all-time' : statementYear
-    a.download = `nimbooks-statement-${label}-${account.nimiqAddress.replace(/\s+/g, '').slice(0, 8)}.csv`
-    document.body.appendChild(a)
-    a.click()
-    setTimeout(() => {
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
-    }, 1000)
+    void downloadCsv(
+      `nimbooks-statement-${label}-${account.nimiqAddress.replace(/\s+/g, '').slice(0, 8)}.csv`,
+      csv
+    )
   }
 
   const requestDeviceId = async () => {
