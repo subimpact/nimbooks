@@ -424,6 +424,7 @@ export default function App() {
               <button className="btn-primary" onClick={connect} disabled={connecting || hubConnecting}>
                 {connecting ? 'Connecting…' : 'Connect Wallet'}
               </button>
+              <p className="hint">Connect your Nimiq wallet to start keeping the books.</p>
               <div className="connect-divider">or</div>
             </>
           ) : isMobile ? (
@@ -437,10 +438,9 @@ export default function App() {
                 Open in Nimiq Pay →
               </a>
               <p className="hint">
-                Opens NimBooks inside the Nimiq Pay app — that's where your NIM wallet lives. Tap
-                it on your phone.
+                NimBooks runs inside the Nimiq Pay app — that's where your NIM wallet lives. Tap it
+                on your phone.
               </p>
-              <div className="connect-divider">or use the web</div>
             </>
           ) : (
             <>
@@ -450,35 +450,12 @@ export default function App() {
               <p className="hint">
                 Sign in with your Nimiq wallet right here in the browser — no app needed.
               </p>
-              <div className="connect-divider">or on your phone</div>
             </>
-          )}
-          {isInNimiqPay ? (
-            <button className="btn-secondary" onClick={connectWithHub} disabled={connecting || hubConnecting}>
-              {hubConnecting ? 'Opening Nimiq Hub…' : 'Continue with Nimiq Hub'}
-            </button>
-          ) : isMobile ? (
-            <button className="btn-secondary" onClick={connectWithHub} disabled={connecting || hubConnecting}>
-              {hubConnecting ? 'Opening Nimiq Hub…' : 'Continue with Nimiq Hub'}
-            </button>
-          ) : (
-            <a
-              className="btn-ghost-lg"
-              href="https://nimpay.app/miniapps/open/nimbooks.pages.dev"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Open in Nimiq Pay →
-            </a>
           )}
           <button className="btn-ghost-lg" onClick={connectDemo} disabled={connecting || hubConnecting}>
             Try with a sample wallet
           </button>
           {error && <p className="error">{error}</p>}
-          <p className="hint">
-            In Nimiq Pay you also get balances, history, and signed receipts — or use{' '}
-            <strong>Nimiq Hub</strong> right here in your browser.
-          </p>
         </main>
       </div>
     )
@@ -496,11 +473,26 @@ export default function App() {
         >
           {theme === 'dark' ? '☀️' : '🌙'}
         </button>
-        <button className="btn-ghost" onClick={() => refresh(account)} disabled={loading}>
-          {loading ? '…' : '↻'}
+        <button className="btn-ghost" onClick={() => refresh(account)} disabled={loading} title="Refresh" aria-label="Refresh">
+          {loading ? (
+            <span className="spin">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+                <path d="M21 3v6h-6" />
+              </svg>
+            </span>
+          ) : (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+              <path d="M21 3v6h-6" />
+            </svg>
+          )}
         </button>
-        <button className="btn-ghost" onClick={disconnect} title="Disconnect wallet">
-          ⏻
+        <button className="btn-ghost" onClick={disconnect} title="Disconnect wallet" aria-label="Disconnect wallet">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M12 2v10" />
+            <path d="M18.4 6.6a9 9 0 1 1-12.77.04" />
+          </svg>
         </button>
       </header>
 
