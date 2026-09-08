@@ -52,7 +52,7 @@ The wallet layer is behind an adapter interface — swapping Nimiq Pay for Teleg
 
 ## Receipt verification
 
-Any receipt link looks like `https://nimbooks.pages.dev/#/verify/<base64url-receipt>`. The page:
+Any receipt link looks like `https://nimbooks.subimpact.net/#/verify/<base64url-receipt>`. The page:
 
 1. Decodes the receipt payload
 2. Verifies the Ed25519 signature against the embedded public key
@@ -63,7 +63,7 @@ Three outcomes: ✅ verified, ❌ not verified, ⏳ inconclusive (chain lookup u
 
 ## Payment requests
 
-A request link looks like `https://nimbooks.pages.dev/#/invoice/<base64url-request>` — the whole invoice (payee, amount in Luna, memo, created/expiry) rides in the URL fragment, so nothing is ever stored on a server. The page renders read-only before any wallet is connected; paying needs a wallet:
+A request link looks like `https://nimbooks.subimpact.net/#/invoice/<base64url-request>` — the whole invoice (payee, amount in Luna, memo, created/expiry) rides in the URL fragment, so nothing is ever stored on a server. The page renders read-only before any wallet is connected; paying needs a wallet:
 
 - **Nimiq Pay** — `sendBasicTransactionWithData()`; the transaction hash is recovered from the sender's history
 - **Nimiq Hub** — checkout flow, with a defensive re-broadcast of the signed transaction
@@ -77,7 +77,7 @@ npm install
 npm run dev
 ```
 
-Open in a browser for the connect screen (providers only inject inside Nimiq Pay). For the full experience, deploy and open via `nimiqpay://miniapp?url=https://nimbooks.pages.dev`.
+Open in a browser for the connect screen (providers only inject inside Nimiq Pay). For the full experience, deploy and open via `nimiqpay://miniapp?url=https://nimbooks.subimpact.net`.
 
 ## Build
 
