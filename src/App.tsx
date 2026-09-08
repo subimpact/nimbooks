@@ -1090,6 +1090,7 @@ export default function App() {
             className="btn-ghost theme-toggle"
             onClick={toggleTheme}
             title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
           >
             {theme === 'dark' ? '☀️' : '🌙'}
           </button>
@@ -1152,6 +1153,7 @@ export default function App() {
           className="btn-ghost"
           onClick={toggleTheme}
           title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
         >
           {theme === 'dark' ? '☀️' : '🌙'}
         </button>
@@ -1194,30 +1196,50 @@ export default function App() {
       </header>
 
       {error && (
-        <div className="error-banner" onClick={() => setError(null)}>
-          {error} <span className="dismiss">✕</span>
+        <div className="error-banner" role="alert" onClick={() => setError(null)}>
+          {error} <span className="dismiss" aria-hidden="true">✕</span>
         </div>
       )}
       {toast && (
-        <div className="toast" onClick={() => setToast(null)}>
+        <div className="toast" role="status" aria-live="polite" onClick={() => setToast(null)}>
           {toast}
         </div>
       )}
 
-      <nav className="tabs">
-        <button className={view === 'dashboard' ? 'tab active' : 'tab'} onClick={() => setView('dashboard')}>
+      <nav className="tabs" aria-label="Sections">
+        <button
+          className={view === 'dashboard' ? 'tab active' : 'tab'}
+          aria-current={view === 'dashboard' ? 'page' : undefined}
+          onClick={() => setView('dashboard')}
+        >
           Overview
         </button>
-        <button className={view === 'history' ? 'tab active' : 'tab'} onClick={() => setView('history')}>
+        <button
+          className={view === 'history' ? 'tab active' : 'tab'}
+          aria-current={view === 'history' ? 'page' : undefined}
+          onClick={() => setView('history')}
+        >
           History
         </button>
-        <button className={view === 'receipts' ? 'tab active' : 'tab'} onClick={() => setView('receipts')}>
+        <button
+          className={view === 'receipts' ? 'tab active' : 'tab'}
+          aria-current={view === 'receipts' ? 'page' : undefined}
+          onClick={() => setView('receipts')}
+        >
           Receipts
         </button>
-        <button className={view === 'request' ? 'tab active' : 'tab'} onClick={() => setView('request')}>
+        <button
+          className={view === 'request' ? 'tab active' : 'tab'}
+          aria-current={view === 'request' ? 'page' : undefined}
+          onClick={() => setView('request')}
+        >
           Request
         </button>
-        <button className={view === 'export' ? 'tab active' : 'tab'} onClick={() => setView('export')}>
+        <button
+          className={view === 'export' ? 'tab active' : 'tab'}
+          aria-current={view === 'export' ? 'page' : undefined}
+          onClick={() => setView('export')}
+        >
           Export
         </button>
       </nav>
@@ -1241,7 +1263,7 @@ export default function App() {
             <div className="card">
               <span className="label">NIM balance</span>
               {pendingUnstake && (
-                <div className="pending-unstake-banner">
+                <div className="pending-unstake-banner" role="status">
                   <span className="pending-dot" aria-hidden="true" />
                   <span>
                     Unstaking {formatLuna(String(pendingUnstake.amountNim * 100000), lang)} NIM —
@@ -2236,7 +2258,13 @@ export default function App() {
                         </button>
                         {confirmUnstakeOpen && (
                           <div className="confirm-overlay" onClick={() => setConfirmUnstakeOpen(false)}>
-                            <div className="confirm-dialog" onClick={(e) => e.stopPropagation()}>
+                            <div
+                              className="confirm-dialog"
+                              role="dialog"
+                              aria-modal="true"
+                              aria-label="Confirm unstake"
+                              onClick={(e) => e.stopPropagation()}
+                            >
                               <h3 className="confirm-title">Confirm unstake</h3>
                               <p className="confirm-amount">
                                 {Number(unstakeAmount).toLocaleString(lang)} NIM
