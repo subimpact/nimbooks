@@ -16,11 +16,16 @@ export interface NimiqTx {
   // Recipient account type: 0 = basic, 1 = vesting contract, 2 = HTLC
   // (Nimiq Pay swaps), 3 = the staking contract.
   toType?: number
-  // Set on rows synthesized from an API that isn't the tx index — staking
-  // reward rollups (lib/stakingEvents.ts). These have no on-chain hash, so
-  // `hash` is a synthetic key: never link it to the explorer or sign it into a
-  // receipt. The value is the kind the row represents.
-  synthetic?: TxKind
+  // Set on rows built from something other than the tx index, and holding the
+  // kind the row represents. Two sources:
+  //   - reward rollups (lib/stakingEvents.ts), which have no on-chain hash at
+  //     all — `hash` is a synthetic key there: never link it to the explorer
+  //     and never sign it into a receipt;
+  //   - staking actions (lib/stakingLog.ts), which are real mined txs the
+  //     address index simply doesn't return, so their hash *is* linkable.
+  // Either way the row is not a receipt candidate: the wallet can't prove a
+  // payment it didn't make to a counterparty.
+  synthetic?: TxKind | StakingActionKind
 }
 
 async function rpcCall(method: string, params: unknown[], timeoutMs = 10000): Promise<any> {
@@ -840,10 +845,20 @@ const VALIDATOR_REWARD_PREFIX = 'NQ81 C01N BASE'
 
 export type TxKind = 'payment' | 'stake' | 'unstake' | 'reward' | 'fee' | 'unknown'
 
+// The three legs of the unstake flow, recorded locally because the index never
+// returns them (see lib/stakingLog.ts). Accounting-wise they are all one kind —
+// stake on its way out — so `classifyTx` collapses them to 'unstake'; only the
+// History chip distinguishes the leg.
+export type StakingActionKind = 'deactivate' | 'retire' | 'withdraw'
+
+const STAKING_ACTION_KINDS: readonly string[] = ['deactivate', 'retire', 'withdraw']
+
 export function classifyTx(tx: NimiqTx, ownAddress: string): TxKind {
   // Synthesized rows carry their kind: a restaked reward is paid by the
   // validator's own address, which no address rule can tell from a payment.
-  if (tx.synthetic) return tx.synthetic
+  if (tx.synthetic) {
+    return STAKING_ACTION_KINDS.includes(tx.synthetic) ? 'unstake' : (tx.synthetic as TxKind)
+  }
   const own = cleanAddress(ownAddress).toUpperCase()
   const sender = cleanAddress(tx.sender).toUpperCase()
   const recipient = cleanAddress(tx.recipient).toUpperCase()

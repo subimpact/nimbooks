@@ -41,15 +41,24 @@ import {
   loadCurrency,
   saveCurrency,
   CURRENCIES,
+  STAKING_CONTRACT,
   type CurrencyCode,
   type FiatRates,
   type NimiqTx,
   type EvmBalance,
   type HtlcHolding,
+  type StakingActionKind,
   type StakingHolding,
   type ValidatorInfo,
   type VestingHolding,
 } from './lib/chain'
+import {
+  appendStakingAction,
+  loadStakingLog,
+  markStakingActionConfirmed,
+  removeStakingAction,
+  type StakingAction,
+} from './lib/stakingLog'
 import { encodeReceipt, type SignedReceipt } from './lib/receipt'
 import {
   EXPIRY_OPTIONS,
@@ -154,6 +163,15 @@ type TxVerify = 'checking' | 'confirmed' | 'expired' | 'unknown'
 const TX_VERIFY_TIMEOUT_MS = 90_000
 const TX_VERIFY_INTERVAL_MS = 10_000
 
+// Wording for the locally-recorded staking legs (lib/stakingLog.ts). Past
+// tense: each row records an action that was submitted, not a state the stake
+// is currently in — the balance banner reports the state.
+const STAKING_ACTION_LABEL: Record<StakingActionKind, string> = {
+  deactivate: 'deactivated',
+  retire: 'retired',
+  withdraw: 'withdrawn',
+}
+
 // "submitted" only ever means "handed to the network" — don't claim more than
 // the verification poll has actually established.
 function txVerifyLabel(state: TxVerify | null): string {
@@ -247,6 +265,15 @@ export default function App() {
       /* corrupt — ignore */
     }
   }, [pendingUnstakeKey])
+  // Staking transactions are absent from the public address index, so the ones
+  // this wallet sent are recorded locally and rendered as History rows from
+  // here (see lib/stakingLog.ts). Address-scoped and reloaded on switch, like
+  // the pending marker above.
+  const [stakingLog, setStakingLog] = useState<StakingAction[]>([])
+  useEffect(() => {
+    const addr = account?.nimiqAddress
+    setStakingLog(addr ? loadStakingLog(addr) : [])
+  }, [account?.nimiqAddress])
   const [validators, setValidators] = useState<ValidatorInfo[]>([])
   const [validatorsLoading, setValidatorsLoading] = useState(false)
   const [validatorsError, setValidatorsError] = useState<string | null>(null)
@@ -587,6 +614,34 @@ export default function App() {
     return [...nimTxs, ...rewardTxs].sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
   }, [nimTxs, rewardTxs])
 
+  // History adds one more source on top: the staking actions this wallet sent.
+  // They are real mined transactions, but no address list returns them (see
+  // lib/stakingLog.ts), so without this the user unstakes and History shows
+  // nothing. Deliberately *not* folded into `allTxs`: the CSV, the tax
+  // statement and the balance trajectory all read that, and moving NIM between
+  // your own staking buckets is not a fiat flow those should report.
+  const historyTxs = useMemo(() => {
+    const own = account?.nimiqAddress
+    if (!own || stakingLog.length === 0) return allTxs
+    // Should the index ever start returning these, the indexed row wins — it
+    // carries the block data, and two rows would share a React key.
+    const indexed = new Set(allTxs.map((t) => t.hash))
+    const rows: NimiqTx[] = stakingLog
+      .filter((a) => !indexed.has(a.hash))
+      .map((a) => ({
+        hash: a.hash,
+        sender: own,
+        recipient: STAKING_CONTRACT,
+        value: String(Math.round(a.amountNim * 100000)),
+        fee: '0',
+        timestamp: a.at,
+        executionResult: true,
+        synthetic: a.kind,
+      }))
+    if (rows.length === 0) return allTxs
+    return [...allTxs, ...rows].sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
+  }, [allTxs, stakingLog, account?.nimiqAddress])
+
   // Luna locked in pending swaps — sits outside the basic account balance.
   const lockedLuna = useMemo(
     () => htlcHoldings.reduce((sum, h) => sum + (Number(h.balance) || 0), 0),
@@ -797,7 +852,21 @@ export default function App() {
   // never mined must not leave a banner counting down to an election block it
   // will never reach. Only a definitive "not found" clears it — an RPC that
   // never answered leaves the banner and its 72h backstop alone.
-  const verifyUnstakeTx = (hash: string) => {
+  //
+  // `action` also records the leg in the local staking log, which is the only
+  // place History can learn about it: submit writes the row unconfirmed so it
+  // shows immediately, the poll flips it to confirmed, and a tx that never
+  // reached the chain takes its row with it.
+  const verifyUnstakeTx = (
+    hash: string,
+    action?: { kind: StakingActionKind; amountNim: number }
+  ) => {
+    const addr = account?.nimiqAddress
+    if (action && addr) {
+      const entry: StakingAction = { ...action, hash, at: Date.now(), confirmed: false }
+      appendStakingAction(addr, entry)
+      setStakingLog((prev) => [entry, ...prev.filter((a) => a.hash !== hash)])
+    }
     unstakeVerifyRef.current = hash
     setUnstakeVerify('checking')
     void (async () => {
@@ -805,6 +874,21 @@ export default function App() {
         intervalMs: TX_VERIFY_INTERVAL_MS,
         timeoutMs: TX_VERIFY_TIMEOUT_MS,
       })
+      // The log update is keyed by hash, so it runs even when a newer submit
+      // has taken over the panel's verification state — one unstake can send
+      // two transactions (withdraw then deactivate), and the first one's row
+      // must still resolve. 'unknown' leaves the row as submitted-not-confirmed.
+      if (action && addr) {
+        if (result === 'confirmed') {
+          markStakingActionConfirmed(addr, hash)
+          setStakingLog((prev) =>
+            prev.map((a) => (a.hash === hash ? { ...a, confirmed: true } : a))
+          )
+        } else if (result === 'expired') {
+          removeStakingAction(addr, hash)
+          setStakingLog((prev) => prev.filter((a) => a.hash !== hash))
+        }
+      }
       if (unstakeVerifyRef.current !== hash) return // superseded by a newer submit
       setUnstakeVerify(result)
       if (result !== 'expired') return
@@ -848,7 +932,7 @@ export default function App() {
           return
         }
         setUnstakeHash(remove.hash)
-        verifyUnstakeTx(remove.hash)
+        verifyUnstakeTx(remove.hash, { kind: 'withdraw', amountNim: removeNim })
         remainingNim -= removeNim
       }
       // 2. Deactivate the rest of the ACTIVE stake (active → inactive). The
@@ -874,7 +958,7 @@ export default function App() {
         } catch {
           /* storage full — in-memory only */
         }
-        verifyUnstakeTx(deactivate.hash)
+        verifyUnstakeTx(deactivate.hash, { kind: 'deactivate', amountNim: deactivateNim })
         remainingNim -= deactivateNim
       }
       // 3. Anything left is already cooling down (inactive). It still needs a
@@ -912,7 +996,7 @@ export default function App() {
         return
       }
       setUnstakeHash(retire.hash)
-      verifyUnstakeTx(retire.hash)
+      verifyUnstakeTx(retire.hash, { kind: 'retire', amountNim: inactiveLuna / 100000 })
       setToast('Retired — withdrawable after the reporting window ✓')
       clearTxCache()
       if (account) await refresh(account)
@@ -936,7 +1020,7 @@ export default function App() {
         return
       }
       setUnstakeHash(remove.hash)
-      verifyUnstakeTx(remove.hash)
+      verifyUnstakeTx(remove.hash, { kind: 'withdraw', amountNim: retiredLuna / 100000 })
       setToast('Withdrawal submitted ✓')
       clearTxCache()
       if (account) await refresh(account)
@@ -1757,8 +1841,8 @@ export default function App() {
             {stakingHolding && (Number(stakingHolding.active) > 0 || Number(stakingHolding.inactive) > 0 || Number(stakingHolding.retired) > 0) && (
               <p className="hint small stake-history-note">
                 Stake and unstake transactions are not exposed by the public chain index, so
-                they don't appear below (reward payouts do, one row per day) — your staker
-                record is live:{' '}
+                only the unstake actions you sent from this device appear below (reward payouts
+                do too, one row per day) — your staker record is live:{' '}
                 <strong>
                   {formatLuna(stakingHolding.active, lang)} NIM active
                   {Number(stakingHolding.inactive) > 0 &&
@@ -1768,36 +1852,51 @@ export default function App() {
                 </strong>
               </p>
             )}
-            {loading && allTxs.length === 0 && <p className="empty">Loading transactions…</p>}
-            {!loading && allTxs.length === 0 && (
+            {loading && historyTxs.length === 0 && <p className="empty">Loading transactions…</p>}
+            {!loading && historyTxs.length === 0 && (
               <p className="empty">No transactions found for this address.</p>
             )}
-            {allTxs.slice(0, visibleTxCount).map((tx) => {
+            {historyTxs.slice(0, visibleTxCount).map((tx) => {
               const isOut = tx.sender.replace(/\s+/g, '').toUpperCase() === account.nimiqAddress?.replace(/\s+/g, '').toUpperCase()
               const label = txLabel(tx, account.nimiqAddress ?? '')
               const memo = decodeMemo(tx.data)
               const demo = isDemoMode()
-              // Reward rows are a daily rollup of restaking events, not chain
-              // txs: there is no hash to open in the explorer and nothing a
-              // receipt could prove, so both are replaced by the payer's name.
-              const validator = tx.synthetic
+              // Two kinds of synthesized row, and they differ in exactly one
+              // way that matters here: a staking action is a real transaction
+              // the index just doesn't list, so its hash opens in the explorer;
+              // a reward rollup has no hash at all.
+              const stakingAction = tx.synthetic
+                ? STAKING_ACTION_LABEL[tx.synthetic as StakingActionKind]
+                : undefined
+              const isReward = !!tx.synthetic && !stakingAction
+              // Reward rows are a daily rollup of restaking events, so the
+              // payer's name takes the place of the missing hash link.
+              const validator = isReward
                 ? (validators.find((v) => cleanAddr(v.address) === cleanAddr(tx.sender))?.name ??
                   `${tx.sender.slice(0, 14)}…`)
                 : null
+              // Recorded at submit; the verification poll flips it. Until then
+              // the row must not claim more than "handed to the network".
+              const stakingUnconfirmed =
+                !!stakingAction && stakingLog.some((a) => a.hash === tx.hash && !a.confirmed)
               return (
                 <div key={tx.hash} className="tx">
                   <div className="tx-main">
                     <span className={isOut ? 'out' : 'in'}>
-                      {isOut ? '▼ sent' : '▲ received'}
-                      {isLabelledTxKind(label) && (
-                        <span className={`tx-kind ${label}`}> · {label}</span>
+                      {stakingAction ? `▼ ${stakingAction}` : isOut ? '▼ sent' : '▲ received'}
+                      {stakingAction ? (
+                        <span className={`tx-kind ${tx.synthetic}`}> · {tx.synthetic}</span>
+                      ) : (
+                        isLabelledTxKind(label) && (
+                          <span className={`tx-kind ${label}`}> · {label}</span>
+                        )
                       )}
                     </span>
                     <span className="tx-amount">{formatLuna(tx.value, lang)} NIM</span>
                   </div>
                   <div className="tx-sub">
                     {tx.timestamp ? new Date(tx.timestamp).toLocaleString(lang) : '—'} ·{' '}
-                    {tx.synthetic ? (
+                    {isReward ? (
                       <span className="tx-synthetic">{validator} · restaked, daily total</span>
                     ) : (
                       <a
@@ -1808,6 +1907,12 @@ export default function App() {
                       >
                         {tx.hash.slice(0, 10)}…
                       </a>
+                    )}
+                    {stakingAction && (
+                      <span className="tx-synthetic">
+                        {' '}
+                        · staking{stakingUnconfirmed ? ', confirming…' : ''}
+                      </span>
                     )}
                     {tx.executionResult === false && <span className="tx-failed"> · failed</span>}
                   </div>
@@ -1835,12 +1940,12 @@ export default function App() {
                 </div>
               )
             })}
-            {allTxs.length > visibleTxCount && (
+            {historyTxs.length > visibleTxCount && (
               <button
                 className="btn-ghost-lg"
                 onClick={() => setVisibleTxCount((c) => c + 100)}
               >
-                Load more ({allTxs.length - visibleTxCount} remaining)
+                Load more ({historyTxs.length - visibleTxCount} remaining)
               </button>
             )}
           </section>
