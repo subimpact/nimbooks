@@ -299,9 +299,66 @@ export async function stakeNim(delegation: string | null, amountNim: number): Pr
 export type UnstakeResult = { ok: true; hash: string } | { ok: false; error: string }
 
 /**
- * Retire stake: moves it from "active" to "inactive" (cooldown). The stake
- * keeps no longer earning; once cooled down (inactiveBalance appears), the
- * same amount becomes withdrawable via `unstakeRemove`.
+ * Deactivate stake: moves it from "active" to "inactive" (cooldown). Takes
+ * effect at the next election block (~12h). This is the FIRST step of
+ * unstaking — the protocol only ever retires *inactive* stake, so sending a
+ * retire against live stake is rejected and the transaction never mines.
+ *
+ * @param newActiveBalanceNim the active balance to LEAVE staked, not the
+ *   amount being deactivated — `sendSetActiveStakeTransaction` sets an
+ *   absolute balance (`newActiveBalance`), so a full unstake passes 0.
+ *
+ * Works only inside Nimiq Pay (same provider constraint as `stakeNim`).
+ */
+export async function unstakeDeactivate(newActiveBalanceNim: number): Promise<UnstakeResult> {
+  if (activeProvider === 'demo') {
+    return { ok: false, error: 'Demo mode is read-only — connect your wallet to unstake.' }
+  }
+  if (activeProvider === 'hub') {
+    return {
+      ok: false,
+      error: 'Unstaking needs the Nimiq Pay app — the browser login can read and sign, but not unstake.',
+    }
+  }
+
+  // 0 is the normal case (unstake everything), so only negatives are invalid.
+  const value = Math.round(newActiveBalanceNim * 100000)
+  if (!Number.isSafeInteger(value) || value < 0) {
+    return { ok: false, error: 'Invalid unstake amount.' }
+  }
+
+  if (!nimiqProvider) {
+    try {
+      nimiqProvider = await init({ timeout: 10000 })
+    } catch (e) {
+      console.warn('Nimiq provider unavailable for unstaking:', e)
+    }
+  }
+  if (!nimiqProvider) {
+    return { ok: false, error: 'No Nimiq wallet connected — open NimBooks inside Nimiq Pay to unstake.' }
+  }
+
+  try {
+    const res = await nimiqProvider.sendSetActiveStakeTransaction({ newActiveBalance: value, fee: 0 })
+    if (typeof res !== 'string') {
+      const message = res && typeof res === 'object' && 'error' in res ? res.error?.message : null
+      return { ok: false, error: message || 'The unstaking transaction was rejected.' }
+    }
+    return { ok: true, hash: res }
+  } catch (e) {
+    console.error('Nimiq Pay unstake (deactivate) failed:', e)
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+/**
+ * Retire stake: moves it from "inactive" (cooled down) to "retired". Second
+ * step of the unstake flow — valid only once the deactivation has taken
+ * effect and the reporting window has passed; retired stake is then
+ * withdrawable via `unstakeRemove`.
+ *
+ * @param amountNim a portion of the inactive balance (`newRetireStake` takes
+ *   an amount, not a target balance).
  *
  * Works only inside Nimiq Pay (same provider constraint as `stakeNim`).
  */
@@ -346,9 +403,9 @@ export async function unstakeRetire(amountNim: number): Promise<UnstakeResult> {
 }
 
 /**
- * Withdraw retired stake: moves it from "inactive" back to the basic balance.
+ * Withdraw retired stake: moves it from "retired" back to the basic balance.
  * Only the amount already shown as `retiredBalance` (after the cooldown)
- * can be removed.
+ * can be removed; `amountNim` is an amount, not a target balance.
  *
  * Works only inside Nimiq Pay.
  */

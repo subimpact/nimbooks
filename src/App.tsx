@@ -9,6 +9,7 @@ import {
   isDemoMode,
   canStake,
   stakeNim,
+  unstakeDeactivate,
   unstakeRetire,
   unstakeRemove,
   getDeviceId,
@@ -850,35 +851,38 @@ export default function App() {
         verifyUnstakeTx(remove.hash)
         remainingNim -= removeNim
       }
-      // 2. Retire the rest from ACTIVE stake into the cooldown. This is the
-      //    path for live stake — it stops earning and starts the reporting
-      //    window, after which it becomes withdrawable.
+      // 2. Deactivate the rest of the ACTIVE stake (active → inactive). The
+      //    protocol only retires *inactive* stake, so this — not retire — is
+      //    the first step for live stake. `setActiveStake` sets an absolute
+      //    balance, so pass what stays staked, not what leaves.
       if (remainingNim > 0 && retireableLuna > 0) {
-        const retireNim = Math.min(remainingNim, retireableLuna / 100000)
-        const retire = await unstakeRetire(retireNim)
-        if (!retire.ok) {
-          setUnstakeError(retire.error)
+        const deactivateLuna = Math.min(Math.round(remainingNim * 100000), retireableLuna)
+        const deactivateNim = deactivateLuna / 100000
+        const deactivate = await unstakeDeactivate((retireableLuna - deactivateLuna) / 100000)
+        if (!deactivate.ok) {
+          setUnstakeError(deactivate.error)
           return
         }
-        setUnstakeHash(retire.hash)
-        // The retire only takes effect at the next election block (~12h) —
-        // persist a pending marker so Overview/History can show it until the
+        setUnstakeHash(deactivate.hash)
+        // The deactivation only takes effect at the next election block (~12h)
+        // — persist a pending marker so Overview/History can show it until the
         // staker record flips to inactive.
-        const pending = { amountNim: retireNim, hash: retire.hash, submittedAt: Date.now() }
+        const pending = { amountNim: deactivateNim, hash: deactivate.hash, submittedAt: Date.now() }
         setPendingUnstake(pending)
         try {
           if (pendingUnstakeKey) localStorage.setItem(pendingUnstakeKey, JSON.stringify(pending))
         } catch {
           /* storage full — in-memory only */
         }
-        verifyUnstakeTx(retire.hash)
-        remainingNim -= retireNim
+        verifyUnstakeTx(deactivate.hash)
+        remainingNim -= deactivateNim
       }
-      // 3. Anything left was already cooling down (inactive) — no tx needed,
-      //    it becomes withdrawable on its own after the reporting window.
+      // 3. Anything left is already cooling down (inactive). It still needs a
+      //    retire transaction once the reporting window passes — that is the
+      //    banner's finish action, not something this submit can send yet.
       if (remainingNim > 0) {
         setUnstakeError(
-          `${formatLuna(String(remainingNim * 100000), lang)} NIM is still cooling down — it becomes withdrawable after the reporting window with no action needed.`
+          `${formatLuna(String(remainingNim * 100000), lang)} NIM is already cooling down — finish it from the balance banner once the reporting window passes.`
         )
       }
       if (remainingNim < amountNim) {
@@ -886,6 +890,56 @@ export default function App() {
         clearTxCache()
         if (account) await refresh(account)
       }
+    } finally {
+      setUnstaking(false)
+    }
+  }
+
+  // Step 2 of the unstake flow: inactive → retired, for the whole cooled-down
+  // balance. Only valid once the deactivation took effect and the reporting
+  // window passed — before that the provider rejects it and says so.
+  const completeUnstake = async () => {
+    if (inactiveLuna <= 0) return
+    setUnstaking(true)
+    setUnstakeError(null)
+    setUnstakeHash(null)
+    setUnstakeVerify(null)
+    try {
+      const retire = await unstakeRetire(inactiveLuna / 100000)
+      if (!retire.ok) {
+        setUnstakeError(retire.error)
+        setToast(retire.error)
+        return
+      }
+      setUnstakeHash(retire.hash)
+      verifyUnstakeTx(retire.hash)
+      setToast('Retired — withdrawable after the reporting window ✓')
+      clearTxCache()
+      if (account) await refresh(account)
+    } finally {
+      setUnstaking(false)
+    }
+  }
+
+  // Step 3: retired → basic balance, for the whole withdrawable balance.
+  const withdrawRetired = async () => {
+    if (retiredLuna <= 0) return
+    setUnstaking(true)
+    setUnstakeError(null)
+    setUnstakeHash(null)
+    setUnstakeVerify(null)
+    try {
+      const remove = await unstakeRemove(retiredLuna / 100000)
+      if (!remove.ok) {
+        setUnstakeError(remove.error)
+        setToast(remove.error)
+        return
+      }
+      setUnstakeHash(remove.hash)
+      verifyUnstakeTx(remove.hash)
+      setToast('Withdrawal submitted ✓')
+      clearTxCache()
+      if (account) await refresh(account)
     } finally {
       setUnstaking(false)
     }
@@ -1394,27 +1448,47 @@ export default function App() {
               {unstakeActivity && (
                 <div className="pending-unstake-banner" role="status">
                   <span className="pending-dot" aria-hidden="true" />
-                  <span>
+                  <span className="banner-text">
                     {unstakeActivity.kind === 'pending' && (
                       <>
-                        Unstaking {formatLuna(String(unstakeActivity.amountNim * 100000), lang)} NIM
-                        — takes effect at the next election block (up to ~12h), then a
+                        Deactivating {formatLuna(String(unstakeActivity.amountNim * 100000), lang)}{' '}
+                        NIM — takes effect at the next election block (up to ~12h), then a
                         reporting window before it's withdrawable.
                       </>
                     )}
                     {unstakeActivity.kind === 'cooling' && (
                       <>
                         {formatLuna(String(unstakeActivity.amountNim * 100000), lang)} NIM is
-                        cooling down — withdrawable after the reporting window.
+                        cooling down — finish the unstake after the reporting window.
                       </>
                     )}
                     {unstakeActivity.kind === 'ready' && (
                       <>
                         {formatLuna(String(unstakeActivity.amountNim * 100000), lang)} NIM is
-                        ready to withdraw — use Unstake to move it to your balance.
+                        ready to withdraw — move it to your balance.
                       </>
                     )}
                   </span>
+                  {unstakeActivity.kind === 'cooling' && (
+                    <button
+                      type="button"
+                      className="btn-small"
+                      onClick={() => void completeUnstake()}
+                      disabled={!canStake() || staking || unstaking}
+                    >
+                      {unstaking ? 'Submitting…' : 'Complete unstake'}
+                    </button>
+                  )}
+                  {unstakeActivity.kind === 'ready' && (
+                    <button
+                      type="button"
+                      className="btn-small"
+                      onClick={() => void withdrawRetired()}
+                      disabled={!canStake() || staking || unstaking}
+                    >
+                      {unstaking ? 'Submitting…' : 'Withdraw'}
+                    </button>
+                  )}
                 </div>
               )}
               {nimBalance === null ? (
@@ -1666,8 +1740,9 @@ export default function App() {
                   </span>
                 </div>
                 <div className="tx-sub">
-                  Submitted {new Date(unstakeActivity.submittedAt).toLocaleString(lang)} · takes
-                  effect at the next election block (up to ~12h) ·{' '}
+                  Deactivating · submitted{' '}
+                  {new Date(unstakeActivity.submittedAt).toLocaleString(lang)} · takes effect at
+                  the next election block (up to ~12h) ·{' '}
                   <span className="mono">{unstakeActivity.hash.slice(0, 10)}…</span>
                 </div>
               </div>
@@ -2387,8 +2462,8 @@ export default function App() {
                         </div>
                         <span className="hint small">
                           {inactiveLuna > 0
-                            ? `${formatLuna(String(inactiveLuna), lang)} NIM cooling down — becomes withdrawable after the reporting window.`
-                            : 'Unstake retires active stake into a cooldown; after the reporting window the same amount becomes withdrawable.'}
+                            ? `${formatLuna(String(inactiveLuna), lang)} NIM cooling down — finish it from the balance banner after the reporting window.`
+                            : 'Unstake deactivates active stake into a cooldown; after the reporting window you retire it, then withdraw it.'}
                           {retiredLuna > 0 &&
                             ` ${formatLuna(String(retiredLuna), lang)} NIM already withdrawable.`}
                         </span>
@@ -2420,14 +2495,14 @@ export default function App() {
                                 {Number(unstakeAmount).toLocaleString(lang)} NIM
                               </p>
                               <p className="hint small">
-                                Your stake stops earning immediately. It becomes withdrawable
-                                after the reporting window — by{' '}
+                                Your stake stops earning at the next election block (~12h). It
+                                becomes withdrawable after the reporting window — by{' '}
                                 <strong>{unstakeEstimate.worstLabel}</strong> at the latest
                                 (up to ~24h, depending on where the epoch boundary falls).
                               </p>
                               <p className="hint small">
-                                You'll need one more transaction to withdraw it once the
-                                cooldown finishes.
+                                You'll need two more transactions once it has cooled down —
+                                both are one tap from the balance banner.
                               </p>
                               <div className="confirm-actions">
                                 <button
