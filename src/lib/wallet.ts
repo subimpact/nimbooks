@@ -296,6 +296,102 @@ export async function stakeNim(delegation: string | null, amountNim: number): Pr
   }
 }
 
+export type UnstakeResult = { ok: true; hash: string } | { ok: false; error: string }
+
+/**
+ * Retire stake: moves it from "active" to "inactive" (cooldown). The stake
+ * keeps no longer earning; once cooled down (inactiveBalance appears), the
+ * same amount becomes withdrawable via `unstakeRemove`.
+ *
+ * Works only inside Nimiq Pay (same provider constraint as `stakeNim`).
+ */
+export async function unstakeRetire(amountNim: number): Promise<UnstakeResult> {
+  if (activeProvider === 'demo') {
+    return { ok: false, error: 'Demo mode is read-only — connect your wallet to unstake.' }
+  }
+  if (activeProvider === 'hub') {
+    return {
+      ok: false,
+      error: 'Unstaking needs the Nimiq Pay app — the browser login can read and sign, but not unstake.',
+    }
+  }
+
+  const value = Math.round(amountNim * 100000)
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    return { ok: false, error: 'Enter an amount above 0.' }
+  }
+
+  if (!nimiqProvider) {
+    try {
+      nimiqProvider = await init({ timeout: 10000 })
+    } catch (e) {
+      console.warn('Nimiq provider unavailable for unstaking:', e)
+    }
+  }
+  if (!nimiqProvider) {
+    return { ok: false, error: 'No Nimiq wallet connected — open NimBooks inside Nimiq Pay to unstake.' }
+  }
+
+  try {
+    const res = await nimiqProvider.sendRetireStakeTransaction({ retireStake: value, fee: 0 })
+    if (typeof res !== 'string') {
+      const message = res && typeof res === 'object' && 'error' in res ? res.error?.message : null
+      return { ok: false, error: message || 'The unstaking transaction was rejected.' }
+    }
+    return { ok: true, hash: res }
+  } catch (e) {
+    console.error('Nimiq Pay unstake (retire) failed:', e)
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+/**
+ * Withdraw retired stake: moves it from "inactive" back to the basic balance.
+ * Only the amount already shown as `retiredBalance` (after the cooldown)
+ * can be removed.
+ *
+ * Works only inside Nimiq Pay.
+ */
+export async function unstakeRemove(amountNim: number): Promise<UnstakeResult> {
+  if (activeProvider === 'demo') {
+    return { ok: false, error: 'Demo mode is read-only — connect your wallet to withdraw.' }
+  }
+  if (activeProvider === 'hub') {
+    return {
+      ok: false,
+      error: 'Withdrawing needs the Nimiq Pay app — the browser login can read and sign, but not withdraw.',
+    }
+  }
+
+  const value = Math.round(amountNim * 100000)
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    return { ok: false, error: 'Enter an amount above 0.' }
+  }
+
+  if (!nimiqProvider) {
+    try {
+      nimiqProvider = await init({ timeout: 10000 })
+    } catch (e) {
+      console.warn('Nimiq provider unavailable for withdrawal:', e)
+    }
+  }
+  if (!nimiqProvider) {
+    return { ok: false, error: 'No Nimiq wallet connected — open NimBooks inside Nimiq Pay to withdraw.' }
+  }
+
+  try {
+    const res = await nimiqProvider.sendRemoveStakeTransaction({ value, fee: 0 })
+    if (typeof res !== 'string') {
+      const message = res && typeof res === 'object' && 'error' in res ? res.error?.message : null
+      return { ok: false, error: message || 'The withdrawal transaction was rejected.' }
+    }
+    return { ok: true, hash: res }
+  } catch (e) {
+    console.error('Nimiq Pay unstake (remove) failed:', e)
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
 export async function signReceipt(
   receipt: Omit<SignedReceipt, 'publicKey' | 'signature'>,
   signer?: string
