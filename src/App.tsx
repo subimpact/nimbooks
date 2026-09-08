@@ -1,14 +1,26 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import './App.css'
 import { applyTheme, getInitialTheme, type Theme } from './lib/theme'
-import { connectWallet, connectHub, getDeviceId, getLanguage, signReceipt, type WalletAccount } from './lib/wallet'
+import {
+  connectWallet,
+  connectHub,
+  connectDemoAccount,
+  isDemoMode,
+  getDeviceId,
+  getLanguage,
+  signReceipt,
+  type WalletAccount,
+} from './lib/wallet'
 import {
   getNimiqBalance,
-  getNimiqTransactions,
+  getNimiqTransactionHistory,
   getEvmBalances,
   getAllFiatRates,
   formatLuna,
   formatUnits,
+  classifyTx,
+  decodeMemo,
+  explorerTxUrl,
   type NimiqTx,
   type EvmBalance,
 } from './lib/chain'
@@ -77,6 +89,8 @@ export default function App() {
   const [error, setError] = useState<string | null>(null)
   const [toast, setToast] = useState<string | null>(null)
   const [theme, setTheme] = useState<Theme>(getInitialTheme)
+  const [showReceiptHelp, setShowReceiptHelp] = useState(false)
+  const [visibleTxCount, setVisibleTxCount] = useState(50)
 
   const toggleTheme = useCallback(() => {
     setTheme((t) => {
@@ -91,6 +105,16 @@ export default function App() {
     [account?.nimiqAddress]
   )
 
+  const fetchRates = useCallback(async () => {
+    try {
+      const all = await getAllFiatRates()
+      setRates({ nim: all.nim.usd, usdt: all.usdt.usd, eth: all.eth.usd, pol: all.pol.usd })
+    } catch (e) {
+      console.warn('Rate fetch failed:', e)
+      setError('Live rates unavailable — showing cached values.')
+    }
+  }, [])
+
   useEffect(() => {
     setLang(getLanguage() ?? navigator.language.split('-')[0] ?? 'en')
     // Load rates from localStorage cache immediately (no flash of $0)
@@ -104,17 +128,14 @@ export default function App() {
     }))
     // Fetch fresh rates (single consolidated request)
     fetchRates()
-  }, [])
+  }, [fetchRates])
 
-  const fetchRates = useCallback(async () => {
-    try {
-      const all = await getAllFiatRates()
-      setRates({ nim: all.nim.usd, usdt: all.usdt.usd, eth: all.eth.usd, pol: all.pol.usd })
-    } catch (e) {
-      console.warn('Rate fetch failed:', e)
-      setError('Live rates unavailable — showing cached values.')
-    }
-  }, [])
+  // Toasts auto-dismiss after 4s (tap still dismisses immediately)
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(null), 4000)
+    return () => clearTimeout(t)
+  }, [toast])
 
   // Load receipts scoped to the connected account
   useEffect(() => {
@@ -168,11 +189,10 @@ export default function App() {
     setConnecting(true)
     setError(null)
     try {
-      // Public mainnet address with real activity — read-only demo mode.
-      const acc: WalletAccount = {
-        nimiqAddress: 'NQ02 31N6 3KM5 T6G5 22TN EPF5 5XPY RLHK RMB3',
-        provider: 'hub',
-      }
+      // Public mainnet address with real human activity — read-only demo mode.
+      // (NQ43 6G6H FE78 TV0B YCM5 TD84 P7QX 46XS SNM5: 50 txs over 4 days,
+      // 7 distinct senders, mixed in/out — a believable sample wallet.)
+      const acc = connectDemoAccount('NQ43 6G6H FE78 TV0B YCM5 TD84 P7QX 46XS SNM5')
       setAccount(acc)
       await refresh(acc)
       setToast('Demo mode — read-only sample wallet.')
@@ -190,7 +210,9 @@ export default function App() {
       if (acc.nimiqAddress) {
         const [bal, txs] = await Promise.all([
           getNimiqBalance(acc.nimiqAddress),
-          getNimiqTransactions(acc.nimiqAddress, 50),
+          // Full history via cursor pagination (up to 1000 txs) — the 50-tx
+          // cap silently truncated "accountant-ready" statements.
+          getNimiqTransactionHistory(acc.nimiqAddress, 1000),
         ])
         setNimBalance(bal)
         setNimTxs(txs)
@@ -283,30 +305,42 @@ export default function App() {
     }
   }
 
-  const exportCsv = () => {
-    if (!account?.nimiqAddress) return
+  // Shared CSV row builder — one source of truth for export + copy.
+  const buildCsv = () => {
+    if (!account?.nimiqAddress) return ''
+    const own = account.nimiqAddress.replace(/\s+/g, '').toUpperCase()
     const rows = [
-      ['timestamp', 'txHash', 'type', 'sender', 'recipient', 'amountNIM', 'feeNIM', 'valueUSD_indicative', 'memo'],
-      ...nimTxs.map((t) => {
-        const isOut = t.sender.replace(/\s+/g, '').toUpperCase() === account.nimiqAddress?.replace(/\s+/g, '').toUpperCase()
-        return [
-          new Date(t.timestamp ?? Date.now()).toISOString(),
-          t.hash,
-          isOut ? 'sent' : 'received',
-          t.sender,
-          t.recipient,
-          (Number(t.value) / 100000).toFixed(5), // raw decimals — no locale separators (accounting-safe)
-          (Number(t.fee) / 100000).toFixed(5),
-          ((Number(t.value) / 100000) * rates.nim).toFixed(6),
-          t.data ?? '',
-        ]
-      }),
+      ['timestamp', 'txHash', 'type', 'kind', 'sender', 'recipient', 'amountNIM', 'feeNIM', 'valueUSD_indicative', 'memo'],
+      ...nimTxs
+        // Failed/reverted txs are not real transfers — exclude from statements
+        .filter((t) => t.executionResult !== false)
+        .map((t) => {
+          const isOut = t.sender.replace(/\s+/g, '').toUpperCase() === own
+          return [
+            new Date(t.timestamp ?? Date.now()).toISOString(),
+            t.hash,
+            isOut ? 'sent' : 'received',
+            classifyTx(t, own),
+            t.sender,
+            t.recipient,
+            (Number(t.value) / 100000).toFixed(5), // raw decimals — no locale separators (accounting-safe)
+            (Number(t.fee) / 100000).toFixed(5),
+            ((Number(t.value) / 100000) * rates.nim).toFixed(6),
+            decodeMemo(t.data) ?? '',
+          ]
+        }),
     ]
-    const csv =
+    return (
       '\uFEFF' + // UTF-8 BOM for Excel
       rows
         .map((r) => r.map((c) => `"${sanitizeCsvCell(c).replace(/"/g, '""')}"`).join(','))
         .join('\n')
+    )
+  }
+
+  const exportCsv = () => {
+    if (!account?.nimiqAddress) return
+    const csv = buildCsv()
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -323,30 +357,8 @@ export default function App() {
 
   const copyCsv = async () => {
     if (!account?.nimiqAddress) return
-    const rows = [
-      ['timestamp', 'txHash', 'type', 'sender', 'recipient', 'amountNIM', 'feeNIM', 'valueUSD_indicative', 'memo'],
-      ...nimTxs.map((t) => {
-        const isOut = t.sender.replace(/\s+/g, '').toUpperCase() === account.nimiqAddress?.replace(/\s+/g, '').toUpperCase()
-        return [
-          new Date(t.timestamp ?? Date.now()).toISOString(),
-          t.hash,
-          isOut ? 'sent' : 'received',
-          t.sender,
-          t.recipient,
-          (Number(t.value) / 100000).toFixed(5),
-          (Number(t.fee) / 100000).toFixed(5),
-          ((Number(t.value) / 100000) * rates.nim).toFixed(6),
-          t.data ?? '',
-        ]
-      }),
-    ]
-    const csv =
-      '\uFEFF' +
-      rows
-        .map((r) => r.map((c) => `"${sanitizeCsvCell(c).replace(/"/g, '""')}"`).join(','))
-        .join('\n')
     try {
-      await navigator.clipboard.writeText(csv)
+      await navigator.clipboard.writeText(buildCsv())
       setToast('CSV copied to clipboard!')
     } catch {
       setError('Could not copy CSV — use Download instead.')
@@ -361,16 +373,32 @@ export default function App() {
     setReceipts([])
     setError(null)
     setToast(null)
+    setVisibleTxCount(50)
   }
 
   const requestDeviceId = async () => {
     if (deviceId) return
-    const id = await getDeviceId()
-    if (id) setDeviceId(id)
+    try {
+      const id = await getDeviceId()
+      if (id) {
+        setDeviceId(id)
+        setToast('Device preferences enabled — settings are saved to this device.')
+      } else {
+        setError('Device preferences unavailable — this works inside Nimiq Pay.')
+      }
+    } catch (e) {
+      setError('Device preferences unavailable: ' + (e instanceof Error ? e.message : String(e)))
+    }
   }
 
   if (!account) {
     const isInNimiqPay = typeof window !== 'undefined' && !!window.nimiqPay
+    // Mobile = touch-primary device (phone/tablet) → Nimiq Pay is the natural
+    // wallet. Desktop → Nimiq Hub browser login is the primary path.
+    const isMobile =
+      typeof window !== 'undefined' &&
+      (window.matchMedia?.('(pointer: coarse)').matches ||
+        /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent))
     return (
       <div className="app">
         <header className="hero">
@@ -393,7 +421,7 @@ export default function App() {
               </button>
               <div className="connect-divider">or</div>
             </>
-          ) : (
+          ) : isMobile ? (
             <>
               <a
                 className="btn-primary btn-link"
@@ -409,10 +437,35 @@ export default function App() {
               </p>
               <div className="connect-divider">or use the web</div>
             </>
+          ) : (
+            <>
+              <button className="btn-primary" onClick={connectWithHub} disabled={connecting || hubConnecting}>
+                {hubConnecting ? 'Opening Nimiq Hub…' : 'Continue with Nimiq Hub'}
+              </button>
+              <p className="hint">
+                Sign in with your Nimiq wallet right here in the browser — no app needed.
+              </p>
+              <div className="connect-divider">or on your phone</div>
+            </>
           )}
-          <button className="btn-secondary" onClick={connectWithHub} disabled={connecting || hubConnecting}>
-            {hubConnecting ? 'Opening Nimiq Hub…' : 'Continue with Nimiq Hub'}
-          </button>
+          {isInNimiqPay ? (
+            <button className="btn-secondary" onClick={connectWithHub} disabled={connecting || hubConnecting}>
+              {hubConnecting ? 'Opening Nimiq Hub…' : 'Continue with Nimiq Hub'}
+            </button>
+          ) : isMobile ? (
+            <button className="btn-secondary" onClick={connectWithHub} disabled={connecting || hubConnecting}>
+              {hubConnecting ? 'Opening Nimiq Hub…' : 'Continue with Nimiq Hub'}
+            </button>
+          ) : (
+            <a
+              className="btn-ghost-lg"
+              href="https://nimpay.app/miniapps/open/nimbooks.pages.dev"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Open in Nimiq Pay →
+            </a>
+          )}
           <button className="btn-ghost-lg" onClick={connectDemo} disabled={connecting || hubConnecting}>
             Try with a sample wallet
           </button>
@@ -541,18 +594,42 @@ export default function App() {
 
         {view === 'history' && (
           <section className="history">
-            <h2>NIM transactions</h2>
+            <div className="section-head">
+              <h2>NIM transactions</h2>
+              <button className="btn-link-inline" onClick={() => setShowReceiptHelp((v) => !v)}>
+                {showReceiptHelp ? 'Hide' : 'What is a signed receipt?'}
+              </button>
+            </div>
+            {showReceiptHelp && (
+              <div className="card help-card">
+                <p>
+                  A signed receipt is a shareable proof-of-payment. NimBooks signs the
+                  transaction details with your wallet key, then anyone can verify them on a
+                  public page: the signature is checked, the signer must be the sender or
+                  recipient, and the transaction is cross-checked on the Nimiq chain.
+                </p>
+                <p className="hint small">
+                  Forged, reverted, or non-existent transactions fail verification.
+                </p>
+              </div>
+            )}
             {loading && nimTxs.length === 0 && <p className="empty">Loading transactions…</p>}
             {!loading && nimTxs.length === 0 && (
               <p className="empty">No transactions found for this address.</p>
             )}
-            {nimTxs.map((tx) => {
+            {nimTxs.slice(0, visibleTxCount).map((tx) => {
               const isOut = tx.sender.replace(/\s+/g, '').toUpperCase() === account.nimiqAddress?.replace(/\s+/g, '').toUpperCase()
+              const kind = classifyTx(tx, account.nimiqAddress ?? '')
+              const memo = decodeMemo(tx.data)
+              const demo = isDemoMode()
               return (
                 <div key={tx.hash} className="tx">
                   <div className="tx-main">
                     <span className={isOut ? 'out' : 'in'}>
                       {isOut ? '▼ sent' : '▲ received'}
+                      {kind !== 'payment' && kind !== 'unknown' && (
+                        <span className={`tx-kind ${kind}`}> · {kind}</span>
+                      )}
                     </span>
                     <span className="tx-amount">{formatLuna(tx.value, lang)} NIM</span>
                   </div>
@@ -560,7 +637,7 @@ export default function App() {
                     {tx.timestamp ? new Date(tx.timestamp).toLocaleString(lang) : '—'} ·{' '}
                     <a
                       className="tx-hash-link"
-                      href={`https://explorer.nimiq.com/transactions/${tx.hash}`}
+                      href={explorerTxUrl(tx.hash)}
                       target="_blank"
                       rel="noopener noreferrer"
                     >
@@ -568,21 +645,36 @@ export default function App() {
                     </a>
                     {tx.executionResult === false && <span className="tx-failed"> · failed</span>}
                   </div>
-                  {tx.data && <div className="tx-memo">memo: {tx.data}</div>}
+                  {memo && <div className="tx-memo">memo: {memo}</div>}
                   <button
                     className="btn-small"
                     onClick={() => makeReceipt(tx)}
-                    disabled={receipts.some((r) => r.txHash === tx.hash) || signingHash === tx.hash}
+                    disabled={
+                      demo ||
+                      receipts.some((r) => r.txHash === tx.hash) ||
+                      signingHash === tx.hash
+                    }
+                    title={demo ? 'Demo mode is read-only — connect your wallet to sign receipts.' : undefined}
                   >
                     {signingHash === tx.hash
                       ? 'Signing…'
                       : receipts.some((r) => r.txHash === tx.hash)
                         ? '✓ Signed'
-                        : 'Sign receipt'}
+                        : demo
+                          ? 'Sign receipt (demo)'
+                          : 'Sign receipt'}
                   </button>
                 </div>
               )
             })}
+            {nimTxs.length > visibleTxCount && (
+              <button
+                className="btn-ghost-lg"
+                onClick={() => setVisibleTxCount((c) => c + 100)}
+              >
+                Load more ({nimTxs.length - visibleTxCount} remaining)
+              </button>
+            )}
           </section>
         )}
 
@@ -591,7 +683,8 @@ export default function App() {
             <h2>Signed receipts</h2>
             {receipts.length === 0 && (
               <p className="empty">
-                No receipts yet. Go to History and tap "Sign receipt" on a transaction.
+                No receipts yet. Go to History and tap "Sign receipt" on a transaction to create
+                a shareable proof-of-payment.
               </p>
             )}
             {receipts.map((r) => (

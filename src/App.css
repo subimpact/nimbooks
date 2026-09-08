@@ -1,7 +1,9 @@
 :root {
   --bg: #0f1117;
+  --bg-elev: #141722;
   --card: #1a1d27;
   --card-2: #222634;
+  --border: #2a2f3d;
   --text: #e8eaf0;
   --muted: #8b90a0;
   --accent: #e9a23b;
@@ -9,6 +11,10 @@
   --green: #3ddc84;
   --red: #ff5c5c;
   --radius: 14px;
+  --radius-sm: 10px;
+  --radius-xs: 8px;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.25), 0 4px 16px rgba(0, 0, 0, 0.12);
+  --ring: 0 0 0 3px rgba(233, 162, 59, 0.35);
   /* Derived surfaces (dark) */
   --error-bg: #2a1515;
   --error-border: #4a1d1d;
@@ -28,14 +34,18 @@
 /* Light theme */
 :root[data-theme='light'] {
   --bg: #f2f4f8;
+  --bg-elev: #ffffff;
   --card: #ffffff;
   --card-2: #e6e9f0;
+  --border: #d8dce5;
   --text: #1a1d27;
   --muted: #5c6472;
   --accent: #d98e1f;
   --accent-2: #a86a0a;
   --green: #16a34a;
   --red: #dc2626;
+  --shadow: 0 1px 2px rgba(16, 24, 40, 0.05), 0 4px 16px rgba(16, 24, 40, 0.06);
+  --ring: 0 0 0 3px rgba(217, 142, 31, 0.25);
   --error-bg: #fdecec;
   --error-border: #f5c2c2;
   --toast-bg: #e8f7ee;
@@ -57,24 +67,56 @@
   padding: 0;
 }
 
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   background: var(--bg);
   color: var(--text);
   min-height: 100vh;
+  line-height: 1.45;
+  letter-spacing: -0.01em;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Tabular figures for every number — a finance app's digits must not jiggle */
+.value,
+.tx-amount,
+.stat .value,
+.card .value,
+.row,
+.mono,
+.addr,
+.tx-sub,
+.verify-grid .value {
+  font-variant-numeric: tabular-nums;
+}
+
+button {
+  font-family: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus-visible,
+a:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
 }
 
 .app {
   max-width: 480px;
   margin: 0 auto;
   padding: 16px;
-  padding-bottom: 80px;
+  padding-bottom: 104px; /* clears the floating dock */
 }
 
 /* Hero (connect screen) */
 .hero {
   text-align: center;
-  padding: 48px 0 24px;
+  padding: 56px 0 28px;
   position: relative;
 }
 .hero .theme-toggle {
@@ -83,17 +125,19 @@ body {
   right: 0;
 }
 .hero .logo {
-  font-size: 56px;
-  margin-bottom: 8px;
+  font-size: 60px;
+  margin-bottom: 12px;
+  display: inline-block;
+  filter: drop-shadow(0 4px 12px rgba(233, 162, 59, 0.25));
 }
 .hero h1 {
-  font-size: 32px;
+  font-size: 34px;
   font-weight: 800;
-  letter-spacing: -0.5px;
+  letter-spacing: -0.02em;
 }
 .tagline {
   color: var(--muted);
-  margin-top: 6px;
+  margin-top: 8px;
   font-size: 15px;
 }
 
@@ -101,10 +145,27 @@ body {
   text-align: center;
   padding: 24px 0;
 }
+.connect-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin: 18px 0;
+}
+.connect-divider::before,
+.connect-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
 .hint {
   color: var(--muted);
   font-size: 13px;
-  line-height: 1.5;
+  line-height: 1.55;
   margin-top: 16px;
 }
 .hint.small {
@@ -121,7 +182,7 @@ body {
   background: var(--error-bg);
   border: 1px solid var(--error-border);
   color: var(--red);
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   padding: 10px 14px;
   font-size: 13px;
   margin-bottom: 12px;
@@ -139,25 +200,43 @@ body {
   background: var(--toast-bg);
   border: 1px solid var(--toast-border);
   color: var(--green);
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   padding: 10px 14px;
   font-size: 13px;
   margin-bottom: 12px;
   text-align: center;
   cursor: pointer;
+  animation: toast-in 0.2s ease-out;
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .btn-secondary {
   background: var(--card-2);
   color: var(--text);
-  border: none;
+  border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 12px 20px;
+  padding: 13px 20px;
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
   width: 100%;
   margin-top: 10px;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+.btn-secondary:hover {
+  background: var(--card);
+}
+.btn-secondary:active {
+  transform: scale(0.98);
 }
 
 .value.dim {
@@ -168,7 +247,7 @@ body {
 .topbar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   padding: 8px 0 16px;
 }
 .topbar .logo.small {
@@ -176,38 +255,54 @@ body {
 }
 .topbar h1 {
   font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
   flex: 1;
 }
 
-/* Tabs */
+/* Tabs — floating dock overlay, anchored to the bottom, never pushes content */
 .tabs {
   display: flex;
   gap: 6px;
   margin-bottom: 16px;
   overflow-x: auto;
   position: fixed;
-  bottom: 0;
+  bottom: calc(12px + env(safe-area-inset-bottom));
   left: 0;
   right: 0;
   margin-left: auto;
   margin-right: auto;
-  max-width: 480px;
-  background: var(--bg);
-  padding: 8px 16px calc(8px + env(safe-area-inset-bottom));
-  z-index: 10;
-  border-top: 1px solid var(--tab-border);
+  width: calc(100% - 24px);
+  max-width: 456px;
+  background: color-mix(in srgb, var(--bg-elev) 92%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  padding: 6px;
+  z-index: 20;
+  border: 1px solid var(--tab-border);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  /* Own compositing layer — keeps the dock visible on very tall pages
+     where WebViews can drop plain `position: fixed` elements. */
+  transform: translateZ(0);
+  will-change: transform;
 }
 .tab {
   flex: 1;
   padding: 10px 0;
   border: none;
-  border-radius: 10px;
-  background: var(--card);
+  border-radius: var(--radius-sm);
+  background: transparent;
   color: var(--muted);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.tab:hover {
+  background: var(--card);
+  color: var(--text);
 }
 .tab.active {
   background: var(--accent);
@@ -217,22 +312,25 @@ body {
 /* Cards */
 .card {
   background: var(--card);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 16px;
   margin-bottom: 12px;
+  box-shadow: var(--shadow);
 }
 .card .label {
   display: block;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 0.6px;
+  letter-spacing: 0.08em;
   margin-bottom: 6px;
 }
 .card .value {
   display: block;
   font-size: 24px;
   font-weight: 700;
+  letter-spacing: -0.01em;
 }
 .card .sub {
   display: block;
@@ -255,7 +353,7 @@ body {
   font-size: 14px;
 }
 .addr {
-  font-family: 'SF Mono', 'Roboto Mono', monospace;
+  font-family: 'SF Mono', 'Roboto Mono', ui-monospace, monospace;
   font-size: 12px;
   color: var(--muted);
   padding: 4px 0;
@@ -267,13 +365,16 @@ body {
 .receipts h2,
 .export h2 {
   font-size: 16px;
+  font-weight: 700;
   margin-bottom: 12px;
 }
 .tx {
   background: var(--card);
+  border: 1px solid var(--border);
   border-radius: 12px;
   padding: 12px 14px;
   margin-bottom: 8px;
+  transition: border-color 0.15s ease;
 }
 .tx-main {
   display: flex;
@@ -315,6 +416,7 @@ body {
 /* Receipts */
 .receipt {
   background: var(--card);
+  border: 1px solid var(--border);
   border-radius: 12px;
   padding: 12px 14px;
   margin-bottom: 8px;
@@ -327,7 +429,7 @@ body {
 
 /* Buttons */
 .btn-primary {
-  background: var(--accent);
+  background: linear-gradient(180deg, var(--accent), color-mix(in srgb, var(--accent) 88%, #000));
   color: var(--on-accent);
   border: none;
   border-radius: 12px;
@@ -336,6 +438,13 @@ body {
   font-weight: 700;
   cursor: pointer;
   width: 100%;
+  transition: transform 0.1s ease, filter 0.15s ease;
+}
+.btn-primary:hover {
+  filter: brightness(1.05);
+}
+.btn-primary:active {
+  transform: scale(0.98);
 }
 .btn-primary:disabled {
   opacity: 0.6;
@@ -359,12 +468,19 @@ a.btn-ghost.btn-link {
 .btn-ghost {
   background: var(--card);
   color: var(--text);
-  border: none;
-  border-radius: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   width: 36px;
   height: 36px;
   font-size: 16px;
   cursor: pointer;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+.btn-ghost:hover {
+  background: var(--card-2);
+}
+.btn-ghost:active {
+  transform: scale(0.94);
 }
 /* Full-width ghost button (connect screen demo mode) — btn-ghost is a 36px icon square */
 .btn-ghost-lg {
@@ -378,10 +494,14 @@ a.btn-ghost.btn-link {
   cursor: pointer;
   width: 100%;
   margin-top: 10px;
+  transition: color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
 }
 .btn-ghost-lg:hover {
   color: var(--text);
   border-color: var(--muted);
+}
+.btn-ghost-lg:active {
+  transform: scale(0.98);
 }
 .btn-ghost-lg:disabled {
   opacity: 0.6;
@@ -390,14 +510,21 @@ a.btn-ghost.btn-link {
   display: inline-block;
   background: var(--card-2);
   color: var(--accent-2);
-  border: none;
-  border-radius: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
   padding: 6px 12px;
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   margin-top: 8px;
   text-decoration: none;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+.btn-small:hover {
+  background: var(--card);
+}
+.btn-small:active {
+  transform: scale(0.97);
 }
 
 /* Verify page */
@@ -411,6 +538,7 @@ a.btn-ghost.btn-link {
 }
 .verify-card h1 {
   font-size: 20px;
+  font-weight: 700;
   margin-bottom: 8px;
 }
 .verify-card.valid {
@@ -434,7 +562,7 @@ a.btn-ghost.btn-link {
   color: var(--muted);
   font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.06em;
   margin-bottom: 2px;
 }
 .verify-grid .value {
@@ -442,7 +570,7 @@ a.btn-ghost.btn-link {
   word-break: break-all;
 }
 .mono {
-  font-family: 'SF Mono', 'Roboto Mono', monospace;
+  font-family: 'SF Mono', 'Roboto Mono', ui-monospace, monospace;
   font-size: 12px !important;
 }
 
@@ -459,12 +587,14 @@ a.btn-ghost.btn-link {
 }
 .analytics-head h2 {
   font-size: 18px;
+  font-weight: 700;
 }
 .period-switch {
   display: flex;
   gap: 4px;
   background: var(--card);
-  border-radius: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   padding: 3px;
 }
 .period {
@@ -474,8 +604,12 @@ a.btn-ghost.btn-link {
   font-size: 12px;
   font-weight: 600;
   padding: 5px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-xs);
   cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.period:hover {
+  color: var(--text);
 }
 .period.active {
   background: var(--accent);
@@ -488,6 +622,7 @@ a.btn-ghost.btn-link {
 }
 .stat {
   background: var(--card);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 12px 14px;
 }
@@ -496,7 +631,7 @@ a.btn-ghost.btn-link {
   color: var(--muted);
   font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.06em;
   margin-bottom: 4px;
 }
 .stat .value {
@@ -520,4 +655,111 @@ a.btn-ghost.btn-link {
 .tx-failed {
   color: var(--red);
   font-size: 12px;
+}
+.tx-kind {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.tx-kind.stake,
+.tx-kind.unstake {
+  color: var(--accent-2);
+}
+.tx-kind.reward {
+  color: var(--green);
+}
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.section-head h2 {
+  margin-bottom: 0;
+}
+.btn-link-inline {
+  background: none;
+  border: none;
+  color: var(--accent-2);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.help-card p {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text);
+}
+.help-card .hint.small {
+  margin-top: 8px;
+}
+
+/* Print: clean receipt slip, no chrome */
+@media print {
+  body {
+    background: #fff !important;
+    color: #000 !important;
+  }
+  .topbar,
+  .tabs,
+  .btn-ghost,
+  .btn-ghost.btn-link,
+  .btn-primary,
+  .btn-secondary,
+  .btn-small,
+  .theme-toggle,
+  .error-banner,
+  .toast {
+    display: none !important;
+  }
+  .app,
+  .verify {
+    max-width: 100%;
+    padding: 0;
+  }
+  .card,
+  .verify-card {
+    border: 1px solid #ccc !important;
+    box-shadow: none !important;
+    background: #fff !important;
+    color: #000 !important;
+    break-inside: avoid;
+  }
+  .card .label,
+  .verify-grid .label,
+  .stat .label {
+    color: #555 !important;
+  }
+  .card .value,
+  .verify-grid .value,
+  .stat .value {
+    color: #000 !important;
+  }
+  .tx,
+  .receipt,
+  .stat {
+    border: 1px solid #ddd !important;
+    background: #fff !important;
+    box-shadow: none !important;
+  }
+  .tx-sub,
+  .details,
+  .hint,
+  .addr {
+    color: #444 !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
