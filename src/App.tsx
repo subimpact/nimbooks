@@ -919,9 +919,9 @@ export default function App() {
 
   // Tax-year statement: recompute when txs / account / period change.
   // Prices load once (12h cache); the statement itself computes instantly.
-  const statementYears = useMemo(() => availableStatementYears(nimTxs), [nimTxs])
+  const statementYears = useMemo(() => availableStatementYears(allTxs), [allTxs])
   useEffect(() => {
-    if (!account?.nimiqAddress || nimTxs.length === 0) {
+    if (!account?.nimiqAddress || allTxs.length === 0) {
       setStatement(null)
       return
     }
@@ -932,7 +932,7 @@ export default function App() {
       try {
         const prices = await getDailyNimPrices()
         if (cancelled) return
-        setStatement(computeStatement(nimTxs, own, statementYear, prices))
+        setStatement(computeStatement(allTxs, own, statementYear, prices))
       } catch (e) {
         if (cancelled) return
         console.warn('Statement failed:', e)
@@ -945,7 +945,7 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [account?.nimiqAddress, nimTxs, statementYear])
+  }, [account?.nimiqAddress, allTxs, statementYear])
 
   const exportStatementCsv = () => {
     if (!account?.nimiqAddress || !statement) return
@@ -1297,6 +1297,10 @@ export default function App() {
               })()}
             </div>
 
+            {/* Raw indexed txs only: restaked rewards compound into the
+                staking contract and never touch the basic balance, so feeding
+                them to a trajectory anchored on the current basic balance
+                would rewrite history by the reward total. */}
             <Analytics
               txs={nimTxs}
               currentBalanceNim={nimBalance}
@@ -1372,15 +1376,22 @@ export default function App() {
                 </strong>
               </p>
             )}
-            {loading && nimTxs.length === 0 && <p className="empty">Loading transactions…</p>}
-            {!loading && nimTxs.length === 0 && (
+            {loading && allTxs.length === 0 && <p className="empty">Loading transactions…</p>}
+            {!loading && allTxs.length === 0 && (
               <p className="empty">No transactions found for this address.</p>
             )}
-            {nimTxs.slice(0, visibleTxCount).map((tx) => {
+            {allTxs.slice(0, visibleTxCount).map((tx) => {
               const isOut = tx.sender.replace(/\s+/g, '').toUpperCase() === account.nimiqAddress?.replace(/\s+/g, '').toUpperCase()
               const label = txLabel(tx, account.nimiqAddress ?? '')
               const memo = decodeMemo(tx.data)
               const demo = isDemoMode()
+              // Reward rows are a daily rollup of restaking events, not chain
+              // txs: there is no hash to open in the explorer and nothing a
+              // receipt could prove, so both are replaced by the payer's name.
+              const validator = tx.synthetic
+                ? (validators.find((v) => cleanAddr(v.address) === cleanAddr(tx.sender))?.name ??
+                  `${tx.sender.slice(0, 14)}…`)
+                : null
               return (
                 <div key={tx.hash} className="tx">
                   <div className="tx-main">
@@ -1394,44 +1405,50 @@ export default function App() {
                   </div>
                   <div className="tx-sub">
                     {tx.timestamp ? new Date(tx.timestamp).toLocaleString(lang) : '—'} ·{' '}
-                    <a
-                      className="tx-hash-link"
-                      href={explorerTxUrl(tx.hash)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      {tx.hash.slice(0, 10)}…
-                    </a>
+                    {tx.synthetic ? (
+                      <span className="tx-synthetic">{validator} · restaked, daily total</span>
+                    ) : (
+                      <a
+                        className="tx-hash-link"
+                        href={explorerTxUrl(tx.hash)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        {tx.hash.slice(0, 10)}…
+                      </a>
+                    )}
                     {tx.executionResult === false && <span className="tx-failed"> · failed</span>}
                   </div>
                   {memo && <div className="tx-memo">memo: {memo}</div>}
-                  <button
-                    className="btn-small"
-                    onClick={() => makeReceipt(tx)}
-                    disabled={
-                      demo ||
-                      receipts.some((r) => r.txHash === tx.hash) ||
-                      signingHash === tx.hash
-                    }
-                    title={demo ? 'Demo mode is read-only — connect your wallet to sign receipts.' : undefined}
-                  >
-                    {signingHash === tx.hash
-                      ? 'Signing…'
-                      : receipts.some((r) => r.txHash === tx.hash)
-                        ? '✓ Signed'
-                        : demo
-                          ? 'Sign receipt (demo)'
-                          : 'Sign receipt'}
-                  </button>
+                  {!tx.synthetic && (
+                    <button
+                      className="btn-small"
+                      onClick={() => makeReceipt(tx)}
+                      disabled={
+                        demo ||
+                        receipts.some((r) => r.txHash === tx.hash) ||
+                        signingHash === tx.hash
+                      }
+                      title={demo ? 'Demo mode is read-only — connect your wallet to sign receipts.' : undefined}
+                    >
+                      {signingHash === tx.hash
+                        ? 'Signing…'
+                        : receipts.some((r) => r.txHash === tx.hash)
+                          ? '✓ Signed'
+                          : demo
+                            ? 'Sign receipt (demo)'
+                            : 'Sign receipt'}
+                    </button>
+                  )}
                 </div>
               )
             })}
-            {nimTxs.length > visibleTxCount && (
+            {allTxs.length > visibleTxCount && (
               <button
                 className="btn-ghost-lg"
                 onClick={() => setVisibleTxCount((c) => c + 100)}
               >
-                Load more ({nimTxs.length - visibleTxCount} remaining)
+                Load more ({allTxs.length - visibleTxCount} remaining)
               </button>
             )}
           </section>
