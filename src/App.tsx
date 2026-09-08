@@ -26,6 +26,13 @@ import {
 } from './lib/chain'
 import { encodeReceipt, type SignedReceipt } from './lib/receipt'
 import Analytics, { type AnalyticsPeriod } from './Analytics'
+import {
+  availableStatementYears,
+  buildStatementCsv,
+  computeStatement,
+  getDailyNimPrices,
+  type Statement,
+} from './lib/statement'
 
 type View = 'dashboard' | 'history' | 'receipts' | 'export'
 
@@ -91,6 +98,9 @@ export default function App() {
   const [theme, setTheme] = useState<Theme>(getInitialTheme)
   const [showReceiptHelp, setShowReceiptHelp] = useState(false)
   const [visibleTxCount, setVisibleTxCount] = useState(50)
+  const [statementYear, setStatementYear] = useState<string>('all')
+  const [statement, setStatement] = useState<Statement | null>(null)
+  const [statementLoading, setStatementLoading] = useState(false)
 
   const toggleTheme = useCallback(() => {
     setTheme((t) => {
@@ -374,6 +384,55 @@ export default function App() {
     setError(null)
     setToast(null)
     setVisibleTxCount(50)
+    setStatement(null)
+    setStatementYear('all')
+  }
+
+  // Tax-year statement: recompute when txs / account / period change.
+  // Prices load once (12h cache); the statement itself computes instantly.
+  const statementYears = useMemo(() => availableStatementYears(nimTxs), [nimTxs])
+  useEffect(() => {
+    if (!account?.nimiqAddress || nimTxs.length === 0) {
+      setStatement(null)
+      return
+    }
+    const own = account.nimiqAddress // narrowed; stable across the closure
+    let cancelled = false
+    setStatementLoading(true)
+    ;(async () => {
+      try {
+        const prices = await getDailyNimPrices()
+        if (cancelled) return
+        setStatement(computeStatement(nimTxs, own, statementYear, prices))
+      } catch (e) {
+        if (cancelled) return
+        console.warn('Statement failed:', e)
+        setError('Statement prices unavailable right now — try again shortly.')
+        setStatement(null)
+      } finally {
+        if (!cancelled) setStatementLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [account?.nimiqAddress, nimTxs, statementYear])
+
+  const exportStatementCsv = () => {
+    if (!account?.nimiqAddress || !statement) return
+    const csv = buildStatementCsv(statement, account.nimiqAddress)
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    const label = statementYear === 'all' ? 'all-time' : statementYear
+    a.download = `nimbooks-statement-${label}-${account.nimiqAddress.replace(/\s+/g, '').slice(0, 8)}.csv`
+    document.body.appendChild(a)
+    a.click()
+    setTimeout(() => {
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    }, 1000)
   }
 
   const requestDeviceId = async () => {
@@ -716,6 +775,79 @@ export default function App() {
             <button className="btn-secondary" onClick={copyCsv} disabled={nimTxs.length === 0}>
               Copy CSV to clipboard
             </button>
+
+            <div className="card statement-card">
+              <span className="label">Tax-year statement</span>
+              <p className="hint small">
+                Daily closes at CoinGecko UTC prices, aggregated per day — received, sent, fees,
+                rewards, and net NIM with USD values. Failed transactions excluded.
+              </p>
+              {statementYears.length > 0 && (
+                <div className="statement-controls">
+                  <label className="hint small" htmlFor="statementYear">
+                    Period
+                  </label>
+                  <select
+                    id="statementYear"
+                    className="select"
+                    value={statementYear}
+                    onChange={(e) => setStatementYear(e.target.value)}
+                  >
+                    <option value="all">All time</option>
+                    {statementYears.map((y) => (
+                      <option key={y} value={y}>
+                        {y}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {statementLoading && <p className="empty">Building statement…</p>}
+              {!statementLoading && statement && (
+                <>
+                  <div className="statement-summary">
+                    <div className="row">
+                      <span>Received</span>
+                      <span>
+                        {statement.totals.receivedNim.toFixed(5)} NIM
+                        {statement.totals.receivedUsd !== null &&
+                          ` · $${statement.totals.receivedUsd.toFixed(2)}`}
+                      </span>
+                    </div>
+                    <div className="row">
+                      <span>Sent + fees</span>
+                      <span>
+                        {(statement.totals.sentNim + statement.totals.feeNim).toFixed(5)} NIM
+                        {statement.totals.sentUsd !== null &&
+                          ` · $${(statement.totals.sentUsd + (statement.totals.feeNim * (statement.rows[0]?.closeUsd ?? 0))).toFixed(2)}`}
+                      </span>
+                    </div>
+                    <div className="row">
+                      <span>Rewards</span>
+                      <span>{statement.totals.rewardsNim.toFixed(5)} NIM</span>
+                    </div>
+                    <div className="row strong">
+                      <span>Net</span>
+                      <span>
+                        {statement.totals.netNim.toFixed(5)} NIM
+                        {statement.totals.netUsd !== null && ` · $${statement.totals.netUsd.toFixed(2)}`}
+                      </span>
+                    </div>
+                    <div className="row">
+                      <span>Transactions</span>
+                      <span>{statement.totals.txCount}</span>
+                    </div>
+                  </div>
+                  <button className="btn-primary" onClick={exportStatementCsv}>
+                    Download statement CSV ({statement.rows.length} days)
+                  </button>
+                </>
+              )}
+              {!statementLoading && !statement && nimTxs.length === 0 && (
+                <p className="hint small">No transactions loaded yet — statements appear here.</p>
+              )}
+            </div>
+
             <button className="btn-secondary" onClick={requestDeviceId}>
               {deviceId ? `Device: ${deviceId.slice(0, 12)}…` : 'Enable device preferences'}
             </button>

@@ -727,6 +727,42 @@ a.btn-ghost.btn-link {
   margin-top: 8px;
 }
 
+/* Statement (Export tab) */
+.statement-card .select {
+  width: 100%;
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-size: 14px;
+  margin-top: 4px;
+  margin-bottom: 8px;
+}
+.statement-card .statement-controls label {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--muted);
+}
+.statement-summary {
+  margin: 8px 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px 12px;
+  background: var(--bg-elev);
+}
+.statement-summary .row {
+  border-bottom: 1px solid var(--border);
+  padding: 8px 0;
+}
+.statement-summary .row:last-child {
+  border-bottom: none;
+}
+.statement-summary .row.strong {
+  font-weight: 700;
+  color: var(--text);
+}
+
 /* Print: clean receipt slip, no chrome */
 @media print {
   body {
