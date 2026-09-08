@@ -1193,6 +1193,19 @@ a.btn-ghost.btn-link {
 .modal .input {
   margin-top: 2px;
 }
+/* The download link is a very long URL (it carries the CSV) — keep it
+   readable and selectable without stretching the sheet. */
+.modal textarea.download-link {
+  margin-top: 10px;
+  font-family: 'SF Mono', 'Roboto Mono', ui-monospace, monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  resize: none;
+  word-break: break-all;
+}
+.modal .download-link + .btn-primary {
+  margin-top: 10px;
+}
 .btn-primary.stake-submit {
   margin-top: 14px;
 }

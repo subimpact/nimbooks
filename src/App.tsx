@@ -65,6 +65,7 @@ import {
 } from './lib/invoice'
 import { getRestakeRewardTxs, restakeWindow } from './lib/stakingEvents'
 import { isInNimiqPay, isMobileDevice, NIMIQ_PAY_APP_URL } from './lib/device'
+import { buildDownloadLink } from './lib/downloadLink'
 import QrCode from './QrCode'
 import Analytics, { type AnalyticsPeriod } from './Analytics'
 import {
@@ -173,6 +174,9 @@ export default function App() {
   const [statementYear, setStatementYear] = useState<string>('all')
   const [statement, setStatement] = useState<Statement | null>(null)
   const [statementLoading, setStatementLoading] = useState(false)
+  // Real-HTTPS download link for WebViews that can't save files (see downloadLink.ts).
+  const [downloadLink, setDownloadLink] = useState<string | null>(null)
+  const [linkBusy, setLinkBusy] = useState(false)
   const [invoices, setInvoices] = useState<StoredInvoice[]>([])
   const [amountInput, setAmountInput] = useState('')
   const [memoInput, setMemoInput] = useState('')
@@ -888,6 +892,22 @@ export default function App() {
     )
   }
 
+  // One source of truth for what each export is called and what it holds, so
+  // the download, copy, and link paths can never drift apart.
+  const csvExport = (kind: 'history' | 'statement'): { filename: string; csv: string } | null => {
+    if (!account?.nimiqAddress) return null
+    const tag = account.nimiqAddress.replace(/\s+/g, '').slice(0, 8)
+    if (kind === 'history') {
+      return { filename: `nimbooks-${tag}.csv`, csv: buildCsv() }
+    }
+    if (!statement) return null
+    const label = statementYear === 'all' ? 'all-time' : statementYear
+    return {
+      filename: `nimbooks-statement-${label}-${tag}.csv`,
+      csv: buildStatementCsv(statement, account.nimiqAddress),
+    }
+  }
+
   const downloadCsv = async (filename: string, csv: string) => {
     // Mobile-first: Web Share API with a real file (works in Android Chrome,
     // iOS Safari 15+, and most WebViews). Anchor-download silently no-ops in
@@ -934,11 +954,8 @@ export default function App() {
   }
 
   const exportCsv = () => {
-    if (!account?.nimiqAddress) return
-    void downloadCsv(
-      `nimbooks-${account.nimiqAddress.replace(/\s+/g, '').slice(0, 8)}.csv`,
-      buildCsv()
-    )
+    const e = csvExport('history')
+    if (e) void downloadCsv(e.filename, e.csv)
   }
 
   const copyCsv = async () => {
@@ -948,6 +965,30 @@ export default function App() {
       setToast('CSV copied to clipboard!')
     } catch {
       setError('Could not copy CSV — use Download instead.')
+    }
+  }
+
+  // Nimiq Pay's WebView cannot save files at all, so hand the user a real
+  // HTTPS link (plus a QR for a second device) they can open in a browser
+  // that does honour Content-Disposition.
+  const getDownloadLink = async (kind: 'history' | 'statement') => {
+    const e = csvExport(kind)
+    if (!e || !e.csv) {
+      setError('Nothing to export yet.')
+      return
+    }
+    setLinkBusy(true)
+    try {
+      const link = await buildDownloadLink(e.csv, e.filename)
+      if (!link) {
+        setToast('CSV too large for a link — use Copy CSV instead.')
+        return
+      }
+      setDownloadLink(link)
+    } catch {
+      setError('Could not build download link.')
+    } finally {
+      setLinkBusy(false)
     }
   }
 
@@ -967,6 +1008,7 @@ export default function App() {
     setVisibleTxCount(50)
     setStatement(null)
     setStatementYear('all')
+    setDownloadLink(null)
     setInvoices([])
     setAmountInput('')
     setMemoInput('')
@@ -1011,13 +1053,8 @@ export default function App() {
   }, [account?.nimiqAddress, allTxs, statementYear])
 
   const exportStatementCsv = () => {
-    if (!account?.nimiqAddress || !statement) return
-    const csv = buildStatementCsv(statement, account.nimiqAddress)
-    const label = statementYear === 'all' ? 'all-time' : statementYear
-    void downloadCsv(
-      `nimbooks-statement-${label}-${account.nimiqAddress.replace(/\s+/g, '').slice(0, 8)}.csv`,
-      csv
-    )
+    const e = csvExport('statement')
+    if (e) void downloadCsv(e.filename, e.csv)
   }
 
   const requestDeviceId = async () => {
@@ -1729,6 +1766,17 @@ export default function App() {
             <button className="btn-secondary" onClick={copyCsv} disabled={allTxs.length === 0}>
               Copy CSV to clipboard
             </button>
+            {/* Pay's WebView can't save files; desktop/Hub users already get a
+                real download, so this route only appears where it's needed. */}
+            {inNimiqPay && (
+              <button
+                className="btn-secondary"
+                onClick={() => void getDownloadLink('history')}
+                disabled={allTxs.length === 0 || linkBusy}
+              >
+                {linkBusy ? 'Building link…' : 'Get download link'}
+              </button>
+            )}
 
             <div className="card statement-card">
               <span className="label">Tax-year statement</span>
@@ -1812,6 +1860,15 @@ export default function App() {
                     >
                       Copy CSV
                     </button>
+                    {inNimiqPay && (
+                      <button
+                        className="btn-secondary"
+                        onClick={() => void getDownloadLink('statement')}
+                        disabled={linkBusy}
+                      >
+                        {linkBusy ? 'Building link…' : 'Get download link'}
+                      </button>
+                    )}
                   </div>
                 </>
               )}
@@ -1827,6 +1884,65 @@ export default function App() {
           </section>
         )}
       </main>
+
+      {downloadLink && (
+        <div className="modal-overlay" onClick={() => setDownloadLink(null)}>
+          <div
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="CSV download link"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-head">
+              <h2>Download link</h2>
+              <button className="btn-ghost" onClick={() => setDownloadLink(null)} aria-label="Close">
+                ✕
+              </button>
+            </div>
+            <p className="hint">
+              Nimiq Pay can't save files directly — open this link in your phone's browser (or scan
+              the QR with another device) to download the CSV.
+            </p>
+            <textarea
+              className="input download-link"
+              readOnly
+              rows={3}
+              value={downloadLink}
+              onFocus={(e) => e.currentTarget.select()}
+              aria-label="CSV download link"
+            />
+            <button
+              className="btn-primary"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(downloadLink)
+                  setToast('Download link copied — open it in your browser to save the file ✓')
+                } catch {
+                  setError('Could not copy the link — select it above and copy manually.')
+                }
+              }}
+            >
+              Copy link
+            </button>
+            {/* The whole CSV rides in the URL, so long exports outgrow what a
+                camera can resolve. Show the QR only while it stays scannable. */}
+            {downloadLink.length <= 1200 ? (
+              <div className="invoice-qr">
+                <QrCode value={downloadLink} size={220} label="Scan to download CSV" />
+                <p className="hint small">Scan to download CSV</p>
+              </div>
+            ) : (
+              <p className="hint small">
+                This export is too long for a scannable QR code — copy the link instead.
+              </p>
+            )}
+            <p className="hint small">
+              The link carries the CSV itself, compressed. Nothing is stored on a server.
+            </p>
+          </div>
+        </div>
+      )}
 
       {currencyOpen && (
         <div className="modal-overlay" onClick={() => setCurrencyOpen(false)}>
