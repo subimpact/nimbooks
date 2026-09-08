@@ -1,4 +1,0 @@
-# NimBooks canonical host is nimbooks.subimpact.net (registered in the Nimiq
-# mini-apps registry). The pages.dev URL redirects so old links, receipt
-# fragments, and the submitted competition URL keep working.
-https://nimbooks.pages.dev/* https://nimbooks.subimpact.net/:splat 301
