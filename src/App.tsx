@@ -23,6 +23,7 @@ import {
   getStakingHolding,
   getVestingHoldings,
   getNimiqTransactionHistory,
+  getNimiqBlockNumber,
   waitForTxMined,
   getEvmBalances,
   getAllFiatRates,
@@ -163,6 +164,12 @@ type TxVerify = 'checking' | 'confirmed' | 'expired' | 'unknown'
 const TX_VERIFY_TIMEOUT_MS = 90_000
 const TX_VERIFY_INTERVAL_MS = 10_000
 
+// Nimiq PoS: one epoch is 43,200 blocks at ~1 block/second (~12h). A retire is
+// only valid a full reporting epoch after the deactivation took effect, which
+// is what gates step 2 of the unstake flow.
+const BLOCKS_PER_EPOCH = 43_200
+const SECONDS_PER_BLOCK = 1
+
 // Wording for the locally-recorded staking legs (lib/stakingLog.ts). Past
 // tense: each row records an action that was submitted, not a state the stake
 // is currently in — the balance banner reports the state.
@@ -193,6 +200,9 @@ export default function App() {
   const [rewardTxs, setRewardTxs] = useState<NimiqTx[]>([])
   const [htlcHoldings, setHtlcHoldings] = useState<HtlcHolding[]>([])
   const [stakingHolding, setStakingHolding] = useState<StakingHolding | null>(null)
+  // Chain head, refreshed alongside the balances. Unstake steps are gated on
+  // block height, not wall clock — 0 means "not known yet".
+  const [currentBlock, setCurrentBlock] = useState<number>(0)
   const [vestingHoldings, setVestingHoldings] = useState<VestingHolding[]>([])
   const [evmBalances, setEvmBalances] = useState<EvmBalance[]>([])
   // Full rate table per asset — one entry per display currency, so switching
@@ -552,6 +562,14 @@ export default function App() {
           console.warn('Staking holding lookup failed:', e)
           setStakingHolding(null)
         }
+        // Chain head — needed to tell whether a retire is already valid.
+        // Best effort: a failure keeps the previous height and the 10s
+        // auto-refresh picks it up on the next pass.
+        try {
+          setCurrentBlock(await getNimiqBlockNumber())
+        } catch (e) {
+          console.warn('Block number lookup failed:', e)
+        }
         // Pending unstake resolution: the marker clears when the staker record
         // shows the retire took effect (inactive balance appeared, or active
         // dropped by the pending amount) — the chain flip is the only real
@@ -821,10 +839,26 @@ export default function App() {
     }
     const inactive = Number(stakingHolding?.inactive || 0)
     const retired = Number(stakingHolding?.retired || 0)
-    if (inactive > 0) return { kind: 'cooling' as const, amountNim: inactive / 100000 }
+    if (inactive > 0) {
+      // The retire tx only becomes valid one full reporting epoch after the
+      // deactivation takes effect. Sending it before that is rejected outright
+      // — the tx never mines and the state never moves, so the button has to
+      // stay away until the chain head passes that height.
+      const inactiveFrom = stakingHolding?.inactiveFrom || 0
+      const retireValidAt = inactiveFrom > 0 ? inactiveFrom + BLOCKS_PER_EPOCH : 0
+      const retireReady = retireValidAt > 0 && currentBlock >= retireValidAt
+      return {
+        kind: 'cooling' as const,
+        amountNim: inactive / 100000,
+        retireValidAt,
+        retireReady,
+      }
+    }
+    // `retired > 0` already means the retire took effect — withdraw needs no
+    // further height gate.
     if (retired > 0) return { kind: 'ready' as const, amountNim: retired / 100000 }
     return null
-  }, [pendingUnstake, stakingHolding])
+  }, [pendingUnstake, stakingHolding, currentBlock])
 
   // Unstake timing (protocol): retire-stake takes effect at the NEXT election
   // block (epoch boundary, ~12h), then the reporting window (1 epoch, ~12h)
@@ -984,6 +1018,12 @@ export default function App() {
   // window passed — before that the provider rejects it and says so.
   const completeUnstake = async () => {
     if (inactiveLuna <= 0) return
+    // Belt and braces: the banner already hides the button until the retire is
+    // valid, but a click racing a refresh must not send a tx the chain will
+    // reject (it would never mine, leaving the state untouched).
+    const inactiveFrom = stakingHolding?.inactiveFrom || 0
+    const retireValidAt = inactiveFrom > 0 ? inactiveFrom + BLOCKS_PER_EPOCH : 0
+    if (retireValidAt > 0 && currentBlock < retireValidAt) return
     setUnstaking(true)
     setUnstakeError(null)
     setUnstakeHash(null)
@@ -1560,16 +1600,28 @@ export default function App() {
                       </>
                     )}
                   </span>
-                  {unstakeActivity.kind === 'cooling' && (
-                    <button
-                      type="button"
-                      className="btn-small"
-                      onClick={() => void completeUnstake()}
-                      disabled={!canStake() || staking || unstaking}
-                    >
-                      {unstaking ? 'Submitting…' : 'Complete unstake'}
-                    </button>
-                  )}
+                  {unstakeActivity.kind === 'cooling' &&
+                    (unstakeActivity.retireReady ? (
+                      <button
+                        type="button"
+                        className="btn-small"
+                        onClick={() => void completeUnstake()}
+                        disabled={!canStake() || staking || unstaking}
+                      >
+                        {unstaking ? 'Submitting…' : 'Complete unstake'}
+                      </button>
+                    ) : (
+                      // No button before the retire is valid — the chain would
+                      // reject the tx, so a click here is a dead click.
+                      <span className="banner-hint">
+                        {unstakeActivity.retireValidAt > 0 && currentBlock > 0
+                          ? `Complete unstake available in ~${Math.ceil(
+                              ((unstakeActivity.retireValidAt - currentBlock) * SECONDS_PER_BLOCK) /
+                                3600,
+                            )}h`
+                          : 'Complete unstake available after the reporting window'}
+                      </span>
+                    ))}
                   {unstakeActivity.kind === 'ready' && (
                     <button
                       type="button"

@@ -148,6 +148,10 @@ export interface StakingHolding {
   inactive: string // Luna
   retired: string // Luna
   delegation: string // validator address, '' when unknown
+  // Block height at which the deactivation takes effect. The retire tx is only
+  // valid one full reporting epoch later (`inactiveFrom + blocksPerEpoch`);
+  // sending it earlier is rejected and never mines. 0 when unknown/never.
+  inactiveFrom: number
 }
 
 /**
@@ -165,6 +169,7 @@ export async function getStakingHolding(ownAddress: string): Promise<StakingHold
       inactive: String(data.inactiveBalance ?? 0),
       retired: String(data.retiredBalance ?? 0),
       delegation: data.delegation ?? '',
+      inactiveFrom: Number(data.inactiveFrom ?? 0) || 0,
     }
   } catch (e) {
     // "No staker with address: …" is the answer for every user who has never
