@@ -390,6 +390,12 @@ a:focus-visible {
   font-weight: 700;
   color: var(--text);
 }
+/* Validator the stake is delegated to — a footnote to the "Staked" label */
+.delegate-to {
+  font-family: 'SF Mono', 'Roboto Mono', ui-monospace, monospace;
+  font-size: 11px;
+  opacity: 0.75;
+}
 .addr {
   font-family: 'SF Mono', 'Roboto Mono', ui-monospace, monospace;
   font-size: 12px;
@@ -736,14 +742,23 @@ a.btn-ghost.btn-link {
 .tx-kind.reward {
   color: var(--green);
 }
-.tx-kind.swap {
+.tx-kind.swap,
+.tx-kind.vesting {
   color: var(--muted);
 }
 .section-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   margin-bottom: 12px;
+}
+/* Two help toggles share the header — wrap them rather than squeeze the title */
+.help-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px 12px;
 }
 .section-head h2 {
   margin-bottom: 0;
