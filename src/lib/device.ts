@@ -21,4 +21,4 @@ export function isInNimiqPay(): boolean {
 
 // Deep link that opens NimBooks inside Nimiq Pay. Hardcoded to the registered
 // host (not window.location) so preview/staging URLs can't produce a dead link.
-export const NIMIQ_PAY_APP_URL = 'https://nimpay.app/miniapps/open/nimbooks.pages.dev'
+export const NIMIQ_PAY_APP_URL = 'https://nimpay.app/miniapps/open/nimbooks.subimpact.net'
