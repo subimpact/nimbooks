@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import { applyTheme, getInitialTheme, type Theme } from './lib/theme'
 import {
@@ -668,6 +668,29 @@ export default function App() {
     }
   }
 
+  const [countdown, setCountdown] = useState(10)
+  const loadingRef = useRef(false)
+  useEffect(() => {
+    loadingRef.current = loading
+  }, [loading])
+  // Auto-refresh: count down from 10s and refresh when it hits 0. Only for a
+  // real connected wallet (demo mode stays manual to avoid pointless RPC load).
+  useEffect(() => {
+    if (!account?.nimiqAddress || isDemoMode()) return
+    setCountdown(10)
+    const id = setInterval(() => {
+      setCountdown((c) => {
+        if (c <= 1) {
+          if (!loadingRef.current) void refresh(account)
+          return 10
+        }
+        return c - 1
+      })
+    }, 1000)
+    return () => clearInterval(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [account?.nimiqAddress])
+
   const makeReceipt = async (tx: NimiqTx) => {
     if (!account?.nimiqAddress) return
     if (receipts.some((r) => r.txHash === tx.hash)) {
@@ -990,7 +1013,7 @@ export default function App() {
             <path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12" />
           </svg>
         </button>
-        <button className="btn-ghost" onClick={() => refresh(account)} disabled={loading} title="Refresh" aria-label="Refresh">
+        <button className="btn-ghost refresh-btn" onClick={() => refresh(account)} disabled={loading} title="Refresh" aria-label="Refresh">
           {loading ? (
             <span className="spin">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1003,6 +1026,9 @@ export default function App() {
               <path d="M21 12a9 9 0 1 1-2.64-6.36" />
               <path d="M21 3v6h-6" />
             </svg>
+          )}
+          {!demoMode && account?.nimiqAddress && !loading && (
+            <span className="refresh-countdown">{countdown}</span>
           )}
         </button>
         <button className="btn-ghost" onClick={disconnect} title="Disconnect wallet" aria-label="Disconnect wallet">
