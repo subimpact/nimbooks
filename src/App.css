@@ -374,6 +374,22 @@ a:focus-visible {
   padding: 6px 0;
   font-size: 14px;
 }
+/* Available / locked / total split, shown only while a swap holds funds */
+.balance-breakdown {
+  margin-top: 2px;
+}
+.balance-breakdown .row {
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+}
+.balance-breakdown .row:last-child {
+  border-bottom: none;
+}
+.balance-breakdown .row.strong {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+}
 .addr {
   font-family: 'SF Mono', 'Roboto Mono', ui-monospace, monospace;
   font-size: 12px;
@@ -719,6 +735,9 @@ a.btn-ghost.btn-link {
 }
 .tx-kind.reward {
   color: var(--green);
+}
+.tx-kind.swap {
+  color: var(--muted);
 }
 .section-head {
   display: flex;

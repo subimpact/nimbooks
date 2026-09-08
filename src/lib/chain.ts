@@ -16,6 +16,7 @@ export interface NimiqTx {
   blockNumber?: number
   proof?: string
   executionResult?: boolean
+  toType?: number // 0 = basic account, 2 = HTLC contract creation (Nimiq Pay swaps)
 }
 
 async function rpcCall(method: string, params: unknown[], timeoutMs = 10000): Promise<any> {
@@ -51,6 +52,74 @@ export async function getNimiqBalance(address: string): Promise<string> {
   return String(data?.balance ?? '0')
 }
 
+// --- HTLC holdings (funds parked in a pending swap) ---
+
+// Nimiq Pay routes transfers through HTLC contracts: the wallet funds a
+// contract, then the counterparty claims it (or it refunds). While a swap is
+// in flight the money lives in the contract, so the basic account reads 0 —
+// `getNimiqBalance` alone under-reports what the user actually holds.
+export interface HtlcHolding {
+  address: string
+  balance: string // Luna
+  timeout?: number // ms
+  sender: string
+  recipient: string
+}
+
+// One RPC call per contract, so bound the fan-out. Candidates are ordered
+// newest-first: recent HTLCs are the ones plausibly still funded.
+const MAX_HTLC_LOOKUPS = 10
+const HTLC_LOOKUP_DELAY = 150 // ms — nimiqwatch 429s on unpaced bursts
+
+/**
+ * Sum up the user's funds sitting in HTLC contracts, discovered from their own
+ * transaction history (contract-creating txs carry `toType === 2`).
+ *
+ * Only contracts that are still *funded* are returned: a settled HTLC is
+ * pruned from the accounts tree and reads back as a plain basic account with
+ * balance 0, which is noise for a "locked funds" figure. Both the `type` check
+ * and the balance check filter those out.
+ */
+export async function getHtlcHoldings(ownAddress: string, txs: NimiqTx[]): Promise<HtlcHolding[]> {
+  const own = cleanAddress(ownAddress).toUpperCase()
+  const candidates: string[] = []
+  const seen = new Set<string>()
+  for (const tx of [...txs].sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))) {
+    if (tx.toType !== 2 || !tx.recipient) continue
+    const key = cleanAddress(tx.recipient).toUpperCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    candidates.push(tx.recipient)
+    if (candidates.length >= MAX_HTLC_LOOKUPS) break
+  }
+
+  const holdings: HtlcHolding[] = []
+  for (let i = 0; i < candidates.length; i++) {
+    if (i > 0) await new Promise((r) => setTimeout(r, HTLC_LOOKUP_DELAY))
+    try {
+      const data = await rpcCall('getAccountByAddress', [cleanAddress(candidates[i])])
+      if (data?.type !== 'htlc') continue // already settled → pruned to 'basic'
+      const isOurs =
+        cleanAddress(data.sender ?? '').toUpperCase() === own ||
+        cleanAddress(data.recipient ?? '').toUpperCase() === own
+      if (!isOurs) continue
+      const balance = String(data.balance ?? '0')
+      if (!(Number(balance) > 0)) continue
+      holdings.push({
+        address: data.address ?? candidates[i],
+        balance,
+        timeout: data.timeout,
+        sender: data.sender,
+        recipient: data.recipient,
+      })
+    } catch (e) {
+      // A rate limit or flaky lookup must not cost the user their balance view
+      console.warn('HTLC lookup failed for', candidates[i], e)
+    }
+  }
+  return holdings
+}
+
 export async function getNimiqTransactions(
   address: string,
   max = 50,
@@ -71,6 +140,7 @@ export async function getNimiqTransactions(
       blockNumber: t.blockNumber ?? t.blockHeight,
       proof: t.proof ?? undefined,
       executionResult: t.executionResult,
+      toType: t.toType ?? 0,
     }))
   } catch (e) {
     console.warn('getNimiqTransactions failed:', e)
@@ -97,6 +167,9 @@ function readTxCache(address: string): NimiqTx[] | null {
     if (!raw) return null
     const entry = JSON.parse(raw) as TxCacheEntry
     if (entry.address !== address || Date.now() - entry.at > TX_CACHE_TTL) return null
+    // Entries cached before HTLC support carry no `toType`; serving them would
+    // hide swap labels and locked balances until the TTL expired.
+    if (entry.txs.some((t) => t.toType === undefined)) return null
     return entry.txs
   } catch {
     return null
@@ -166,6 +239,7 @@ export async function getNimiqTransactionByHash(hash: string): Promise<NimiqTx |
       blockNumber: t.blockNumber ?? t.blockHeight,
       proof: t.proof ?? undefined,
       executionResult: t.executionResult,
+      toType: t.toType ?? 0,
     }
   } catch (e) {
     // RPC returns -32603 "Transaction not found: <hash>" for nonexistent hashes.
