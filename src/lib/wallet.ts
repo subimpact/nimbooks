@@ -222,6 +222,80 @@ export async function sendNim({
   return { hash: null, serializedTx: res }
 }
 
+// --- Staking ---
+
+export type StakeResult = { ok: true; hash: string } | { ok: false; error: string }
+
+/**
+ * Can the active provider stake? Nimiq Pay only: the injected provider signs
+ * and sends staking transactions itself, while Nimiq Hub's `signStaking` wants
+ * a pre-serialized transaction (and therefore the @nimiq/core wasm bundle).
+ */
+export function canStake(): boolean {
+  return activeProvider === 'pay'
+}
+
+/**
+ * Delegate NIM to a validator through Nimiq Pay.
+ *
+ * @param delegation validator address for a first stake; `null` adds to the
+ *   staker record that already exists (the delegation is fixed at creation).
+ * @param amountNim amount in NIM — converted to Luna here (1 NIM = 1e5 Luna).
+ *
+ * Errors come back in the result rather than thrown: every failure here is a
+ * message for the stake panel, not an exception for the app to survive.
+ */
+export async function stakeNim(delegation: string | null, amountNim: number): Promise<StakeResult> {
+  if (activeProvider === 'demo') {
+    return { ok: false, error: 'Demo mode is read-only — connect your wallet to stake.' }
+  }
+  if (activeProvider === 'hub') {
+    return {
+      ok: false,
+      error: 'Staking needs the Nimiq Pay app — the browser login can read and sign, but not stake.',
+    }
+  }
+
+  const value = Math.round(amountNim * 100000)
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    return { ok: false, error: 'Enter an amount above 0.' }
+  }
+
+  // Same as connectWallet: re-init if the provider handle was never obtained
+  // (or the page reloaded inside Nimiq Pay without a fresh connect).
+  if (!nimiqProvider) {
+    try {
+      nimiqProvider = await init({ timeout: 10000 })
+    } catch (e) {
+      console.warn('Nimiq provider unavailable for staking:', e)
+    }
+  }
+  if (!nimiqProvider) {
+    return { ok: false, error: 'No Nimiq wallet connected — open NimBooks inside Nimiq Pay to stake.' }
+  }
+
+  try {
+    const res = delegation
+      ? await nimiqProvider.sendNewStakerTransaction({
+          delegation: delegation.replace(/\s+/g, '').toUpperCase(),
+          value,
+          fee: 0,
+        })
+      : await nimiqProvider.sendStakeTransaction({ value, fee: 0 })
+    if (typeof res !== 'string') {
+      const message = res && typeof res === 'object' && 'error' in res ? res.error?.message : null
+      return { ok: false, error: message || 'The staking transaction was rejected.' }
+    }
+    // Nimiq Pay hands back the transaction it sent — a hash for the staking
+    // calls, a serialized transaction for the basic ones. Either way it is the
+    // receipt the user sees; the balance card is the real confirmation.
+    return { ok: true, hash: res }
+  } catch (e) {
+    console.error('Nimiq Pay staking failed:', e)
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
 export async function signReceipt(
   receipt: Omit<SignedReceipt, 'publicKey' | 'signature'>,
   signer?: string
