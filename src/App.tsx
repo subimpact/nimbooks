@@ -868,23 +868,16 @@ export default function App() {
     }
     setTimeout(revoke, 10000)
     window.addEventListener('pagehide', revoke, { once: true })
-    // Inside Nimiq Pay's WebView there is often no download listener — the
-    // anchor click silently does nothing. Open the CSV in a new window/tab
-    // instead: WebView clients usually route target=_blank to the system
-    // browser, where the user can view and save it. A data: URL is used here
-    // because blob: URLs don't survive the cross-process hop to the system
-    // browser. Clipboard as last resort.
+    // Inside Nimiq Pay's WebView: no download listener (anchor silently
+    // no-ops) and window.open(data:) renders a blank window (verified on
+    // device). Clipboard is the one path that always works — go straight to
+    // it with a clear toast.
     if (window.nimiqPay) {
-      const dataUrl = `data:text/csv;charset=utf-8,${encodeURIComponent(csv)}`
-      const opened = window.open(dataUrl, '_blank')
-      if (opened) {
-        return
-      }
       try {
         await navigator.clipboard.writeText(csv)
-        setToast('Download may not work in this app — CSV copied to clipboard instead ✓')
+        setToast('CSV copied to clipboard — paste into any app to save it ✓')
       } catch {
-        /* clipboard also unavailable — nothing more we can do */
+        setError('Could not copy CSV — try the Copy button instead.')
       }
     }
   }
