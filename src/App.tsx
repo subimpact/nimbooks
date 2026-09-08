@@ -9,6 +9,8 @@ import {
   isDemoMode,
   canStake,
   stakeNim,
+  unstakeRetire,
+  unstakeRemove,
   getDeviceId,
   getLanguage,
   signReceipt,
@@ -173,6 +175,11 @@ export default function App() {
   const [expiryIdx, setExpiryIdx] = useState(0)
   const [shownQrId, setShownQrId] = useState<string | null>(null)
   const [stakeOpen, setStakeOpen] = useState(false)
+  const [unstakeOpen, setUnstakeOpen] = useState(false)
+  const [unstakeAmount, setUnstakeAmount] = useState('')
+  const [unstaking, setUnstaking] = useState(false)
+  const [unstakeError, setUnstakeError] = useState<string | null>(null)
+  const [unstakeHash, setUnstakeHash] = useState<string | null>(null)
   const [validators, setValidators] = useState<ValidatorInfo[]>([])
   const [validatorsLoading, setValidatorsLoading] = useState(false)
   const [validatorsError, setValidatorsError] = useState<string | null>(null)
@@ -499,10 +506,14 @@ export default function App() {
 
   // --- Staking (Nimiq Pay) ---
 
-  // Fetch the validator list the first time the panel opens (10-min cache in
-  // chain.ts, so reopening it is free).
+  // Fetch the validator list whenever a wallet is connected (10-min cache in
+  // chain.ts, so reconnects are free). The balance card and the stake panel
+  // both resolve validator names from it.
   useEffect(() => {
-    if (!stakeOpen || validators.length > 0) return
+    // Fetch whenever a wallet is connected (and lazily when the panel opens):
+    // the balance card and the stake panel both resolve validator names from
+    // this list, so it must exist outside the panel too. Cached 10 min.
+    if (!account?.nimiqAddress || validators.length > 0) return
     let cancelled = false
     setValidatorsLoading(true)
     setValidatorsError(null)
@@ -521,7 +532,7 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [stakeOpen, validators.length])
+  }, [account?.nimiqAddress, stakeOpen, validators.length])
 
   // Escape closes whichever panel is open.
   useEffect(() => {
@@ -582,6 +593,56 @@ export default function App() {
       if (account) await refresh(account)
     } finally {
       setStaking(false)
+    }
+  }
+
+  const retiredLuna = Number(stakingHolding?.retired || 0)
+  const inactiveLuna = Number(stakingHolding?.inactive || 0)
+  // After the cooldown, retired stake can be withdrawn 1:1 — that is the
+  // amount the withdraw path accepts. Inactive is still cooling down.
+  const withdrawableLuna = retiredLuna
+
+  const submitUnstake = async () => {
+    const amountNim = Number(unstakeAmount)
+    if (!Number.isFinite(amountNim) || amountNim <= 0) {
+      setUnstakeError('Enter an amount above 0.')
+      return
+    }
+    if (amountNim * 100000 > withdrawableLuna + inactiveLuna) {
+      setUnstakeError(
+        `You can unstake up to ${formatLuna(String(withdrawableLuna + inactiveLuna), lang)} NIM.`
+      )
+      return
+    }
+    // First withdraw anything already retired (freed from cooldown), then
+    // retire fresh stake if more was requested.
+    setUnstaking(true)
+    setUnstakeError(null)
+    setUnstakeHash(null)
+    try {
+      if (retiredLuna > 0) {
+        const removeNim = Math.min(amountNim, retiredLuna / 100000)
+        const remove = await unstakeRemove(removeNim)
+        if (!remove.ok) {
+          setUnstakeError(remove.error)
+          return
+        }
+        setUnstakeHash(remove.hash)
+      }
+      const remainingNim = amountNim - Math.min(amountNim, retiredLuna / 100000)
+      if (remainingNim > 0) {
+        const retire = await unstakeRetire(remainingNim)
+        if (!retire.ok) {
+          setUnstakeError(retire.error)
+          return
+        }
+        setUnstakeHash(retire.hash)
+      }
+      setUnstakeAmount('')
+      clearTxCache()
+      if (account) await refresh(account)
+    } finally {
+      setUnstaking(false)
     }
   }
 
@@ -982,10 +1043,16 @@ export default function App() {
                       <div className="row">
                         <span>
                           Staked
-                          {stakingHolding?.delegation && (
+                          {currentValidator?.name && (
                             <span className="delegate-to">
                               {' '}
-                              → {stakingHolding.delegation.slice(0, 12)}…
+                              → {currentValidator.name}
+                            </span>
+                          )}
+                          {!currentValidator?.name && lockedDelegation && (
+                            <span className="delegate-to">
+                              {' '}
+                              → {lockedDelegation.slice(0, 12)}…
                             </span>
                           )}
                         </span>
@@ -1619,7 +1686,7 @@ export default function App() {
                           type="button"
                           role="radio"
                           aria-checked={activeSelection === addr}
-                          disabled={hasStaker}
+                          disabled={hasStaker || v.reliability === null}
                           onClick={() => setSelectedValidator(addr)}
                           className={[
                             'option-row',
@@ -1684,7 +1751,53 @@ export default function App() {
                 >
                   {staking ? 'Submitting…' : hasStaker ? 'Add to stake' : 'Stake'}
                 </button>
-                <p className="hint small">Switching validator and unstaking are coming soon.</p>
+                {hasStaker && (
+                  <>
+                    <button
+                      className="btn-ghost unstake-toggle"
+                      onClick={() => setUnstakeOpen((v) => !v)}
+                      disabled={!canStake() || staking || unstaking}
+                    >
+                      {unstakeOpen ? 'Hide unstake' : 'Unstake'}
+                    </button>
+                    {unstakeOpen && (
+                      <div className="unstake-box">
+                        <span className="label stake-section">Unstake (NIM)</span>
+                        <input
+                          className="input"
+                          type="text"
+                          inputMode="decimal"
+                          autoComplete="off"
+                          placeholder="0.00"
+                          value={unstakeAmount}
+                          onChange={(e) => setUnstakeAmount(e.target.value)}
+                        />
+                        <span className="hint small">
+                          {inactiveLuna > 0
+                            ? `${formatLuna(String(inactiveLuna), lang)} NIM cooling down — becomes withdrawable after the reporting window.`
+                            : 'Unstake moves NIM into a cooldown; after the reporting window the same amount becomes withdrawable.'}
+                          {retiredLuna > 0 &&
+                            ` ${formatLuna(String(retiredLuna), lang)} NIM already withdrawable.`}
+                        </span>
+                        {unstakeError && <p className="hint small warn">{unstakeError}</p>}
+                        {unstakeHash && (
+                          <p className="hint small ok">
+                            Unstake submitted ✓{' '}
+                            <span className="mono">{unstakeHash.slice(0, 20)}…</span>
+                          </p>
+                        )}
+                        <button
+                          className="btn-primary stake-submit"
+                          onClick={submitUnstake}
+                          disabled={!canStake() || unstaking || !(Number(unstakeAmount) > 0)}
+                        >
+                          {unstaking ? 'Submitting…' : 'Unstake'}
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+                <p className="hint small">Switching validator is coming soon.</p>
               </>
             )}
           </div>

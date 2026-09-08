@@ -1052,10 +1052,43 @@ a.btn-ghost.btn-link {
   gap: 6px;
 }
 .validator-list {
-  max-height: 40vh;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding-right: 2px;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  gap: 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  padding: 2px 2px 10px;
+  -webkit-overflow-scrolling: touch;
+  /* No vertical scrolling: the panel fits without it. */
+  max-height: none;
+}
+.validator-list .option-row {
+  flex: 0 0 240px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  scroll-snap-align: start;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+}
+.validator-list .option-dot {
+  display: none;
+}
+.validator-list .option-main {
+  gap: 3px;
+  font-size: 13px;
+}
+.validator-list .badge.inactive {
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 1px 7px;
+  font-size: 11px;
+  background: var(--warn-bg, rgba(255, 159, 10, 0.12));
+  color: var(--warn, #b26a00);
+  border-radius: 999px;
 }
 .option-row {
   display: flex;
@@ -1158,6 +1191,17 @@ a.btn-ghost.btn-link {
 }
 .btn-primary.stake-submit {
   margin-top: 14px;
+}
+.unstake-toggle {
+  margin-top: 10px;
+  width: 100%;
+}
+.unstake-box {
+  margin-top: 4px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  background: var(--card);
 }
 
 /* Currency picker — flag grid matching the Nimiq wallet's Reference
