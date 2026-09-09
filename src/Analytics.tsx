@@ -398,11 +398,16 @@ export default function Analytics({
         const minTs = Math.min(...trajectory.map((q) => q.ts))
         const maxTs = Math.max(...trajectory.map((q) => q.ts))
         const span = Math.max(0.000001, trajMax - trajFloor)
+        // A single-value trajectory (every tx on one day) has no span to scale
+        // against, and scaling it anyway pins every point to the floor — which
+        // reads as "the balance went to zero" while both axis labels say it did
+        // not. Draw a flat balance along the top instead: steady, not empty.
+        const flat = trajMax - trajFloor < 1e-9
         return trajectory
           .map((p) => {
             // Time-scaled x-axis: gaps in time render as gaps in the chart
             const x = PAD_L + plotW * (maxTs === minTs ? 1 : (p.ts - minTs) / (maxTs - minTs))
-            const yv = PAD_T + plotH - 4 - ((p.balance - trajFloor) / span) * (plotH - 8)
+            const yv = flat ? PAD_T + 4 : PAD_T + plotH - 4 - ((p.balance - trajFloor) / span) * (plotH - 8)
             return `${x},${yv}`
           })
           .join(' ')
@@ -738,7 +743,7 @@ export default function Analytics({
 
       {trajectory.length > 1 && (
         <div className="card chart-card">
-          <span className="label">Balance trajectory (NIM, end of day)</span>
+          <span className="label">Liquid balance trajectory (NIM, end of day)</span>
           <svg viewBox={`0 0 ${W} ${H}`} className="chart" role="img" aria-label="Balance trajectory chart">
             <defs>
               <linearGradient id="trajFill" x1="0" y1="0" x2="0" y2="1">
