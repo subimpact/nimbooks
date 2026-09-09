@@ -18,13 +18,20 @@ interface Ctx {
   env: { SHORTIO_API_KEY?: string; SHORTIO_DOMAIN?: string }
 }
 
-/** Only NimBooks hash routes get shortened, so the short domain can't be
- *  turned into an open redirector pointing anywhere on the web. */
-const ALLOWED_PREFIX = 'https://nimbooks.subimpact.net/#/'
+const ORIGIN = 'https://nimbooks.subimpact.net'
 
-/** Receipt payloads ride in the fragment and are already well under this;
- *  the cap just keeps a junk body from being forwarded upstream. */
-const MAX_URL = 4096
+/** Only NimBooks share links get shortened, so the short domain can't be
+ *  turned into an open redirector pointing anywhere on the web. Each prefix
+ *  carries its own cap: receipts ride in the fragment and stay small, while
+ *  an /export link carries a gzipped CSV (up to ~12 KB) in its query string.
+ *  The caps just keep a junk body from being forwarded upstream. */
+const ALLOWED: ReadonlyArray<{ prefix: string; maxUrl: number }> = [
+  { prefix: `${ORIGIN}/#/`, maxUrl: 4096 },
+  { prefix: `${ORIGIN}/export/`, maxUrl: 16384 },
+]
+
+const isShareLink = (url: string): boolean =>
+  ALLOWED.some(({ prefix, maxUrl }) => url.startsWith(prefix) && url.length <= maxUrl)
 
 const DEFAULT_DOMAIN = 'nimbooks.s.gy'
 
@@ -43,7 +50,7 @@ export const onRequestPost = async ({ request, env }: Ctx): Promise<Response> =>
     return json({ error: 'invalid url' }, 400)
   }
 
-  if (typeof url !== 'string' || url.length > MAX_URL || !url.startsWith(ALLOWED_PREFIX)) {
+  if (typeof url !== 'string' || !isShareLink(url)) {
     return json({ error: 'invalid url' }, 400)
   }
 
