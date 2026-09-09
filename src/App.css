@@ -415,6 +415,56 @@ a:focus-visible {
   letter-spacing: 0.08em;
   margin-bottom: 6px;
 }
+/* Card label with an info icon: label + circle-i on one row, explainer below */
+.card .label.label-with-info {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+/* The wrapper is transparent to layout: the button and the explainer become
+   flex items of the label row directly. */
+.info-wrap {
+  display: contents;
+}
+.info-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0;
+  flex: none;
+}
+/* Invisible hit-area expander: 18px circle, 26px tap target (WCAG 2.5.8) */
+.info-btn::before {
+  content: '';
+  position: absolute;
+  inset: -4px;
+}
+.info-btn:hover,
+.info-btn:focus-visible {
+  color: var(--accent);
+  border-color: var(--accent);
+  outline: none;
+}
+.info-text {
+  flex-basis: 100%;
+  display: block;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+  margin-top: 6px;
+}
 .card .value {
   display: block;
   font-size: 24px;
@@ -440,7 +490,7 @@ a:focus-visible {
    affordance for the picker (the value used to be an invisible button). */
 .total-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
   margin-bottom: 6px;
