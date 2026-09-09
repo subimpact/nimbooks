@@ -1612,153 +1612,156 @@ export default function App() {
       <main>
         {view === 'dashboard' && (
           <section className="dashboard">
-            <div className="card total">
-              <span className="label">Total value</span>
-              <button
-                type="button"
-                className="value value-btn"
-                onClick={() => setCurrencyOpen(true)}
-                title="Tap to change currency"
-              >
-                {formatFiat(totalFiat, currency)}
-              </button>
-              <span className="sub">≈ {currency.toUpperCase()} · {lang}</span>
+            <div className="stat-row">
+              <div className="card total">
+                <span className="label">Total value</span>
+                <button
+                  type="button"
+                  className="value value-btn"
+                  onClick={() => setCurrencyOpen(true)}
+                  title="Tap to change currency"
+                >
+                  {formatFiat(totalFiat, currency)}
+                </button>
+                <span className="sub">≈ {currency.toUpperCase()} · {lang}</span>
+              </div>
+
+              <div className="card nim-tile">
+                <span className="label">NIM balance</span>
+                {nimBalance === null ? (
+                  <span className="value dim">…</span>
+                ) : (
+                  <>
+                    <span className="value">{formatLuna(String(totalNimLuna), lang)} NIM</span>
+                    <span className="sub">
+                      ≈ {formatFiat((totalNimLuna / 100000) * shown.nim, currency, 4)}
+                    </span>
+                  </>
+                )}
+              </div>
             </div>
 
-            <div className="card">
-              <span className="label">NIM balance</span>
-              {unstakeActivity && (
-                <div className="pending-unstake-banner" role="status">
-                  <span className="pending-dot" aria-hidden="true" />
-                  <span className="banner-text">
-                    {unstakeActivity.kind === 'pending' && (
-                      <>
-                        Deactivating {formatLuna(String(unstakeActivity.amountNim * 100000), lang)}{' '}
-                        NIM — takes effect at the next election block (up to ~12h), then a
-                        reporting window before it's withdrawable.
-                      </>
-                    )}
-                    {unstakeActivity.kind === 'cooling' && (
-                      <>
-                        {formatLuna(String(unstakeActivity.amountNim * 100000), lang)} NIM is
-                        cooling down — finish the unstake after the reporting window.
-                      </>
-                    )}
-                    {unstakeActivity.kind === 'ready' && (
-                      <>
-                        {formatLuna(String(unstakeActivity.amountNim * 100000), lang)} NIM is
-                        ready to withdraw — move it to your balance.
-                      </>
-                    )}
-                  </span>
-                  {unstakeActivity.kind === 'cooling' &&
-                    (unstakeActivity.retireReady ? (
-                      <button
-                        type="button"
-                        className="btn-small"
-                        onClick={() => void completeUnstake()}
-                        disabled={!canStake() || staking || unstaking}
-                      >
-                        {unstaking ? 'Submitting…' : 'Complete unstake'}
-                      </button>
-                    ) : (
-                      // No button before the retire is valid — the chain would
-                      // reject the tx, so a click here is a dead click.
-                      <span className="banner-hint">
-                        {unstakeActivity.retireValidAt > 0 && currentBlock > 0
-                          ? `Complete unstake available in ~${Math.ceil(
-                              ((unstakeActivity.retireValidAt - currentBlock) * SECONDS_PER_BLOCK) /
-                                3600,
-                            )}h`
-                          : 'Complete unstake available after the reporting window'}
-                      </span>
-                    ))}
+            {unstakeActivity && (
+              <div className="pending-unstake-banner" role="status">
+                <span className="pending-dot" aria-hidden="true" />
+                <span className="banner-text">
+                  {unstakeActivity.kind === 'pending' && (
+                    <>
+                      Deactivating {formatLuna(String(unstakeActivity.amountNim * 100000), lang)}{' '}
+                      NIM — takes effect at the next election block (up to ~12h), then a
+                      reporting window before it's withdrawable.
+                    </>
+                  )}
+                  {unstakeActivity.kind === 'cooling' && (
+                    <>
+                      {formatLuna(String(unstakeActivity.amountNim * 100000), lang)} NIM is
+                      cooling down — finish the unstake after the reporting window.
+                    </>
+                  )}
                   {unstakeActivity.kind === 'ready' && (
+                    <>
+                      {formatLuna(String(unstakeActivity.amountNim * 100000), lang)} NIM is
+                      ready to withdraw — move it to your balance.
+                    </>
+                  )}
+                </span>
+                {unstakeActivity.kind === 'cooling' &&
+                  (unstakeActivity.retireReady ? (
                     <button
                       type="button"
                       className="btn-small"
-                      onClick={() => void withdrawRetired()}
+                      onClick={() => void completeUnstake()}
                       disabled={!canStake() || staking || unstaking}
                     >
-                      {unstaking ? 'Submitting…' : 'Withdraw'}
+                      {unstaking ? 'Submitting…' : 'Complete unstake'}
                     </button>
-                  )}
-                </div>
-              )}
-              {nimBalance === null ? (
-                <span className="value dim">…</span>
-              ) : offBalanceLuna > 0 ? (
-                // Swapped, staked and vesting funds are still the user's —
-                // break the total down so a 0 basic balance doesn't read as
-                // "no money".
-                <>
-                  <div className="balance-breakdown">
-                    <div className="row">
-                      <span>Available</span>
-                      <span>{formatLuna(nimBalance, lang)} NIM</span>
-                    </div>
-                    {lockedLuna > 0 && (
-                      <div className="row">
-                        <span>Locked in swaps</span>
-                        <span>{formatLuna(String(lockedLuna), lang)} NIM</span>
-                      </div>
-                    )}
-                    {retireableLuna > 0 && (
-                      <div className="row">
-                        <span>
-                          Staked
-                          {currentValidator?.name && (
-                            <span className="delegate-to">
-                              {' '}
-                              → {currentValidator.name}
-                            </span>
-                          )}
-                          {!currentValidator?.name && lockedDelegation && (
-                            <span className="delegate-to">
-                              {' '}
-                              → {lockedDelegation.slice(0, 12)}…
-                            </span>
-                          )}
-                        </span>
-                        <span>{formatLuna(String(retireableLuna), lang)} NIM</span>
-                      </div>
-                    )}
-                    {inactiveLuna > 0 && (
-                      <div className="row unstaking-row">
-                        <span>Unstaking (cooling down)</span>
-                        <span>{formatLuna(String(inactiveLuna), lang)} NIM</span>
-                      </div>
-                    )}
-                    {retiredLuna > 0 && (
-                      <div className="row unstaking-row">
-                        <span>Ready to withdraw</span>
-                        <span>{formatLuna(String(retiredLuna), lang)} NIM</span>
-                      </div>
-                    )}
-                    {vestedLuna > 0 && (
-                      <div className="row">
-                        <span>Vesting</span>
-                        <span>{formatLuna(String(vestedLuna), lang)} NIM</span>
-                      </div>
-                    )}
-                    <div className="row strong">
-                      <span>Total</span>
-                      <span>{formatLuna(String(totalNimLuna), lang)} NIM</span>
-                    </div>
+                  ) : (
+                    // No button before the retire is valid — the chain would
+                    // reject the tx, so a click here is a dead click.
+                    <span className="banner-hint">
+                      {unstakeActivity.retireValidAt > 0 && currentBlock > 0
+                        ? `Complete unstake available in ~${Math.ceil(
+                            ((unstakeActivity.retireValidAt - currentBlock) * SECONDS_PER_BLOCK) /
+                              3600,
+                          )}h`
+                        : 'Complete unstake available after the reporting window'}
+                    </span>
+                  ))}
+                {unstakeActivity.kind === 'ready' && (
+                  <button
+                    type="button"
+                    className="btn-small"
+                    onClick={() => void withdrawRetired()}
+                    disabled={!canStake() || staking || unstaking}
+                  >
+                    {unstaking ? 'Submitting…' : 'Withdraw'}
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Swapped, staked and vesting funds are still the user's — break
+                the total down so a 0 basic balance doesn't read as "no money".
+                With nothing off-balance the tile above is the whole story. */}
+            {nimBalance !== null && offBalanceLuna > 0 && (
+              <div className="card">
+                <span className="label">Balance details</span>
+                <div className="balance-breakdown">
+                  <div className="row">
+                    <span>Available</span>
+                    <span>{formatLuna(nimBalance, lang)} NIM</span>
                   </div>
-                  <span className="sub">
-                    ≈ {formatFiat((totalNimLuna / 100000) * shown.nim, currency, 4)}
-                  </span>
-                </>
-              ) : (
-                <>
-                  <span className="value">{formatLuna(nimBalance, lang)} NIM</span>
-                  <span className="sub">
-                    ≈ {formatFiat((Number(nimBalance) / 100000) * shown.nim, currency, 4)}
-                  </span>
-                </>
-              )}
-            </div>
+                  {lockedLuna > 0 && (
+                    <div className="row">
+                      <span>Locked in swaps</span>
+                      <span>{formatLuna(String(lockedLuna), lang)} NIM</span>
+                    </div>
+                  )}
+                  {retireableLuna > 0 && (
+                    <div className="row">
+                      <span>
+                        Staked
+                        {currentValidator?.name && (
+                          <span className="delegate-to">
+                            {' '}
+                            → {currentValidator.name}
+                          </span>
+                        )}
+                        {!currentValidator?.name && lockedDelegation && (
+                          <span className="delegate-to">
+                            {' '}
+                            → {lockedDelegation.slice(0, 12)}…
+                          </span>
+                        )}
+                      </span>
+                      <span>{formatLuna(String(retireableLuna), lang)} NIM</span>
+                    </div>
+                  )}
+                  {inactiveLuna > 0 && (
+                    <div className="row unstaking-row">
+                      <span>Unstaking (cooling down)</span>
+                      <span>{formatLuna(String(inactiveLuna), lang)} NIM</span>
+                    </div>
+                  )}
+                  {retiredLuna > 0 && (
+                    <div className="row unstaking-row">
+                      <span>Ready to withdraw</span>
+                      <span>{formatLuna(String(retiredLuna), lang)} NIM</span>
+                    </div>
+                  )}
+                  {vestedLuna > 0 && (
+                    <div className="row">
+                      <span>Vesting</span>
+                      <span>{formatLuna(String(vestedLuna), lang)} NIM</span>
+                    </div>
+                  )}
+                  <div className="row strong">
+                    <span>Total</span>
+                    <span>{formatLuna(String(totalNimLuna), lang)} NIM</span>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {evmBalances.length > 0 && (
               <div className="card">
