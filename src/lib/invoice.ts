@@ -150,7 +150,7 @@ export function invoiceRoute(inv: InvoicePayload): string {
 
 // The link this page would produce for itself. Used for the QR code, which is
 // scanned off whatever screen the request is shown on; a link that leaves this
-// origin (a share) goes through device.appLink instead.
+// origin (a share) goes through device.siteLink instead.
 export function invoiceUrl(inv: InvoicePayload): string {
   return `${window.location.origin}${window.location.pathname}${invoiceRoute(inv)}`
 }
