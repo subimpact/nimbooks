@@ -1521,7 +1521,10 @@ export default function App() {
         }
         return
       }
-      setDownloadLink(link)
+      // The gzipped CSV makes for a URL long enough that its QR needs a phone
+      // camera held very still. A short link brings that back to a couple of
+      // dozen characters, and shortenUrl hands back the long one if it can't.
+      setDownloadLink(await shortenUrl(link))
     } catch {
       setError('Could not build download link.')
     } finally {
