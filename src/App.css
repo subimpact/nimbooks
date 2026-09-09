@@ -860,6 +860,103 @@ a.btn-ghost.btn-link {
 .day-breakdown .row .green { color: var(--green); }
 .day-breakdown .row .red { color: var(--red); }
 
+/* Stat drilldown sheets (tap Received / Sent / Net flow) */
+/* Same label-left / value-right rows as the day sheet's breakdown. */
+.sheet-metrics {
+  margin: 6px 0 14px;
+}
+.sheet-metrics .row {
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+}
+.sheet-metrics .row:last-child {
+  border-bottom: none;
+}
+.sheet-metrics .row .green { color: var(--green); }
+.sheet-metrics .row .red { color: var(--red); }
+.sheet-counterparties {
+  margin: 0 0 14px;
+}
+.sheet-counterparty {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.sheet-counterparty:last-child {
+  border-bottom: none;
+}
+/* min-width:0 so a long memo ellipsises instead of shoving the amount off */
+.sheet-cp-who {
+  flex: 1;
+  min-width: 0;
+}
+.sheet-cp-name {
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sheet-cp-addr {
+  color: var(--muted);
+  word-break: break-all;
+  margin-top: 2px;
+}
+.sheet-cp-amt {
+  text-align: right;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 600;
+}
+.sheet-cp-amt .green { color: var(--green); }
+.sheet-cp-amt .red { color: var(--red); }
+.sheet-cp-meta {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+  margin-top: 2px;
+}
+.kind-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 14px;
+}
+.kind-pill {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 9px;
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+.kind-pill .kind-n {
+  font-size: 12px;
+  font-weight: 700;
+}
+/* One proportion, two segments — a div pair says it as well as an SVG would */
+.flow-ratio-bar {
+  display: flex;
+  height: 10px;
+  margin: 0 0 6px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--card-2);
+}
+.flow-ratio-bar .seg-in { background: var(--green); }
+.flow-ratio-bar .seg-out { background: var(--red); }
+.flow-ratio-legend {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  margin-bottom: 14px;
+}
+.flow-ratio-legend .green { color: var(--green); }
+.flow-ratio-legend .red { color: var(--red); }
+
 /* History tx hash link + failed badge */
 .tx-hash-link {
   color: var(--accent-2);
