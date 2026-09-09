@@ -562,9 +562,10 @@ export default function App() {
     setError(null)
     try {
       // Public mainnet address with real human activity — read-only demo mode.
-      // (NQ43 6G6H FE78 TV0B YCM5 TD84 P7QX 46XS SNM5: 50 txs over 4 days,
-      // 7 distinct senders, mixed in/out — a believable sample wallet.)
-      const acc = connectDemoAccount('NQ43 6G6H FE78 TV0B YCM5 TD84 P7QX 46XS SNM5')
+      // (NQ43 Y1RH P1K7 JH78 LRTS 95RY GAUU UBDK FFGX: seeded story wallet —
+      //  client payments, staking rewards, cooled-down unstaking. Funded + curated
+      //  for the Sep 16 competition demo; read-only in app, keys held by owner.)
+      const acc = connectDemoAccount('NQ43 Y1RH P1K7 JH78 LRTS 95RY GAUU UBDK FFGX')
       setAccount(acc)
       await refresh(acc)
       setToast('Demo mode — read-only sample wallet.')
