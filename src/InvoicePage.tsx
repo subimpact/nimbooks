@@ -2,12 +2,13 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import './App.css'
 import QrCode from './QrCode'
 import { applyTheme, getInitialTheme, type Theme } from './lib/theme'
-import { isInNimiqPay, isMobileDevice, NIMIQ_PAY_APP_URL } from './lib/device'
+import { appLink, isInNimiqPay, isMobileDevice, NIMIQ_PAY_APP_URL } from './lib/device'
 import {
   canSend,
   connectHub,
   connectWallet,
   getConnectedAccount,
+  getHubRedirectError,
   sendNim,
   signReceipt,
   type WalletAccount,
@@ -47,12 +48,20 @@ export default function InvoicePage() {
   const [invoice, setInvoice] = useState<InvoicePayload | null>(null)
   const [decodeError, setDecodeError] = useState<string | null>(null)
   const [theme, setTheme] = useState<Theme>(getInitialTheme)
-  // Reuse the session's wallet when the link was opened from inside the app.
+  // Reuse the session's wallet when the link was opened from inside the app —
+  // or when a Hub login on a mobile browser has just redirected back here.
   const [account, setAccount] = useState<WalletAccount | null>(getConnectedAccount)
   const [connecting, setConnecting] = useState(false)
-  const [payState, setPayState] = useState<PayState>('idle')
+  // A redirect login lands mid-flow: pick up at the confirm step, not at
+  // "connect your wallet" the user has already been through.
+  const [payState, setPayState] = useState<PayState>(() =>
+    getConnectedAccount()?.nimiqAddress ? 'confirm' : 'idle'
+  )
   const [txHash, setTxHash] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(() => {
+    const failed = getHubRedirectError()
+    return failed ? 'Connection failed: ' + failed : null
+  })
   const [toast, setToast] = useState<string | null>(null)
   const [receipt, setReceipt] = useState<SignedReceipt | null>(null)
   const [signing, setSigning] = useState(false)
@@ -215,7 +224,7 @@ export default function InvoicePage() {
 
   const shareReceipt = useCallback(async () => {
     if (!receipt) return
-    const url = `${window.location.origin}${window.location.pathname}#/verify/${encodeReceipt(receipt)}`
+    const url = appLink(`#/verify/${encodeReceipt(receipt)}`)
     try {
       if (navigator.share) {
         await navigator.share({ title: 'NimBooks receipt', text: 'Verified payment receipt', url })
@@ -264,6 +273,10 @@ export default function InvoicePage() {
   const amountNim = formatLunaExact(invoice.amountNim)
   const demo = account?.provider === 'demo'
   const statusLabel = { pending: 'Open', paid: 'Paid', expired: 'Expired' }[status]
+  // Carry the route across the deep link: without the hash, a shared invoice
+  // opened on a phone lands on the Nimiq Pay connect screen instead of on the
+  // request the sender actually sent.
+  const payHref = window.location.hash ? appLink(window.location.hash) : NIMIQ_PAY_APP_URL
 
   return (
     <div className="verify">
@@ -372,9 +385,16 @@ export default function InvoicePage() {
                 {connecting ? 'Connecting…' : `Pay ${amountNim} NIM`}
               </button>
             ) : isMobileDevice() ? (
-              <a className="btn-primary btn-link" href={NIMIQ_PAY_APP_URL} target="_blank" rel="noopener noreferrer">
-                Open in Nimiq Pay →
-              </a>
+              <>
+                <a className="btn-primary btn-link" href={payHref} target="_blank" rel="noopener noreferrer">
+                  Open in Nimiq Pay →
+                </a>
+                {/* Second path for a phone without the app: the Hub login works
+                    on mobile browsers via redirect (lib/wallet.connectHub). */}
+                <button className="btn-secondary" onClick={connect} disabled={connecting}>
+                  {connecting ? 'Opening Nimiq Hub…' : 'No app? Continue with Nimiq Hub'}
+                </button>
+              </>
             ) : (
               <button className="btn-primary" onClick={connect} disabled={connecting}>
                 {connecting ? 'Opening Nimiq Hub…' : 'Continue with Nimiq Hub'}
@@ -383,7 +403,7 @@ export default function InvoicePage() {
             <p className="hint small">
               {isInNimiqPay() || !isMobileDevice()
                 ? 'Connect your wallet to pay this request.'
-                : 'Paying needs your Nimiq wallet — open this link inside Nimiq Pay.'}
+                : 'Paying needs your Nimiq wallet — open this request in Nimiq Pay, or sign in with the Nimiq Hub right here in the browser.'}
             </p>
           </>
         ) : demo || !canSend() ? (

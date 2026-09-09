@@ -52,6 +52,10 @@ export interface Statement {
 
 const PRICES_KEY = 'nimbooks:prices365'
 const PRICES_TTL = 12 * 60 * 60 * 1000 // 12h — daily closes don't move every minute
+// Upper bound on a plausible daily NIM close, for the same wrong-id guard the
+// live rates run (lib/chain.ts). Looser than the live bound: this covers a
+// full year, so it has to clear any real high with room to spare.
+const NIM_MAX_PLAUSIBLE_CLOSE_USD = 0.02
 
 interface PriceCache {
   at: number
@@ -83,6 +87,12 @@ export async function getDailyNimPrices(): Promise<Record<string, number>> {
       const ms = point?.[0]
       const price = point?.[1]
       if (typeof ms !== 'number' || typeof price !== 'number' || !Number.isFinite(price)) continue
+      // Same sanity clamp as the live rates (lib/chain.ts), loosened for a
+      // year of history: a close above 2¢ means CoinGecko answered for the
+      // wrong NIM id, and a statement that prices a year at 72× is worse than
+      // one with a gap. Dropping the day leaves `closeUsd` null, which every
+      // row already tolerates.
+      if (price > NIM_MAX_PLAUSIBLE_CLOSE_USD) continue
       // Later entries on the same UTC day overwrite earlier ones → the day's
       // last observed price (the "close").
       prices[new Date(ms).toISOString().slice(0, 10)] = price
