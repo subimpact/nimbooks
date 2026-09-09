@@ -208,6 +208,11 @@ function buildTrajectory(
       }
     }
     const isOut = tx.sender.replace(/\s+/g, '').toUpperCase() === ownAddressNorm
+    // Funding an HTLC (toType 2) is internal routing, not a payment out: the
+    // NIM stays the user's, and the anchor this walk starts from already
+    // counts the contract's balance. Undoing it as a spend would credit the
+    // whole amount back and lift every earlier point by it.
+    if (isOut && tx.toType === 2) continue
     const v = Number(tx.value) / 100000
     const fee = Number(tx.fee) / 100000
     if (Number.isFinite(v)) {
@@ -756,7 +761,7 @@ export default function Analytics({
 
       {trajectory.length > 1 && (
         <div className="card chart-card">
-          <span className="label">Liquid balance trajectory (NIM, end of day)</span>
+          <span className="label">Available balance trajectory (NIM, end of day)</span>
           <svg viewBox={`0 0 ${W} ${H}`} className="chart" role="img" aria-label="Balance trajectory chart">
             <defs>
               <linearGradient id="trajFill" x1="0" y1="0" x2="0" y2="1">
