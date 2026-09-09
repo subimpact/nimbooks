@@ -80,7 +80,7 @@ import {
   type StoredInvoice,
 } from './lib/invoice'
 import { getRestakeRewardTxs, restakeWindow } from './lib/stakingEvents'
-import { appLink, isInNimiqPay, isMobileDevice, NIMIQ_PAY_APP_URL } from './lib/device'
+import { isInNimiqPay, isMobileDevice, NIMIQ_PAY_APP_URL, siteLink } from './lib/device'
 import { buildDownloadLink } from './lib/downloadLink'
 import { exportBackup, importBackup, validateBackup } from './lib/backup'
 import { APP_VERSION_LABEL, CHANGELOG } from './lib/changelog'
@@ -521,7 +521,7 @@ export default function App() {
   }
 
   const shareInvoice = async (invoice: StoredInvoice) => {
-    const url = appLink(invoiceRoute(invoice))
+    const url = siteLink(invoiceRoute(invoice))
     const amount = formatLunaExact(invoice.amountNim)
     try {
       if (navigator.share) {
@@ -1369,7 +1369,7 @@ export default function App() {
 
   const shareReceipt = async (r: SignedReceipt) => {
     const enc = encodeReceipt(r)
-    const url = appLink(`#/verify/${enc}`)
+    const url = siteLink(`#/verify/${enc}`)
     try {
       if (navigator.share) {
         await navigator.share({ title: 'NimBooks receipt', text: 'Verified payment receipt', url })

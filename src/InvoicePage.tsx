@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import './App.css'
 import QrCode from './QrCode'
 import { applyTheme, getInitialTheme, type Theme } from './lib/theme'
-import { appLink, isInNimiqPay, isMobileDevice, NIMIQ_PAY_APP_URL } from './lib/device'
+import { isInNimiqPay, isMobileDevice, NIMIQ_PAY_APP_URL, payDeepLink, siteLink } from './lib/device'
 import {
   canSend,
   connectHub,
@@ -224,7 +224,7 @@ export default function InvoicePage() {
 
   const shareReceipt = useCallback(async () => {
     if (!receipt) return
-    const url = appLink(`#/verify/${encodeReceipt(receipt)}`)
+    const url = siteLink(`#/verify/${encodeReceipt(receipt)}`)
     try {
       if (navigator.share) {
         await navigator.share({ title: 'NimBooks receipt', text: 'Verified payment receipt', url })
@@ -273,10 +273,11 @@ export default function InvoicePage() {
   const amountNim = formatLunaExact(invoice.amountNim)
   const demo = account?.provider === 'demo'
   const statusLabel = { pending: 'Open', paid: 'Paid', expired: 'Expired' }[status]
-  // Carry the route across the deep link: without the hash, a shared invoice
-  // opened on a phone lands on the Nimiq Pay connect screen instead of on the
-  // request the sender actually sent.
-  const payHref = window.location.hash ? appLink(window.location.hash) : NIMIQ_PAY_APP_URL
+  // Carry the route into Pay: without it, a shared invoice opened on a phone
+  // lands on the connect screen instead of on the request the sender sent.
+  // The custom scheme is what carries it — the https miniapps link loses the
+  // fragment on the way into the Pay WebView.
+  const payHref = window.location.hash ? payDeepLink(window.location.hash) : NIMIQ_PAY_APP_URL
 
   return (
     <div className="verify">
