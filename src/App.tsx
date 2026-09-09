@@ -1862,6 +1862,7 @@ export default function App() {
               ownAddress={account.nimiqAddress ?? null}
               period={analyticsPeriod}
               onPeriodChange={setAnalyticsPeriod}
+              onOpenHistory={() => setView('history')}
               lang={lang}
             />
           </section>
