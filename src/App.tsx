@@ -797,6 +797,10 @@ export default function App() {
     return Number.isFinite(total) ? total : 0
   }, [nimBalance, offBalanceLuna, evmBalances, shown])
 
+  // Flag/label for the chip on the Total value tile. Falls back to the first
+  // entry so a stale saved code can never blank the chip.
+  const cur = CURRENCIES.find((c) => c.code === currency) ?? CURRENCIES[0]
+
   // --- Staking (Nimiq Pay) ---
 
   // The validator list is a 1.4 MB payload — 13× the whole gzipped bundle —
@@ -1834,15 +1838,45 @@ export default function App() {
           <section className="dashboard">
             <div className="stat-row">
               <div className="card total">
-                <span className="label">Total value</span>
-                <button
-                  type="button"
-                  className="value value-btn"
-                  onClick={() => setCurrencyOpen(true)}
-                  title="Tap to change currency"
-                >
-                  {formatFiat(totalFiat, currency)}
-                </button>
+                <div className="total-header">
+                  <span className="label">Total value</span>
+                  {/* Visible affordance for the currency picker — the value
+                      itself used to be the (invisible) button. */}
+                  <button
+                    type="button"
+                    className="currency-chip"
+                    onClick={() => setCurrencyOpen(true)}
+                    title="Change display currency"
+                  >
+                    <img
+                      className="chip-flag"
+                      src={`/flags/flag-${cur.flag}.svg`}
+                      alt=""
+                      width={16}
+                      height={16}
+                    />
+                    <span className="chip-code">{currency.toUpperCase()}</span>
+                    {/* Inline SVG, not a Unicode chevron — the glyph tofus on
+                        some Android builds. */}
+                    <svg
+                      className="chip-caret"
+                      viewBox="0 0 10 6"
+                      width={10}
+                      height={6}
+                      aria-hidden="true"
+                    >
+                      <path
+                        d="M1 1l4 4 4-4"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </button>
+                </div>
+                <span className="value">{formatFiat(totalFiat, currency)}</span>
               </div>
 
               <div className="card nim-tile">
