@@ -832,6 +832,33 @@ a.btn-ghost.btn-link {
   display: block;
   margin-top: 8px;
 }
+/* The whole plot area is the hit target — bars get down to ~3px wide on the
+   "All" period, and zero-flow days draw no bar at all. */
+.chart-tappable {
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Day drilldown sheet (tap a bar on the daily net flow chart) */
+.day-net {
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.day-net.green { color: var(--green); }
+.day-net.red { color: var(--red); }
+.day-breakdown {
+  margin: 10px 0 14px;
+}
+.day-breakdown .row {
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+}
+.day-breakdown .row:last-child {
+  border-bottom: none;
+}
+.day-breakdown .row .green { color: var(--green); }
+.day-breakdown .row .red { color: var(--red); }
 
 /* History tx hash link + failed badge */
 .tx-hash-link {

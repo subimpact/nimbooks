@@ -1,17 +1,29 @@
 // Analytics — in-depth charts derived from the loaded NIM transaction history.
 // Pure SVG, zero dependencies: daily net flow bars + cumulative balance trajectory.
 
-import { useMemo } from 'react'
-import type { NimiqTx } from './lib/chain'
-import { formatLuna } from './lib/chain'
+import { useMemo, useState } from 'react'
+import type { CurrencyCode, NimiqTx } from './lib/chain'
+import {
+  decodeMemo,
+  explorerTxUrl,
+  formatFiat,
+  formatLuna,
+  isLabelledTxKind,
+  txLabel,
+} from './lib/chain'
+import DetailSheet from './DetailSheet'
 
 export type AnalyticsPeriod = 7 | 30 | 0 // days; 0 = all available
 
 interface FlowPoint {
   key: string // YYYY-MM-DD (local)
   label: string
+  ts: number
   in: number // NIM
   out: number // NIM
+  // The very txs that produced `in`/`out` — the day sheet lists these, so a
+  // bar and its drilldown can never disagree about what the day contained.
+  txs: NimiqTx[]
 }
 
 interface Stats {
@@ -66,6 +78,8 @@ export default function Analytics({
   onPeriodChange,
   onOpenHistory,
   lang,
+  nimRate,
+  currency,
 }: {
   txs: NimiqTx[]
   currentBalanceNim: string | null
@@ -74,13 +88,18 @@ export default function Analytics({
   onPeriodChange: (p: AnalyticsPeriod) => void
   onOpenHistory: () => void
   lang: string
+  nimRate?: number
+  currency?: CurrencyCode
 }) {
   const ownNorm = (ownAddress ?? '').replace(/\s+/g, '').toUpperCase()
+  // Day key (YYYY-MM-DD) of the bar being drilled into, not an index: the
+  // index shifts when the period switch changes the bucket span.
+  const [selectedDay, setSelectedDay] = useState<string | null>(null)
 
   const data = useMemo(() => {
     const now = Date.now()
     const cutoff = period === 0 ? 0 : now - period * 86400000
-    const buckets = new Map<string, { ts: number; in: number; out: number }>()
+    const buckets = new Map<string, { ts: number; in: number; out: number; txs: NimiqTx[] }>()
     const t = new Date(now)
     // Seed buckets so empty days render as flat segments.
     // For "All", span from the earliest tx (capped at 90 days) so the chart
@@ -92,7 +111,7 @@ export default function Analytics({
     }
     for (let i = 0; i < seedDays; i++) {
       const k = dayKey(t.getTime())
-      buckets.set(k, { ts: t.getTime(), in: 0, out: 0 })
+      buckets.set(k, { ts: t.getTime(), in: 0, out: 0, txs: [] })
       t.setDate(t.getDate() - 1)
     }
     let totalIn = 0
@@ -124,11 +143,21 @@ export default function Analytics({
           inCount++
           largestIn = Math.max(largestIn, v)
         }
+        // Collected inside the same guards as the totals above, so the day
+        // sheet can never list a tx the bar's own arithmetic left out.
+        b.txs.push(tx)
         count++
       }
     }
     const points: FlowPoint[] = [...buckets.entries()]
-      .map(([key, b]) => ({ key, label: dayLabel(b.ts), in: b.in, out: b.out }))
+      .map(([key, b]) => ({
+        key,
+        label: dayLabel(b.ts),
+        ts: b.ts,
+        in: b.in,
+        out: b.out,
+        txs: b.txs.sort((x, z) => (z.timestamp ?? 0) - (x.timestamp ?? 0)),
+      }))
       .sort((a, b) => a.key.localeCompare(b.key))
     const stats: Stats = {
       totalIn,
@@ -193,6 +222,40 @@ export default function Analytics({
 
   const fmt = (v: number) => v.toLocaleString(lang, { maximumFractionDigits: 2 })
 
+  // Resolved fresh from the current points, so switching period while a sheet
+  // is open closes it rather than showing a day outside the new range.
+  const selIdx = selectedDay ? data.points.findIndex((p) => p.key === selectedDay) : -1
+  const selected = selIdx >= 0 ? data.points[selIdx] : null
+
+  // Bars are ~48px wide at 7d but 3.2px at "All", and zero-flow days render no
+  // rect at all — so the whole plot area is the hit target and the tap snaps
+  // to the nearest slot. Every pixel maps to some day.
+  const pickDay = (clientX: number, svg: SVGSVGElement) => {
+    const r = svg.getBoundingClientRect()
+    if (!r.width || n === 0) return
+    const xInView = (clientX - r.left) * (W / r.width)
+    const i = Math.min(n - 1, Math.max(0, Math.floor((xInView - PAD_L) / slotW)))
+    setSelectedDay(data.points[i].key)
+  }
+
+  const dayTitle = (ts: number) =>
+    new Date(ts).toLocaleDateString(lang, {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    })
+
+  const selNet = selected ? selected.in - selected.out : 0
+  const selFees = selected
+    ? selected.txs.reduce((sum, tx) => {
+        const f = Number(tx.fee) / 100000
+        return sum + (Number.isFinite(f) ? f : 0)
+      }, 0)
+    : 0
+
+  const TX_CAP = 50
+
   return (
     <section className="analytics">
       <div className="analytics-head">
@@ -211,21 +274,21 @@ export default function Analytics({
       </div>
 
       <div className="stat-grid">
-        <div className="stat">
+        <button type="button" className="stat stat-btn" title="Total NIM received over the period">
           <span className="label">Received</span>
           <span className="value green">+{fmt(data.stats.totalIn)}</span>
-        </div>
-        <div className="stat">
+        </button>
+        <button type="button" className="stat stat-btn" title="Total NIM sent over the period">
           <span className="label">Sent</span>
           <span className="value red">−{fmt(data.stats.totalOut)}</span>
-        </div>
-        <div className="stat">
+        </button>
+        <button type="button" className="stat stat-btn" title="Received minus sent over the period">
           <span className="label">Net flow</span>
           <span className={`value ${data.stats.net >= 0 ? 'green' : 'red'}`}>
             {data.stats.net >= 0 ? '+' : '−'}
             {fmt(Math.abs(data.stats.net))}
           </span>
-        </div>
+        </button>
         <button type="button" className="stat stat-btn" onClick={onOpenHistory} title="View all transactions">
           <span className="label">Txs</span>
           <span className="value">{data.stats.count}</span>
@@ -234,7 +297,24 @@ export default function Analytics({
 
       <div className="card chart-card">
         <span className="label">Daily net flow (NIM)</span>
-        <svg viewBox={`0 0 ${W} ${H}`} className="chart" role="img" aria-label="Daily net flow chart">
+        <svg
+          viewBox={`0 0 ${W} ${H}`}
+          className="chart chart-tappable"
+          role="img"
+          aria-label="Daily net flow chart — tap a bar for that day's transactions"
+          onClick={(e) => pickDay(e.clientX, e.currentTarget)}
+        >
+          {/* selected slot — drawn first so the bars stay on top of it */}
+          {selIdx >= 0 && (
+            <rect
+              x={PAD_L + selIdx * slotW}
+              y={PAD_T}
+              width={slotW}
+              height={plotH}
+              fill="var(--chart-grid)"
+              opacity={0.25}
+            />
+          )}
           {/* zero line */}
           <line x1={PAD_L} y1={y(0)} x2={W - 4} y2={y(0)} stroke="var(--chart-grid)" strokeWidth="1" />
           {/* gridlines */}
@@ -330,6 +410,92 @@ export default function Analytics({
       </div>
 
       <p className="hint small">Based on the loaded transaction history (up to 1000 txs).</p>
+
+      {selected && (
+        <DetailSheet
+          title={dayTitle(selected.ts)}
+          onClose={() => setSelectedDay(null)}
+          footer={
+            <button
+              className="btn-ghost-lg"
+              onClick={() => {
+                setSelectedDay(null)
+                onOpenHistory()
+              }}
+            >
+              View all in History
+            </button>
+          }
+        >
+          <div className={`day-net ${selNet >= 0 ? 'green' : 'red'}`}>
+            {selNet >= 0 ? '+' : '−'}
+            {fmt(Math.abs(selNet))} NIM
+          </div>
+          {nimRate && currency && (
+            <p className="hint small">
+              ≈ {formatFiat(Math.abs(selNet) * nimRate, currency)} at current rate
+            </p>
+          )}
+
+          <div className="day-breakdown">
+            <div className="row">
+              <span>Total in</span>
+              <span className="green">+{fmt(selected.in)}</span>
+            </div>
+            <div className="row">
+              <span>Total out</span>
+              <span className="red">−{fmt(selected.out)}</span>
+            </div>
+            <div className="row">
+              <span>Total fees</span>
+              <span>{fmt(selFees)}</span>
+            </div>
+          </div>
+
+          {selected.txs.length === 0 ? (
+            <p className="hint small">No transactions on this day.</p>
+          ) : (
+            selected.txs.slice(0, TX_CAP).map((tx) => {
+              const isOut = tx.sender.replace(/\s+/g, '').toUpperCase() === ownNorm
+              const label = txLabel(tx, ownAddress ?? '')
+              const memo = decodeMemo(tx.data)
+              return (
+                <div key={tx.hash} className="tx">
+                  <div className="tx-main">
+                    <span className={isOut ? 'out' : 'in'}>
+                      {isOut ? '▼ sent' : '▲ received'}
+                      {isLabelledTxKind(label) && <span className={`tx-kind ${label}`}> · {label}</span>}
+                    </span>
+                    <span className="tx-amount">{formatLuna(tx.value, lang)} NIM</span>
+                  </div>
+                  <div className="tx-sub">
+                    {tx.timestamp ? new Date(tx.timestamp).toLocaleTimeString(lang) : '—'} ·{' '}
+                    {/* Reward rollups carry a synthetic key, not a chain hash — never link one */}
+                    {tx.synthetic ? (
+                      <span className="tx-synthetic">{tx.hash.slice(0, 10)}…</span>
+                    ) : (
+                      <a
+                        className="tx-hash-link"
+                        href={explorerTxUrl(tx.hash)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        {tx.hash.slice(0, 10)}…
+                      </a>
+                    )}
+                  </div>
+                  {memo && <div className="tx-memo">memo: {memo}</div>}
+                </div>
+              )
+            })
+          )}
+          {selected.txs.length > TX_CAP && (
+            <p className="hint small">
+              Showing the {TX_CAP} most recent of {selected.txs.length} transactions.
+            </p>
+          )}
+        </DetailSheet>
+      )}
     </section>
   )
 }

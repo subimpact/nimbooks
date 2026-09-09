@@ -1860,6 +1860,8 @@ export default function App() {
               onPeriodChange={setAnalyticsPeriod}
               onOpenHistory={() => setView('history')}
               lang={lang}
+              nimRate={shown.nim}
+              currency={currency}
             />
           </section>
         )}
