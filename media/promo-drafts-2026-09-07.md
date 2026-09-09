@@ -1,6 +1,6 @@
 # NimBooks — Skool + X promo drafts (refreshed 2026-09-10)
 
-Facts locked: live https://nimbooks.subimpact.net (canonical; legacy nimbooks.pages.dev redirects) · repo https://github.com/subimpact/nimbooks (MIT) · demo video https://nimbooks.subimpact.net/nimbooks-demo.mp4 (v2, 20s, current 5-tab UI) · demo mode (sample wallet, no wallet needed) · v1.4.0 · staking in Nimiq Pay (stake/unstake/rewards) · payment requests (invoices) that settle on-chain · signed receipts w/ public verification · tax-ready CSV statements · 37-currency fiat · HTLC-aware balance · short share links (nimbook.s.gy) · Cycle II closes Sep 18 23:59 UTC · Sip & Ship Sep 16 15:00 UTC.
+Facts locked: live https://nimbooks.subimpact.net (canonical; legacy nimbooks.pages.dev redirects) · repo https://github.com/subimpact/nimbooks (MIT) · demo video https://youtube.com/shorts/y6ZInV49tMc (v2, 20s, current 5-tab UI) · demo mode (sample wallet, no wallet needed) · v1.4.0 · staking in Nimiq Pay (stake/unstake/rewards) · payment requests (invoices) that settle on-chain · signed receipts w/ public verification · tax-ready CSV statements · 37-currency fiat · HTLC-aware balance · short share links (nimbook.s.gy) · Cycle II closes Sep 18 23:59 UTC · Sip & Ship Sep 16 15:00 UTC.
 
 ---
 
@@ -20,7 +20,7 @@ Facts locked: live https://nimbooks.subimpact.net (canonical; legacy nimbooks.pa
 **Try it in 30 seconds — no wallet needed:** demo mode with a sample wallet (1,000 NIM in, 700 staked, rewards accruing). https://nimbooks.subimpact.net
 
 Repo (MIT, open): https://github.com/subimpact/nimbooks
-Demo video: https://nimbooks.subimpact.net/nimbooks-demo.mp4
+Demo video: https://youtube.com/shorts/y6ZInV49tMc
 
 Feedback very welcome — especially on the receipt format and the verification page. Happy to walk through it at Sip & Ship.
 
