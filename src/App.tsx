@@ -1755,10 +1755,6 @@ export default function App() {
                       <span>{formatLuna(String(vestedLuna), lang)} NIM</span>
                     </div>
                   )}
-                  <div className="row strong">
-                    <span>Total</span>
-                    <span>{formatLuna(String(totalNimLuna), lang)} NIM</span>
-                  </div>
                 </div>
               </div>
             )}
