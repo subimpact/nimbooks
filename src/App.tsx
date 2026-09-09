@@ -206,13 +206,13 @@ const MIN_REMAINDER_COPY = 'Your stake must stay ≥ 100 NIM'
 // auto-refresh then retries and usually succeeds. Neither is a broken wallet,
 // so neither belongs in the red alarm banner — and neither should reach the
 // user as "RPC HTTP 429" or "The operation was aborted".
-const NODE_BUSY_COPY = "Nimiq's public node is busy — retrying…"
+const NODE_BUSY_COPY = "Nimiq's public node is busy, retrying…"
 
 // Shown when the Pay host reports no consensus yet. Deliberately a dim note,
 // never a gate: NimBooks reads the chain over its own RPC, so a syncing host
 // only affects what the *wallet* can sign — the books still load. One constant
 // so the connect screen and the Overview can never word it differently.
-const PAY_SYNCING_COPY = 'Nimiq Pay is still syncing — your wallet may look empty for a moment.'
+const PAY_SYNCING_COPY = 'Nimiq Pay is still syncing. Your wallet may look empty for a moment.'
 
 function isTransientChainError(e: unknown): boolean {
   const msg = e instanceof Error ? `${e.name} ${e.message}` : String(e)
@@ -225,8 +225,8 @@ function isTransientChainError(e: unknown): boolean {
 // the verification poll has actually established.
 function txVerifyLabel(state: TxVerify | null): string {
   if (state === 'confirmed') return 'confirmed on chain ✓'
-  if (state === 'unknown') return 'submitted — could not confirm, check History'
-  return 'submitted — confirming…'
+  if (state === 'unknown') return 'submitted: could not confirm, check History'
+  return 'submitted, confirming…'
 }
 
 export default function App() {
@@ -394,7 +394,7 @@ export default function App() {
       setFiat({ nim: all.nim, usdt: all.usdt, eth: all.eth, pol: all.pol })
     } catch (e) {
       console.warn('Rate fetch failed:', e)
-      reportSoftFailure(e, 'Live rates unavailable — showing cached values.')
+      reportSoftFailure(e, 'Live rates unavailable. Showing cached values.')
     }
   }, [reportSoftFailure])
 
@@ -527,7 +527,7 @@ export default function App() {
       if (navigator.share) {
         await navigator.share({
           title: 'NimBooks payment request',
-          text: `Payment request: ${amount} NIM${invoice.memo ? ` — ${invoice.memo}` : ''}`,
+          text: `Payment request: ${amount} NIM${invoice.memo ? ` (${invoice.memo})` : ''}`,
           url,
         })
         return
@@ -540,7 +540,7 @@ export default function App() {
       await navigator.clipboard.writeText(url)
       setToast('Payment link copied!')
     } catch {
-      setError('Could not copy link — open the request and copy it from the address bar.')
+      setError('Could not copy link. Open the request and copy it from the address bar.')
     }
   }
 
@@ -614,7 +614,7 @@ export default function App() {
       setPayConsensus(acc.consensus ?? null)
       setAccount(acc)
       await refresh(acc)
-      setToast('Demo mode — read-only sample wallet.')
+      setToast('Demo mode: read-only sample wallet.')
     } catch (e) {
       setError('Demo load failed: ' + (e as Error).message)
     } finally {
@@ -636,7 +636,7 @@ export default function App() {
           .then(setNimBalance)
           .catch((e) => {
             console.warn('Balance lookup failed:', e)
-            reportSoftFailure(e, 'Balance unavailable right now — retrying.')
+            reportSoftFailure(e, 'Balance unavailable right now, retrying.')
           })
         // Full history via cursor pagination (up to 1000 txs) — the 50-tx
         // cap silently truncated "accountant-ready" statements.
@@ -874,7 +874,7 @@ export default function App() {
       } catch (e) {
         if (cancelled) return
         console.warn('Validator list failed:', e)
-        setValidatorsError('Validator list unavailable right now — try again shortly.')
+        setValidatorsError('Validator list unavailable right now. Try again shortly.')
       } finally {
         if (!cancelled) setValidatorsLoading(false)
       }
@@ -966,7 +966,7 @@ export default function App() {
       if (result !== 'expired') return
       // 'unknown' is not a failure — the RPC never answered, so say only that.
       setStakeError(
-        'Stake transaction was not mined — it never reached the chain. Please try again.'
+        'Stake transaction was not mined: it never reached the chain. Please try again.'
       )
       setToast('Stake transaction was not mined ✗')
     })()
@@ -1129,7 +1129,7 @@ export default function App() {
         /* ignore */
       }
       setUnstakeError(
-        'Unstake transaction was not mined — it never reached the chain. Please try again.'
+        'Unstake transaction was not mined: it never reached the chain. Please try again.'
       )
       setToast('Unstake transaction was not mined ✗')
     })()
@@ -1195,12 +1195,12 @@ export default function App() {
             // The whole active balance is at or under the minimum — nothing
             // partial is legal here, only unstaking all of it.
             setUnstakeError(
-              `${MIN_REMAINDER_COPY} — unstake the full ${formatLuna(String(retireableLuna), lang)} NIM instead.`
+              `${MIN_REMAINDER_COPY}. Unstake the full ${formatLuna(String(retireableLuna), lang)} NIM instead.`
             )
             return
           }
           setToast(
-            `${MIN_REMAINDER_COPY} — deactivating ${formatLuna(String(deactivateLuna), lang)} NIM instead.`
+            `${MIN_REMAINDER_COPY}. Deactivating ${formatLuna(String(deactivateLuna), lang)} NIM instead.`
           )
         }
         const deactivateNim = deactivateLuna / 100000
@@ -1231,7 +1231,7 @@ export default function App() {
       //    banner's finish action, not something this submit can send yet.
       if (remainingNim > 0) {
         setUnstakeError(
-          `${formatLuna(String(remainingNim * 100000), lang)} NIM is already cooling down — finish it from the balance banner once the reporting window passes.`
+          `${formatLuna(String(remainingNim * 100000), lang)} NIM is already cooling down. Finish it from the balance banner once the reporting window passes.`
         )
       }
       if (remainingNim < amountNim) {
@@ -1268,7 +1268,7 @@ export default function App() {
       }
       setUnstakeHash(retire.hash)
       verifyUnstakeTx(retire.hash, { kind: 'retire', amountNim: inactiveLuna / 100000 })
-      setToast('Retired — withdrawable after the reporting window ✓')
+      setToast('Retired. Withdrawable after the reporting window ✓')
       clearTxCache()
       if (account) await refresh(account)
     } finally {
@@ -1346,7 +1346,7 @@ export default function App() {
         account.nimiqAddress // sign with the connected address — no address-selector step
       )
       if (!receipt) {
-        setError('Signing cancelled — no signature returned.')
+        setError('Signing cancelled. No signature returned.')
         return
       }
       // Fallback: if the returned public key doesn't bind to sender/recipient,
@@ -1383,7 +1383,7 @@ export default function App() {
       await navigator.clipboard.writeText(url)
       setToast('Verification link copied!')
     } catch {
-      setError('Could not copy link — long-press the URL in the address bar.')
+      setError('Could not copy link. Long-press the URL in the address bar.')
     }
   }
 
@@ -1489,7 +1489,7 @@ export default function App() {
       await navigator.clipboard.writeText(buildCsv())
       setToast('CSV copied to clipboard!')
     } catch {
-      setError('Could not copy CSV — use Download instead.')
+      setError('Could not copy CSV. Use Download instead.')
     }
   }
 
@@ -1510,9 +1510,9 @@ export default function App() {
         // user empty-handed — put the CSV somewhere they can actually get at it.
         try {
           await navigator.clipboard.writeText(e.csv)
-          setToast('CSV too large for a link — copied to clipboard instead ✓')
+          setToast('CSV too large for a link. Copied to clipboard instead ✓')
         } catch {
-          setError('CSV too large for a link — use Copy CSV instead.')
+          setError('CSV too large for a link. Use Copy CSV instead.')
         }
         return
       }
@@ -1582,7 +1582,7 @@ export default function App() {
       } catch (e) {
         if (cancelled) return
         console.warn('Statement failed:', e)
-        reportSoftFailure(e, 'Statement prices unavailable right now — try again shortly.')
+        reportSoftFailure(e, 'Statement prices unavailable right now. Try again shortly.')
         setStatement(null)
       } finally {
         if (!cancelled) setStatementLoading(false)
@@ -1612,9 +1612,9 @@ export default function App() {
         // Seed the now-available device-scoped key with what's on screen —
         // otherwise the first read falls back to the legacy key and rewrites it.
         saveCurrency(currency)
-        setToast('Device preferences enabled — settings are saved to this device.')
+        setToast('Device preferences enabled. Settings are saved to this device.')
       } else {
-        setError('Device preferences unavailable — this works inside Nimiq Pay.')
+        setError('Device preferences unavailable. This works inside Nimiq Pay.')
       }
     } catch (e) {
       setError('Device preferences unavailable: ' + (e instanceof Error ? e.message : String(e)))
@@ -1635,21 +1635,21 @@ export default function App() {
   const runRestore = () => {
     const file = validateBackup(restoreText)
     if (!file) {
-      setError("That doesn't look like a NimBooks backup — paste the whole file, braces included.")
+      setError("That doesn't look like a NimBooks backup. Paste the whole file, braces included.")
       return
     }
     const total = Object.keys(file.keys).length
     if (total === 0) {
-      setError('That backup is empty — there was nothing stored when it was taken.')
+      setError('That backup is empty. There was nothing stored when it was taken.')
       return
     }
     const { restored } = importBackup(file)
     if (restored === 0) {
-      setError('Everything in that backup is already on this device — nothing to restore.')
+      setError('Everything in that backup is already on this device. Nothing to restore.')
       return
     }
     setBackupMode(null)
-    setToast(`Restored ${restored} of ${total} items — reloading…`)
+    setToast(`Restored ${restored} of ${total} items, reloading…`)
     // Currency, theme and the device ID are all read once at mount, so the
     // restored values only take effect on a fresh load. Delayed so the count
     // is actually readable before the page goes.
@@ -1743,7 +1743,7 @@ export default function App() {
                 Open in Nimiq Pay →
               </a>
               <p className="hint">
-                NimBooks runs inside the Nimiq Pay app — that's where your NIM wallet lives. Tap it
+                NimBooks runs inside the Nimiq Pay app, where your NIM wallet lives. Tap it
                 on your phone.
               </p>
               {/* Phone without the app: the Hub login works on mobile browsers
@@ -1762,7 +1762,7 @@ export default function App() {
                 {hubConnecting ? 'Opening Nimiq Hub…' : 'Continue with Nimiq Hub'}
               </button>
               <p className="hint">
-                Sign in with your Nimiq wallet right here in the browser — no app needed.
+                Sign in with your Nimiq wallet right here in the browser. No app needed.
               </p>
             </>
           )}
@@ -1770,13 +1770,13 @@ export default function App() {
             Try with a sample wallet
           </button>
           <ul className="feature-list">
-            <li>Balance &amp; history with live fiat values — 37 currencies</li>
+            <li>Balance &amp; history with live fiat values (37 currencies)</li>
             {/* Staking is signed by the injected Pay provider, so the browser
                 and mobile-web paths can read it but never send it — say so
                 here rather than in the stake panel the user has yet to open. */}
             <li>Stake, unstake &amp; track rewards{!inNimiqPay && ' (in Nimiq Pay)'}</li>
             <li>Payment requests (invoices) that settle on-chain</li>
-            <li>Signed receipts — verifiable proof of payment</li>
+            <li>Signed receipts: verifiable proof of payment</li>
             <li>Tax-ready CSV statements &amp; exports</li>
           </ul>
           {error && <p className="error">{error}</p>}
@@ -1976,20 +1976,20 @@ export default function App() {
                   {unstakeActivity.kind === 'pending' && (
                     <>
                       Deactivating {formatLuna(String(unstakeActivity.amountNim * 100000), lang)}{' '}
-                      NIM — takes effect at the next election block (up to ~12h), then a
+                      NIM. Takes effect at the next election block (up to ~12h), then a
                       reporting window before it's withdrawable.
                     </>
                   )}
                   {unstakeActivity.kind === 'cooling' && (
                     <>
                       {formatLuna(String(unstakeActivity.amountNim * 100000), lang)} NIM is
-                      cooling down — finish the unstake after the reporting window.
+                      cooling down. Finish the unstake after the reporting window.
                     </>
                   )}
                   {unstakeActivity.kind === 'ready' && (
                     <>
                       {formatLuna(String(unstakeActivity.amountNim * 100000), lang)} NIM is
-                      ready to withdraw — move it to your balance.
+                      ready to withdraw. Move it to your balance.
                     </>
                   )}
                 </span>
@@ -2132,7 +2132,7 @@ export default function App() {
                           document.body.removeChild(ta)
                           setToast('NIM address copied!')
                         } catch {
-                          setError('Could not copy — long-press the address instead.')
+                          setError('Could not copy. Long-press the address instead.')
                         }
                       }
                     }}
@@ -2165,7 +2165,7 @@ export default function App() {
                           document.body.removeChild(ta)
                           setToast('EVM address copied!')
                         } catch {
-                          setError('Could not copy — long-press the address instead.')
+                          setError('Could not copy. Long-press the address instead.')
                         }
                       }
                     }}
@@ -2201,7 +2201,7 @@ export default function App() {
                 <h3>Your books start here</h3>
                 <ul className="empty-books-steps">
                   <li>
-                    <strong>Receive some NIM.</strong> Send NIM to your address above — it appears
+                    <strong>Receive some NIM.</strong> Send NIM to your address above. It appears
                     here automatically, no import step.
                   </li>
                   <li>
@@ -2263,25 +2263,25 @@ export default function App() {
             {showTypeHelp && (
               <div className="card help-card">
                 <p>
-                  <strong>Basic transfer</strong> — a normal payment between two wallets. Money
+                  <strong>Basic transfer</strong>: a normal payment between two wallets. Money
                   moves straight from sender to recipient.
                 </p>
                 <p>
-                  <strong>Swap (HTLC)</strong> — an atomic swap. Your wallet locks funds in a
+                  <strong>Swap (HTLC)</strong>: an atomic swap. Your wallet locks funds in a
                   contract; the counterparty claims them with a secret, or they refund to you
-                  after the timeout. Nimiq Pay routes some transfers through these — while
+                  after the timeout. Nimiq Pay routes some transfers through these. While
                   locked, the funds are still yours. This is normal, not a drainer.
                 </p>
                 <p>
-                  <strong>Stake / Unstake</strong> — you delegated NIM to a validator, or withdrew
-                  it. Staked NIM lives in the staking contract rather than your basic balance —
-                  NimBooks counts it in the balance card.
+                  <strong>Stake / Unstake</strong>: you delegated NIM to a validator, or withdrew
+                  it. Staked NIM lives in the staking contract rather than your basic balance,
+                  and NimBooks counts it in the balance card.
                 </p>
                 <p>
-                  <strong>Vesting</strong> — time-locked funds that release on a schedule.
+                  <strong>Vesting</strong>: time-locked funds that release on a schedule.
                 </p>
                 <p>
-                  <strong>Reward</strong> — validator payouts on your stake. These are paid every
+                  <strong>Reward</strong>: validator payouts on your stake. These are paid every
                   few minutes and restaked automatically, so NimBooks sums them into one row per
                   day per validator. They come from a separate staking index that closes each UTC
                   day, so today's rewards appear tomorrow, and the last 90 days are covered.
@@ -2328,7 +2328,7 @@ export default function App() {
               <p className="hint small stake-history-note">
                 Stake and unstake transactions are not exposed by the public chain index, so
                 only the unstake actions you sent from this device appear below (reward payouts
-                do too, one row per day) — your staker record is live:{' '}
+                do too, one row per day). Your staker record is live:{' '}
                 <strong>
                   {formatLuna(stakingHolding.active, lang)} NIM active
                   {Number(stakingHolding.inactive) > 0 &&
@@ -2381,7 +2381,7 @@ export default function App() {
                     <span className="tx-amount">{formatLuna(tx.value, lang)} NIM</span>
                   </div>
                   <div className="tx-sub">
-                    {tx.timestamp ? new Date(tx.timestamp).toLocaleString(lang) : '—'} ·{' '}
+                    {tx.timestamp ? new Date(tx.timestamp).toLocaleString(lang) : '…'} ·{' '}
                     {isReward ? (
                       <span className="tx-synthetic">{validator} · restaked, daily total</span>
                     ) : (
@@ -2412,7 +2412,7 @@ export default function App() {
                         receipts.some((r) => r.txHash === tx.hash) ||
                         signingHash === tx.hash
                       }
-                      title={demo ? 'Demo mode is read-only — connect your wallet to sign receipts.' : undefined}
+                      title={demo ? 'Demo mode is read-only. Connect your wallet to sign receipts.' : undefined}
                     >
                       {signingHash === tx.hash
                         ? 'Signing…'
@@ -2539,7 +2539,7 @@ export default function App() {
             <h2>Your requests</h2>
             {invoices.length === 0 && (
               <p className="empty">
-                No payment requests yet. Create one above, then share the link — the payer settles
+                No payment requests yet. Create one above, then share the link. The payer settles
                 it in one tap.
               </p>
             )}
@@ -2608,7 +2608,7 @@ export default function App() {
           <section className="export">
             <h2>Export</h2>
             <p className="hint">
-              Download your NIM transaction history as CSV — ready for your accountant or tax
+              Download your NIM transaction history as CSV, ready for your accountant or tax
               records.
             </p>
             {/* Pay's WebView can't save files at all, so the link route replaces
@@ -2634,7 +2634,7 @@ export default function App() {
             <div className="card statement-card">
               <span className="label">Tax-year statement</span>
               <p className="hint small">
-                Daily closes at CoinGecko UTC prices, aggregated per day — received, sent, fees,
+                Daily closes at CoinGecko UTC prices, aggregated per day: received, sent, fees,
                 rewards, and net NIM with USD values. Failed transactions excluded.
               </p>
               {statementYears.length > 0 && (
@@ -2720,7 +2720,7 @@ export default function App() {
                           )
                           setToast('Statement CSV copied to clipboard!')
                         } catch {
-                          setError('Could not copy statement — use Download instead.')
+                          setError('Could not copy statement. Use Download instead.')
                         }
                       }}
                     >
@@ -2730,14 +2730,14 @@ export default function App() {
                 </>
               )}
               {!statementLoading && !statement && allTxs.length === 0 && (
-                <p className="hint small">No transactions loaded yet — statements appear here.</p>
+                <p className="hint small">No transactions loaded yet. Statements appear here.</p>
               )}
             </div>
 
             <div className="card backup-card">
               <span className="label">Backup &amp; restore</span>
               <p className="hint small">
-                Your books are yours — take them out any time. Receipts, payment requests, the
+                Your books are yours: take them out any time. Receipts, payment requests, the
                 staking log and your preferences live on this device only, so a cleared cache
                 takes them with it.
               </p>
@@ -2774,7 +2774,7 @@ export default function App() {
               </button>
             </div>
             <p className="hint">
-              Nimiq Pay can't save files directly — open this link in your phone's browser (or scan
+              Nimiq Pay can't save files directly. Open this link in your phone's browser (or scan
               the QR with another device) to download the CSV.
             </p>
             <textarea
@@ -2790,9 +2790,9 @@ export default function App() {
               onClick={async () => {
                 try {
                   await navigator.clipboard.writeText(downloadLink)
-                  setToast('Download link copied — open it in your browser to save the file ✓')
+                  setToast('Download link copied. Open it in your browser to save the file ✓')
                 } catch {
-                  setError('Could not copy the link — select it above and copy manually.')
+                  setError('Could not copy the link. Select it above and copy manually.')
                 }
               }}
             >
@@ -2807,7 +2807,7 @@ export default function App() {
               </div>
             ) : (
               <p className="hint small">
-                This export is too long for a scannable QR code — copy the link instead.
+                This export is too long for a scannable QR code. Copy the link instead.
               </p>
             )}
             <p className="hint small">
@@ -2839,7 +2839,7 @@ export default function App() {
             {backupMode === 'backup' ? (
               <>
                 <p className="hint">
-                  Your books are yours — take them out any time. Copy this and keep it somewhere
+                  Your books are yours: take them out any time. Copy this and keep it somewhere
                   safe; paste it back into Restore on any device to bring them along.
                 </p>
                 <textarea
@@ -2855,9 +2855,9 @@ export default function App() {
                   onClick={async () => {
                     try {
                       await navigator.clipboard.writeText(backupJson)
-                      setToast('Backup copied — paste it somewhere safe ✓')
+                      setToast('Backup copied. Paste it somewhere safe ✓')
                     } catch {
-                      setError('Could not copy — select the text above and copy it manually.')
+                      setError('Could not copy. Select the text above and copy it manually.')
                     }
                   }}
                 >
@@ -2865,13 +2865,13 @@ export default function App() {
                 </button>
                 <p className="hint small">
                   Receipts, payment requests, the staking log and your preferences. Prices and
-                  transaction history are left out — those come back from the chain on their own.
+                  transaction history are left out, and come back from the chain on their own.
                 </p>
               </>
             ) : (
               <>
                 <p className="hint">
-                  Paste a backup below. Anything already on this device is kept as-is — a restore
+                  Paste a backup below. Anything already on this device is kept as-is: a restore
                   fills in what's missing, it never overwrites your current books.
                 </p>
                 <textarea
@@ -2936,7 +2936,7 @@ export default function App() {
               ))}
             </div>
             <p className="hint small">
-              Display only — CSV exports and the tax-year statement stay in USD.
+              Display only: CSV exports and the tax-year statement stay in USD.
             </p>
           </div>
         </div>
@@ -2999,7 +2999,7 @@ export default function App() {
                 <span className="label stake-section">Validator</span>
                 {hasStaker && (
                   <p className="hint small">
-                    Your stake is already delegated — adding to it keeps the same validator.
+                    Your stake is already delegated, and adding to it keeps the same validator.
                   </p>
                 )}
                 {validatorsLoading && validators.length === 0 && (
@@ -3053,7 +3053,7 @@ export default function App() {
                             </span>
                             {v.reliability === null && (
                               <span className="badge inactive">
-                                inactive — not producing rewards
+                                inactive: not producing rewards
                               </span>
                             )}
                           </span>
@@ -3108,7 +3108,7 @@ export default function App() {
                   <div className="stake-empty">
                     <p className="hint small">
                       {hasStaker
-                        ? `Your ${formatLuna(String(retireableLuna), lang)} NIM is already staked — staked NIM can't be re-staked. To stake more, send NIM to this address first:`
+                        ? `Your ${formatLuna(String(retireableLuna), lang)} NIM is already staked. Staked NIM can't be re-staked. To stake more, send NIM to this address first:`
                         : 'No spendable NIM in this wallet to stake. Send NIM to this address first:'}
                     </p>
                     <p className="mono stake-empty-addr">{account?.nimiqAddress}</p>
@@ -3176,7 +3176,7 @@ export default function App() {
                         </div>
                         <span className="hint small">
                           {inactiveLuna > 0
-                            ? `${formatLuna(String(inactiveLuna), lang)} NIM cooling down — finish it from the balance banner after the reporting window.`
+                            ? `${formatLuna(String(inactiveLuna), lang)} NIM cooling down. Finish it from the balance banner after the reporting window.`
                             : 'Unstake deactivates active stake into a cooldown; after the reporting window you retire it, then withdraw it.'}
                           {retiredLuna > 0 &&
                             ` ${formatLuna(String(retiredLuna), lang)} NIM already withdrawable.`}
@@ -3210,14 +3210,14 @@ export default function App() {
                               </p>
                               <p className="hint small">
                                 Your stake stops earning at the next election block (~12h). It
-                                becomes withdrawable after the reporting window — by{' '}
+                                becomes withdrawable after the reporting window, by{' '}
                                 <strong>{unstakeEstimate.worstLabel}</strong> at the latest
-                                (up to ~24h, depending on where the epoch boundary falls — and
+                                (up to ~24h, depending on where the epoch boundary falls, and
                                 longer if your validator is jailed).
                               </p>
                               <p className="hint small">
-                                You'll need two more transactions once it has cooled down —
-                                both are one tap from the balance banner.
+                                You'll need two more transactions once it has cooled down.
+                                Both are one tap from the balance banner.
                               </p>
                               <div className="confirm-actions">
                                 <button
@@ -3244,7 +3244,7 @@ export default function App() {
                   </>
                 )}
                 <p className="hint small">
-                  Nimiq requires your stake to cool down for a full epoch before re-delegating —
+                  Nimiq requires your stake to cool down for a full epoch before re-delegating, so
                   switching validator means unstake → stake again. NimBooks does both.
                 </p>
               </>

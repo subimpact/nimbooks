@@ -82,7 +82,7 @@ export default function InvoicePage() {
     }
     const decoded = decodeInvoice(m[1])
     if (!decoded) {
-      setDecodeError('This payment request could not be read — the link may be corrupted.')
+      setDecodeError('This payment request could not be read. The link may be corrupted.')
       return
     }
     setInvoice(decoded)
@@ -175,7 +175,7 @@ export default function InvoicePage() {
       }
       if (!tx?.timestamp) {
         setError(
-          "Couldn't confirm this payment on-chain yet — sign it from History instead, once it appears there."
+          "Couldn't confirm this payment on-chain yet. Sign it from History instead, once it appears there."
         )
         return
       }
@@ -198,7 +198,7 @@ export default function InvoicePage() {
         account.nimiqAddress
       )
       if (!signed) {
-        setError('Signing cancelled — no signature returned.')
+        setError('Signing cancelled. No signature returned.')
         return
       }
       setReceipt(signed)
@@ -237,7 +237,7 @@ export default function InvoicePage() {
       await navigator.clipboard.writeText(url)
       setToast('Verification link copied!')
     } catch {
-      setError('Could not copy link — long-press the URL in the address bar.')
+      setError('Could not copy link. Long-press the URL in the address bar.')
     }
   }, [receipt])
 
@@ -337,7 +337,7 @@ export default function InvoicePage() {
 
         {isExpired && payState !== 'sent' && (
           <p className="hint small">
-            This request has expired. You can still pay it — check with the recipient first.
+            This request has expired. You can still pay it. Check with the recipient first.
           </p>
         )}
 
@@ -370,8 +370,8 @@ export default function InvoicePage() {
               </>
             ) : (
               <p className="hint small">
-                The transaction was submitted. It will appear in History within a few seconds —
-                sign a receipt for it from there.
+                The transaction was submitted. It will appear in History within a few seconds.
+                Sign a receipt for it from there.
               </p>
             )}
             <p className="hint small">
@@ -403,7 +403,7 @@ export default function InvoicePage() {
             <p className="hint small">
               {isInNimiqPay() || !isMobileDevice()
                 ? 'Connect your wallet to pay this request.'
-                : 'Paying needs your Nimiq wallet — open this request in Nimiq Pay, or sign in with the Nimiq Hub right here in the browser.'}
+                : 'Paying needs your Nimiq wallet. Open this request in Nimiq Pay, or sign in with the Nimiq Hub right here in the browser.'}
             </p>
           </>
         ) : demo || !canSend() ? (
@@ -413,7 +413,7 @@ export default function InvoicePage() {
             </button>
             <p className="hint small">
               {demo
-                ? 'Demo mode is read-only — connect your wallet to pay.'
+                ? 'Demo mode is read-only. Connect your wallet to pay.'
                 : 'This wallet cannot send transactions here.'}
             </p>
           </>
@@ -457,7 +457,7 @@ export default function InvoicePage() {
           </>
         )}
 
-        <p className="hint small">Powered by NimBooks — the books for your Nimiq wallet.</p>
+        <p className="hint small">Powered by NimBooks: the books for your Nimiq wallet.</p>
       </div>
     </div>
   )

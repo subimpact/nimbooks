@@ -263,7 +263,7 @@ export async function getCurrentBlock(): Promise<number | null> {
       const height = await nimiqProvider.getBlockNumber()
       if (typeof height === 'number' && Number.isFinite(height) && height > 0) return height
     } catch (e) {
-      console.warn('Provider block height unavailable — falling back to RPC:', e)
+      console.warn('Provider block height unavailable, falling back to RPC:', e)
     }
   }
   try {
@@ -281,7 +281,7 @@ export async function signMessage(
 ): Promise<{ publicKey: string; signature: string } | null> {
   // Demo mode is read-only — never attempt to sign with a wallet we don't own.
   if (activeProvider === 'demo') {
-    throw new Error('Demo mode is read-only — connect your wallet to sign receipts.')
+    throw new Error('Demo mode is read-only. Connect your wallet to sign receipts.')
   }
   // Hub-connected users sign via the Nimiq keyguard (Nimiq Signed Message scheme)
   if (activeProvider === 'hub') {
@@ -341,7 +341,7 @@ export async function sendNim({
   from,
 }: SendNimParams): Promise<SendNimResult> {
   if (activeProvider === 'demo') {
-    throw new Error('Demo mode is read-only — connect your wallet to send NIM.')
+    throw new Error('Demo mode is read-only. Connect your wallet to send NIM.')
   }
   const value = Number(amountLuna)
   if (!Number.isSafeInteger(value) || value <= 0) {
@@ -411,12 +411,12 @@ export function canStake(): boolean {
  */
 export async function stakeNim(delegation: string | null, amountNim: number): Promise<StakeResult> {
   if (activeProvider === 'demo') {
-    return { ok: false, error: 'Demo mode is read-only — connect your wallet to stake.' }
+    return { ok: false, error: 'Demo mode is read-only. Connect your wallet to stake.' }
   }
   if (activeProvider === 'hub') {
     return {
       ok: false,
-      error: 'Staking needs the Nimiq Pay app — the browser login can read and sign, but not stake.',
+      error: 'Staking needs the Nimiq Pay app. The browser login can read and sign, but not stake.',
     }
   }
 
@@ -435,7 +435,7 @@ export async function stakeNim(delegation: string | null, amountNim: number): Pr
     }
   }
   if (!nimiqProvider) {
-    return { ok: false, error: 'No Nimiq wallet connected — open NimBooks inside Nimiq Pay to stake.' }
+    return { ok: false, error: 'No Nimiq wallet connected. Open NimBooks inside Nimiq Pay to stake.' }
   }
 
   try {
@@ -476,12 +476,12 @@ export type UnstakeResult = { ok: true; hash: string } | { ok: false; error: str
  */
 export async function unstakeDeactivate(newActiveBalanceNim: number): Promise<UnstakeResult> {
   if (activeProvider === 'demo') {
-    return { ok: false, error: 'Demo mode is read-only — connect your wallet to unstake.' }
+    return { ok: false, error: 'Demo mode is read-only. Connect your wallet to unstake.' }
   }
   if (activeProvider === 'hub') {
     return {
       ok: false,
-      error: 'Unstaking needs the Nimiq Pay app — the browser login can read and sign, but not unstake.',
+      error: 'Unstaking needs the Nimiq Pay app. The browser login can read and sign, but not unstake.',
     }
   }
 
@@ -499,7 +499,7 @@ export async function unstakeDeactivate(newActiveBalanceNim: number): Promise<Un
     }
   }
   if (!nimiqProvider) {
-    return { ok: false, error: 'No Nimiq wallet connected — open NimBooks inside Nimiq Pay to unstake.' }
+    return { ok: false, error: 'No Nimiq wallet connected. Open NimBooks inside Nimiq Pay to unstake.' }
   }
 
   try {
@@ -528,12 +528,12 @@ export async function unstakeDeactivate(newActiveBalanceNim: number): Promise<Un
  */
 export async function unstakeRetire(amountNim: number): Promise<UnstakeResult> {
   if (activeProvider === 'demo') {
-    return { ok: false, error: 'Demo mode is read-only — connect your wallet to unstake.' }
+    return { ok: false, error: 'Demo mode is read-only. Connect your wallet to unstake.' }
   }
   if (activeProvider === 'hub') {
     return {
       ok: false,
-      error: 'Unstaking needs the Nimiq Pay app — the browser login can read and sign, but not unstake.',
+      error: 'Unstaking needs the Nimiq Pay app. The browser login can read and sign, but not unstake.',
     }
   }
 
@@ -550,7 +550,7 @@ export async function unstakeRetire(amountNim: number): Promise<UnstakeResult> {
     }
   }
   if (!nimiqProvider) {
-    return { ok: false, error: 'No Nimiq wallet connected — open NimBooks inside Nimiq Pay to unstake.' }
+    return { ok: false, error: 'No Nimiq wallet connected. Open NimBooks inside Nimiq Pay to unstake.' }
   }
 
   try {
@@ -575,12 +575,12 @@ export async function unstakeRetire(amountNim: number): Promise<UnstakeResult> {
  */
 export async function unstakeRemove(amountNim: number): Promise<UnstakeResult> {
   if (activeProvider === 'demo') {
-    return { ok: false, error: 'Demo mode is read-only — connect your wallet to withdraw.' }
+    return { ok: false, error: 'Demo mode is read-only. Connect your wallet to withdraw.' }
   }
   if (activeProvider === 'hub') {
     return {
       ok: false,
-      error: 'Withdrawing needs the Nimiq Pay app — the browser login can read and sign, but not withdraw.',
+      error: 'Withdrawing needs the Nimiq Pay app. The browser login can read and sign, but not withdraw.',
     }
   }
 
@@ -597,7 +597,7 @@ export async function unstakeRemove(amountNim: number): Promise<UnstakeResult> {
     }
   }
   if (!nimiqProvider) {
-    return { ok: false, error: 'No Nimiq wallet connected — open NimBooks inside Nimiq Pay to withdraw.' }
+    return { ok: false, error: 'No Nimiq wallet connected. Open NimBooks inside Nimiq Pay to withdraw.' }
   }
 
   try {
