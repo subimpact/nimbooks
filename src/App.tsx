@@ -6,6 +6,8 @@ import {
   connectHub,
   connectDemoAccount,
   disconnectWallet,
+  getConnectedAccount,
+  getHubRedirectError,
   isDemoMode,
   canStake,
   stakeNim,
@@ -65,6 +67,7 @@ import {
   EXPIRY_OPTIONS,
   MAX_MEMO_CHARS,
   formatLunaExact,
+  invoiceRoute,
   invoiceStatus,
   invoiceUrl,
   loadInvoices,
@@ -76,7 +79,7 @@ import {
   type StoredInvoice,
 } from './lib/invoice'
 import { getRestakeRewardTxs, restakeWindow } from './lib/stakingEvents'
-import { isInNimiqPay, isMobileDevice, NIMIQ_PAY_APP_URL } from './lib/device'
+import { appLink, isInNimiqPay, isMobileDevice, NIMIQ_PAY_APP_URL } from './lib/device'
 import { buildDownloadLink } from './lib/downloadLink'
 import { exportBackup, importBackup, validateBackup } from './lib/backup'
 import { APP_VERSION_LABEL, CHANGELOG } from './lib/changelog'
@@ -226,7 +229,10 @@ function txVerifyLabel(state: TxVerify | null): string {
 }
 
 export default function App() {
-  const [account, setAccount] = useState<WalletAccount | null>(null)
+  // A Hub login on a mobile browser returns as a full-page redirect, and
+  // main.tsx has already picked the answer off the URL — so the session can
+  // exist before this component's first render.
+  const [account, setAccount] = useState<WalletAccount | null>(getConnectedAccount)
   // Nimiq Pay's sync state at connect time. `null` = not asked / not applicable
   // (Hub, demo, browser). Never gates the UI — see the note it renders.
   const [payConsensus, setPayConsensus] = useState<boolean | null>(null)
@@ -272,7 +278,12 @@ export default function App() {
   const [receipts, setReceipts] = useState<SignedReceipt[]>([])
   const [loading, setLoading] = useState(false)
   const [signingHash, setSigningHash] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(() => {
+    // A redirect login that came back refused or cancelled has nowhere else to
+    // report itself — the connect screen renders before any handler runs.
+    const failed = getHubRedirectError()
+    return failed ? 'Browser login failed: ' + failed : null
+  })
   const [toast, setToast] = useState<string | null>(null)
   const [theme, setTheme] = useState<Theme>(getInitialTheme)
   const [showReceiptHelp, setShowReceiptHelp] = useState(false)
@@ -504,7 +515,7 @@ export default function App() {
   }
 
   const shareInvoice = async (invoice: StoredInvoice) => {
-    const url = invoiceUrl(invoice)
+    const url = appLink(invoiceRoute(invoice))
     const amount = formatLunaExact(invoice.amountNim)
     try {
       if (navigator.share) {
@@ -727,6 +738,15 @@ export default function App() {
       setLoading(false)
     }
   }
+
+  // The redirect login above hands back an account, not a connect click, so
+  // nothing has loaded the books for it yet. Mount-only: every other path into
+  // an account already calls refresh itself.
+  useEffect(() => {
+    const restored = getConnectedAccount()
+    if (restored) void refresh(restored)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // One ledger for everything that counts as a transaction: indexed txs plus
   // the synthesized reward rows, newest first. History, the CSV and the
@@ -1318,7 +1338,7 @@ export default function App() {
 
   const shareReceipt = async (r: SignedReceipt) => {
     const enc = encodeReceipt(r)
-    const url = `${window.location.origin}${window.location.pathname}#/verify/${enc}`
+    const url = appLink(`#/verify/${enc}`)
     try {
       if (navigator.share) {
         await navigator.share({ title: 'NimBooks receipt', text: 'Verified payment receipt', url })
@@ -1695,6 +1715,15 @@ export default function App() {
                 NimBooks runs inside the Nimiq Pay app — that's where your NIM wallet lives. Tap it
                 on your phone.
               </p>
+              {/* Phone without the app: the Hub login works on mobile browsers
+                  via redirect (lib/wallet.connectHub), read and sign only. */}
+              <button
+                className="btn-ghost-lg"
+                onClick={connectWithHub}
+                disabled={connecting || hubConnecting}
+              >
+                {hubConnecting ? 'Opening Nimiq Hub…' : 'No app? Continue with Nimiq Hub'}
+              </button>
             </>
           ) : (
             <>
@@ -3172,7 +3201,10 @@ export default function App() {
                     )}
                   </>
                 )}
-                <p className="hint small">Switching validator is coming soon.</p>
+                <p className="hint small">
+                  Nimiq requires your stake to cool down for a full epoch before re-delegating —
+                  switching validator means unstake → stake again. NimBooks does both.
+                </p>
               </>
             )}
           </div>

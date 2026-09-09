@@ -621,6 +621,12 @@ function hasAllCurrencies(rates: FiatRates | undefined): boolean {
   return !!rates && CURRENCIES.every((c) => typeof rates[c.code] === 'number')
 }
 
+// A live NIM price at or above this is a wrong-id response, not a rally: NIM
+// has never traded near a cent, and sits around $0.0004 today. The 365-day
+// statement uses a looser bound (lib/statement.ts) — it prices the past, where
+// a genuine high must not be silently dropped.
+const NIM_MAX_PLAUSIBLE_USD = 0.01
+
 function pickRates(entry: any): FiatRates {
   const rates: FiatRates = {}
   for (const c of CURRENCIES) {
@@ -660,6 +666,12 @@ export async function getAllFiatRates(): Promise<Record<'nim' | 'usdt' | 'eth' |
       eth: pickRates(json['ethereum']),
       pol: pickRates(json['matic-network']),
     }
+    // Sanity clamp. CoinGecko's `nimiq` id (the retired NIM 1.0 listing) has
+    // served ~$0.0282 — 72× the real rate — and one bad id would put a 72×
+    // Total value in front of the user. NIM has never traded near a cent, so a
+    // USD price at or above that is bad data, not a rally: zero it, which the
+    // cache guard below reads as "no rates" and never stores.
+    if (!(out.nim.usd > 0 && out.nim.usd < NIM_MAX_PLAUSIBLE_USD)) out.nim = pickRates(null)
     // Cache only if the response actually carried rates (avoid caching 429/empty)
     if (out.nim.usd > 0) {
       for (const k of ['nim', 'usdt', 'eth', 'pol'] as const) {
