@@ -7,12 +7,18 @@ import type { NimiqProvider } from '@nimiq/mini-app-sdk'
 import HubApi from '@nimiq/hub-api'
 import type { SignedReceipt } from './receipt'
 import { canonicalPayload } from './receipt'
-import { broadcastRawTransaction, encodeMemo } from './chain'
+import { broadcastRawTransaction, encodeMemo, getNimiqBlockNumber } from './chain'
 
 export interface WalletAccount {
   nimiqAddress?: string
   evmAddress?: string
   provider: 'pay' | 'hub' | 'demo'
+  /**
+   * Whether the wallet host has established consensus. Only Nimiq Pay reports
+   * it; `true` for Hub (a web wallet talks to a synced node) and `null` for
+   * demo mode, where there is no provider to ask.
+   */
+  consensus?: boolean | null
 }
 
 let nimiqProvider: NimiqProvider | null = null
@@ -45,7 +51,7 @@ function bytesToHex(bytes: Uint8Array): string {
 }
 
 export async function connectWallet(): Promise<WalletAccount> {
-  const account: WalletAccount = { provider: 'pay' }
+  const account: WalletAccount = { provider: 'pay', consensus: null }
   activeProvider = 'pay'
 
   // Nimiq side
@@ -54,6 +60,19 @@ export async function connectWallet(): Promise<WalletAccount> {
     const accounts = await nimiqProvider.listAccounts()
     if (Array.isArray(accounts) && accounts.length > 0) {
       account.nimiqAddress = accounts[0]
+    }
+    // A Pay host that is still syncing answers `listAccounts` but has no chain
+    // view yet, which reads to the user as an empty wallet. Ask, and let the
+    // UI say so — never gate on it: NimBooks reads the chain over its own RPC,
+    // so the data lands regardless.
+    try {
+      // Typed `Promise<boolean>`, but every other provider method can hand
+      // back an ErrorResponse object instead — anything that isn't a boolean
+      // means "didn't answer", which is `null`, not `false`.
+      const established = await nimiqProvider.isConsensusEstablished()
+      if (typeof established === 'boolean') account.consensus = established
+    } catch (e) {
+      console.warn('Consensus check unavailable:', e)
     }
   } catch (e) {
     console.warn('Nimiq provider unavailable:', e)
@@ -81,7 +100,7 @@ export async function connectHub(): Promise<WalletAccount> {
   const result = await getHub().chooseAddress({ appName: 'NimBooks' })
   if (!result?.address) throw new Error('No address returned from Nimiq Hub.')
   activeProvider = 'hub'
-  currentAccount = { nimiqAddress: result.address, provider: 'hub' }
+  currentAccount = { nimiqAddress: result.address, provider: 'hub', consensus: true }
   return currentAccount
 }
 
@@ -89,7 +108,7 @@ export async function connectHub(): Promise<WalletAccount> {
 // correctly disabled (a demo address is not owned by the user).
 export function connectDemoAccount(address: string): WalletAccount {
   activeProvider = 'demo'
-  currentAccount = { nimiqAddress: address, provider: 'demo' }
+  currentAccount = { nimiqAddress: address, provider: 'demo', consensus: null }
   return currentAccount
 }
 
@@ -109,6 +128,35 @@ export async function getDeviceId(): Promise<string | null> {
 
 export function getLanguage(): string | undefined {
   return getHostLanguage()
+}
+
+/**
+ * Chain head, from the wallet host where there is one. Inside Nimiq Pay the
+ * provider already tracks the head, so asking it costs no HTTP request — that
+ * removes ~6 RPC calls/min from the 10s refresh and makes the unstake gate
+ * (which compares `inactiveFrom + BLOCKS_PER_EPOCH` against this) read the same
+ * height the wallet signs against.
+ *
+ * Falls back to the public RPC when the provider has no answer, and is the
+ * only path for Hub/demo. `null` means "unknown" — callers keep the last
+ * height rather than treating it as block 0.
+ */
+export async function getCurrentBlock(): Promise<number | null> {
+  if (activeProvider === 'pay' && nimiqProvider) {
+    try {
+      const height = await nimiqProvider.getBlockNumber()
+      if (typeof height === 'number' && Number.isFinite(height) && height > 0) return height
+    } catch (e) {
+      console.warn('Provider block height unavailable — falling back to RPC:', e)
+    }
+  }
+  try {
+    const height = await getNimiqBlockNumber()
+    return Number.isFinite(height) && height > 0 ? height : null
+  } catch (e) {
+    console.warn('Block number lookup failed:', e)
+    return null
+  }
 }
 
 export async function signMessage(

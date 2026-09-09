@@ -22,6 +22,7 @@ export interface DailyRow {
   closeUsd: number | null
   receivedUsd: number | null
   sentUsd: number | null
+  feeUsd: number | null
   netUsd: number | null
   txCount: number
 }
@@ -34,6 +35,9 @@ export interface StatementTotals {
   netNim: number
   receivedUsd: number | null
   sentUsd: number | null
+  // Fees priced at each day's own close, like every other USD figure here —
+  // a year's fees valued at one arbitrary day's price is not a daily-close basis.
+  feeUsd: number | null
   netUsd: number | null
   txCount: number
   daysActive: number
@@ -126,6 +130,7 @@ export function computeStatement(
         closeUsd: null,
         receivedUsd: null,
         sentUsd: null,
+        feeUsd: null,
         netUsd: null,
         txCount: 0,
       }
@@ -171,6 +176,7 @@ export function computeStatement(
     netNim: 0,
     receivedUsd: null,
     sentUsd: null,
+    feeUsd: null,
     netUsd: null,
     txCount: 0,
     daysActive: 0,
@@ -184,6 +190,9 @@ export function computeStatement(
     if (row.closeUsd === null) usdAvailable = false
     row.receivedUsd = row.closeUsd !== null ? row.receivedNim * row.closeUsd : null
     row.sentUsd = row.closeUsd !== null ? row.sentNim * row.closeUsd : null
+    // Fees on outgoing txs only (the methodology at the top of this file), so
+    // feeNim is already sender-side — price it at the same day's close.
+    row.feeUsd = row.closeUsd !== null ? row.feeNim * row.closeUsd : null
     row.netUsd = row.closeUsd !== null ? row.netNim * row.closeUsd : null
 
     totals.receivedNim += row.receivedNim
@@ -196,6 +205,7 @@ export function computeStatement(
         ? totals.receivedUsd + row.receivedUsd
         : row.receivedUsd
     totals.sentUsd = totals.sentUsd !== null && row.sentUsd !== null ? totals.sentUsd + row.sentUsd : row.sentUsd
+    totals.feeUsd = totals.feeUsd !== null && row.feeUsd !== null ? totals.feeUsd + row.feeUsd : row.feeUsd
     totals.netUsd = totals.netUsd !== null && row.netUsd !== null ? totals.netUsd + row.netUsd : row.netUsd
     totals.txCount += row.txCount
     totals.daysActive += 1
@@ -203,6 +213,7 @@ export function computeStatement(
   if (!usdAvailable) {
     totals.receivedUsd = null
     totals.sentUsd = null
+    totals.feeUsd = null
     totals.netUsd = null
   }
 
@@ -236,6 +247,7 @@ export function buildStatementCsv(s: Statement, address: string): string {
       'closeUSD',
       'receivedUSD',
       'sentUSD',
+      'feeUSD',
       'netUSD',
       'txCount',
     ],
@@ -249,6 +261,7 @@ export function buildStatementCsv(s: Statement, address: string): string {
       fmt(r.closeUsd, 8),
       fmt(r.receivedUsd),
       fmt(r.sentUsd),
+      fmt(r.feeUsd),
       fmt(r.netUsd),
       r.txCount,
     ]),
@@ -263,6 +276,7 @@ export function buildStatementCsv(s: Statement, address: string): string {
       '',
       fmt(s.totals.receivedUsd),
       fmt(s.totals.sentUsd),
+      fmt(s.totals.feeUsd),
       fmt(s.totals.netUsd),
       s.totals.txCount,
     ],
