@@ -430,6 +430,37 @@ a:focus-visible {
   font-size: 32px;
   color: var(--accent-2);
 }
+/* Total value + NIM balance share a row — two half-width tiles instead of
+   two stacked cards, which buys ~90px of vertical space on mobile. */
+.stat-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.stat-row .card {
+  margin-bottom: 0;
+  /* Grid items default to min-width:auto — without this a long balance
+     widens its column and scrolls the whole page sideways. */
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.card.total .value {
+  font-size: 24px;
+}
+/* NIM totals run long (5,010.00052 NIM), so the tile sits a step smaller. */
+.nim-tile .value {
+  font-size: 20px;
+}
+.nim-tile .sub {
+  font-size: 11px;
+}
+@media (max-width: 339px) {
+  .card.total .value,
+  .nim-tile .value {
+    font-size: 18px;
+  }
+}
 .row {
   display: flex;
   justify-content: space-between;
@@ -1371,10 +1402,12 @@ a.btn-ghost.btn-link {
   align-items: flex-start;
   flex-wrap: wrap;
   gap: 8px;
-  margin: 0 0 10px;
-  padding: 8px 10px;
+  /* Standalone row on the dashboard now (it used to sit inside the NIM
+     card's padding), so it carries card-sized spacing and corners itself. */
+  margin: 0 0 12px;
+  padding: 10px 12px;
   border: 1px solid var(--warn, #e8a33d);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius);
   background: color-mix(in srgb, var(--warn, #e8a33d) 10%, transparent);
   font-size: 12px;
   line-height: 1.45;
