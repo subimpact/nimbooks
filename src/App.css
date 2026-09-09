@@ -119,10 +119,13 @@ a:focus-visible {
   padding: 56px 0 28px;
   position: relative;
 }
-.hero .theme-toggle {
+.hero-actions {
   position: absolute;
   top: 0;
   right: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .hero .logo {
   font-size: 60px;
@@ -282,6 +285,41 @@ a:focus-visible {
   font-weight: 700;
   letter-spacing: -0.01em;
   flex: 1;
+}
+
+/* Version badge — opens the changelog; sits beside the theme toggle in both headers */
+.version-badge {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.6;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.version-badge:hover {
+  color: var(--text);
+  border-color: var(--muted);
+}
+
+/* Narrow phones: the topbar already carries four icon buttons — give the badge
+   back the pixels it costs rather than squeezing the icons. */
+@media (max-width: 374px) {
+  .topbar {
+    gap: 5px;
+  }
+  .topbar h1 {
+    font-size: 17px;
+  }
+  .topbar .version-badge {
+    padding: 2px 6px;
+    font-size: 10px;
+  }
 }
 
 /* Tabs — floating dock overlay, anchored to the bottom, never pushes content */
@@ -1073,6 +1111,32 @@ a.btn-ghost.btn-link {
   margin: 8px 0;
 }
 
+/* Changelog modal */
+.changelog-entry {
+  margin-bottom: 14px;
+}
+.changelog-version {
+  font-weight: 700;
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+.changelog-date {
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 12px;
+  margin-left: 6px;
+}
+.changelog-entry ul {
+  margin: 0;
+  padding-left: 18px;
+}
+.changelog-entry li {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+  margin-bottom: 3px;
+}
+
 /* Radio-style option rows — currency list and validator picker */
 .option-list {
   display: flex;
@@ -1504,6 +1568,7 @@ a.btn-ghost.btn-link {
   .btn-secondary,
   .btn-small,
   .theme-toggle,
+  .version-badge,
   .error-banner,
   .toast,
   .modal-overlay {

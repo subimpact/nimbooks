@@ -78,6 +78,7 @@ import {
 import { getRestakeRewardTxs, restakeWindow } from './lib/stakingEvents'
 import { isInNimiqPay, isMobileDevice, NIMIQ_PAY_APP_URL } from './lib/device'
 import { buildDownloadLink } from './lib/downloadLink'
+import { APP_VERSION_LABEL, CHANGELOG } from './lib/changelog'
 import QrCode from './QrCode'
 import Analytics, { type AnalyticsPeriod } from './Analytics'
 import {
@@ -215,6 +216,7 @@ export default function App() {
   })
   const [currency, setCurrency] = useState<CurrencyCode>(loadCurrency)
   const [currencyOpen, setCurrencyOpen] = useState(false)
+  const [changelogOpen, setChangelogOpen] = useState(false)
   const [deviceId, setDeviceId] = useState<string | null>(null)
   const [lang, setLang] = useState<string>('en')
   const [receipts, setReceipts] = useState<SignedReceipt[]>([])
@@ -1386,6 +1388,50 @@ export default function App() {
     }
   }
 
+  // Both headers carry the version badge, and the connect screen returns early —
+  // so the modal is built once here and rendered in each tree.
+  const changelogModal = changelogOpen && (
+    <div className="modal-overlay" onClick={() => setChangelogOpen(false)}>
+      <div
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Changelog"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="modal-head">
+          <h2>NimBooks changelog</h2>
+          <button className="btn-ghost" onClick={() => setChangelogOpen(false)} aria-label="Close">
+            ✕
+          </button>
+        </div>
+        {CHANGELOG.map((entry) => (
+          <div key={entry.version} className="changelog-entry">
+            <div className="changelog-version">
+              v{entry.version} <span className="changelog-date">{entry.date}</span>
+            </div>
+            <ul>
+              {entry.items.map((item, i) => (
+                <li key={i}>{item}</li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+
+  const versionBadge = (
+    <button
+      className="version-badge"
+      onClick={() => setChangelogOpen(true)}
+      title="What's new in NimBooks"
+      aria-label="Version and changelog"
+    >
+      {APP_VERSION_LABEL}
+    </button>
+  )
+
   if (!account) {
     // One path per device — see lib/device.ts for the detection rules.
     const inNimiqPay = isInNimiqPay()
@@ -1393,14 +1439,17 @@ export default function App() {
     return (
       <div className="app">
         <header className="hero">
-          <button
-            className="btn-ghost theme-toggle"
-            onClick={toggleTheme}
-            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-            aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-          >
-            {theme === 'dark' ? '☀️' : '🌙'}
-          </button>
+          <div className="hero-actions">
+            {versionBadge}
+            <button
+              className="btn-ghost theme-toggle"
+              onClick={toggleTheme}
+              title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+              aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            >
+              {theme === 'dark' ? '☀️' : '🌙'}
+            </button>
+          </div>
           <div className="logo">📒</div>
           <h1>NimBooks</h1>
           <p className="tagline">The books for your Nimiq wallet.</p>
@@ -1451,6 +1500,7 @@ export default function App() {
           </ul>
           {error && <p className="error">{error}</p>}
         </main>
+        {changelogModal}
       </div>
     )
   }
@@ -1463,6 +1513,7 @@ export default function App() {
       <header className="topbar">
         <div className="logo small">📒</div>
         <h1>NimBooks</h1>
+        {versionBadge}
         <button
           className="btn-ghost"
           onClick={toggleTheme}
@@ -2304,6 +2355,8 @@ export default function App() {
           </section>
         )}
       </main>
+
+      {changelogModal}
 
       {downloadLink && (
         <div className="modal-overlay" onClick={() => setDownloadLink(null)}>
