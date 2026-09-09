@@ -392,22 +392,24 @@ export default function Analytics({
   const trajMax = trajectory.length ? Math.max(...trajectory.map((q) => q.balance)) : 0
   const trajMin = trajectory.length ? Math.min(...trajectory.map((q) => q.balance)) : 0
   const trajFloor = Math.max(0, trajMin - 0.25 * (trajMax - trajMin))
+  // A single-value trajectory (every tx on one day) has no span to scale
+  // against, and scaling it anyway pins every point to the floor — which reads
+  // as "the balance went to zero" while both axis labels say it did not. Draw a
+  // flat balance along the top instead: steady, not empty. The area fill is
+  // suppressed in this case (see below) — filling from the top line down to the
+  // floor paints the whole plot, which reads as a rendering fault.
+  const trajFlat = trajectory.length > 0 && trajMax - trajFloor < 1e-9
 
   const trajPoints = trajectory.length
     ? (() => {
         const minTs = Math.min(...trajectory.map((q) => q.ts))
         const maxTs = Math.max(...trajectory.map((q) => q.ts))
         const span = Math.max(0.000001, trajMax - trajFloor)
-        // A single-value trajectory (every tx on one day) has no span to scale
-        // against, and scaling it anyway pins every point to the floor — which
-        // reads as "the balance went to zero" while both axis labels say it did
-        // not. Draw a flat balance along the top instead: steady, not empty.
-        const flat = trajMax - trajFloor < 1e-9
         return trajectory
           .map((p) => {
             // Time-scaled x-axis: gaps in time render as gaps in the chart
             const x = PAD_L + plotW * (maxTs === minTs ? 1 : (p.ts - minTs) / (maxTs - minTs))
-            const yv = flat ? PAD_T + 4 : PAD_T + plotH - 4 - ((p.balance - trajFloor) / span) * (plotH - 8)
+            const yv = trajFlat ? PAD_T + 4 : PAD_T + plotH - 4 - ((p.balance - trajFloor) / span) * (plotH - 8)
             return `${x},${yv}`
           })
           .join(' ')
@@ -752,8 +754,12 @@ export default function Analytics({
               </linearGradient>
             </defs>
             <polyline points={trajPoints} fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinejoin="round" />
-            {/* area fill: fades out toward the floor line, which is the bounded y-floor */}
-            <polygon points={`${PAD_L},${PAD_T + plotH} ${trajPoints} ${W - 4},${PAD_T + plotH}`} fill="url(#trajFill)" />
+            {/* area fill: fades out toward the floor line, which is the bounded y-floor.
+                Skipped when flat — the line sits at the top, so the fill would be a
+                full-height block rather than a shape that tracks the balance. */}
+            {!trajFlat && (
+              <polygon points={`${PAD_L},${PAD_T + plotH} ${trajPoints} ${W - 4},${PAD_T + plotH}`} fill="url(#trajFill)" />
+            )}
             <text x={PAD_L - 6} y={PAD_T + 10} fontSize="8" fill="var(--muted)" textAnchor="end">
               {fmt(trajMax)}
             </text>
