@@ -568,14 +568,32 @@ export function currencySymbol(code: CurrencyCode): string {
   return CURRENCIES.find((c) => c.code === code)?.symbol ?? '$'
 }
 
+// Currencies quoted without minor units — there is no such thing as 0.56 yen.
+// Rendering "¥1,234.56" is not a rounding nicety, it is the wrong number of
+// digits. Codes checked against the CURRENCIES list above.
+const ZERO_DECIMAL = new Set<CurrencyCode>(['clp', 'idr', 'jpy', 'krw', 'vnd'])
+
 /**
- * Money for display. Sub-cent amounts get 4 decimals so a small NIM balance
- * never reads as "$0.00"; pass `decimals` to pin the precision instead.
+ * Money for display, grouped by the browser's locale so it lines up with the
+ * NIM figures above it (formatLuna already groups). Sub-cent amounts get 4
+ * decimals so a small NIM balance never reads as "$0.00"; pass `decimals` to
+ * pin the precision instead.
  */
 export function formatFiat(amount: number, code: CurrencyCode, decimals?: number): string {
   const n = Number.isFinite(amount) ? amount : 0
-  const dp = decimals ?? (n > 0 && n < 0.01 ? 4 : 2)
-  return `${currencySymbol(code)}${n.toFixed(dp)}`
+  // Zero-decimal currencies ignore a pinned precision — a caller asking for 4
+  // decimals wants "don't round this away", not "invent minor units for yen".
+  // Below one whole unit they still get 2, since "¥0" for a real balance is
+  // the very thing the sub-cent rule exists to prevent.
+  const dp = ZERO_DECIMAL.has(code)
+    ? n > 0 && n < 1
+      ? 2
+      : 0
+    : (decimals ?? (n > 0 && n < 0.01 ? 4 : 2))
+  return `${currencySymbol(code)}${n.toLocaleString(undefined, {
+    minimumFractionDigits: dp,
+    maximumFractionDigits: dp,
+  })}`
 }
 
 const RATE_CACHE_KEY = 'nimbooks:rates'

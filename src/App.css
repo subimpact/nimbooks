@@ -843,6 +843,49 @@ a.btn-ghost.btn-link {
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
+/* Keyboard reaches the chart too (arrows walk the days, Enter drills in), so
+   the focus ring has to be visible — the SVG fills its card edge to edge. */
+.chart-tappable:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Fresh-wallet Overview card — only ever on screen while there is genuinely
+   nothing to chart, so it can afford the room. */
+.empty-books-glyph {
+  width: 28px;
+  height: 28px;
+  color: var(--accent);
+  display: block;
+  margin-bottom: 8px;
+}
+.empty-books h3 {
+  margin: 0 0 12px;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.empty-books-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.empty-books-steps li {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.empty-books-steps strong {
+  display: block;
+  color: var(--text);
+}
+.empty-books-steps .btn-secondary {
+  margin-top: 8px;
+}
 
 /* Day drilldown sheet (tap a bar on the daily net flow chart) */
 .day-net {
