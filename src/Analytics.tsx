@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
+import InfoIcon from './InfoIcon'
 import type { CurrencyCode, NimiqTx, TxLabel } from './lib/chain'
 import {
   decodeMemo,
@@ -658,7 +659,10 @@ export default function Analytics({
       </div>
 
       <div className="card chart-card">
-        <span className="label">Daily net flow (NIM)</span>
+        <span className="label label-with-info">
+          Daily net flow (NIM)
+          <InfoIcon text="Received minus sent per day, from your indexed transactions. Tap a bar to see that day's transactions. Rewards and staking moves are not included." />
+        </span>
         <svg
           viewBox={`0 0 ${W} ${H}`}
           className="chart chart-tappable"
@@ -761,7 +765,10 @@ export default function Analytics({
 
       {trajectory.length > 1 && (
         <div className="card chart-card">
-          <span className="label">Available balance trajectory (NIM, end of day)</span>
+          <span className="label label-with-info">
+            Available balance trajectory (NIM, end of day)
+            <InfoIcon text="Your available balance, including funds in transit (HTLC), at the end of each day. Reconstructed from your transaction history, one point per day, so a busy day reads as its net move. Staking rewards are not included." />
+          </span>
           <svg viewBox={`0 0 ${W} ${H}`} className="chart" role="img" aria-label="Balance trajectory chart">
             <defs>
               <linearGradient id="trajFill" x1="0" y1="0" x2="0" y2="1">
