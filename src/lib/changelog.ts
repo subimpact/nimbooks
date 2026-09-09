@@ -1,9 +1,9 @@
 // Release notes shown in the version badge modal. Newest first — the git log is
 // the source of truth, so every line here maps to shipped commits.
-export const APP_VERSION = '1.0.0'
+export const APP_VERSION = '1.1.0'
 // Badge text. Spelled out rather than built with `'v' + APP_VERSION` so the exact
 // label ships as one string in the bundle (JSX would emit "v" as a separate node).
-export const APP_VERSION_LABEL = 'v1.0.0'
+export const APP_VERSION_LABEL = 'v1.1.0'
 
 export interface ChangelogEntry {
   version: string
@@ -12,6 +12,16 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '1.1.0',
+    date: '2026-09-09',
+    items: [
+      'Analytics drilldown: tap any bar on the daily net flow chart to see that day\'s transactions',
+      'Received, Sent and Net flow cards expand into detail sheets — top counterparties, fees paid, flow composition and period comparison',
+      'Side-by-side Total value and NIM balance tiles on the Overview, with the balance breakdown in its own card',
+      'Txs stat jumps straight to History',
+    ],
+  },
   {
     version: '1.0.0',
     date: '2026-09-09',
