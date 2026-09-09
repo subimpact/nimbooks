@@ -64,6 +64,7 @@ export default function Analytics({
   ownAddress,
   period,
   onPeriodChange,
+  onOpenHistory,
   lang,
 }: {
   txs: NimiqTx[]
@@ -71,6 +72,7 @@ export default function Analytics({
   ownAddress: string | null
   period: AnalyticsPeriod
   onPeriodChange: (p: AnalyticsPeriod) => void
+  onOpenHistory: () => void
   lang: string
 }) {
   const ownNorm = (ownAddress ?? '').replace(/\s+/g, '').toUpperCase()
@@ -224,10 +226,10 @@ export default function Analytics({
             {fmt(Math.abs(data.stats.net))}
           </span>
         </div>
-        <div className="stat">
+        <button type="button" className="stat stat-btn" onClick={onOpenHistory} title="View all transactions">
           <span className="label">Txs</span>
           <span className="value">{data.stats.count}</span>
-        </div>
+        </button>
       </div>
 
       <div className="card chart-card">
