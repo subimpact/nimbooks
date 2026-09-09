@@ -38,7 +38,7 @@ export const onRequestGet = async ({ request, params }: Ctx): Promise<Response> 
     return new Response('Missing ?d= payload', { status: 400 })
   }
   if (payload.length > MAX_PAYLOAD) {
-    return new Response('Payload too large for a URL — use Copy CSV instead.', { status: 414 })
+    return new Response('Payload too large for a URL. Use Copy CSV instead.', { status: 414 })
   }
 
   // Bytes, never a string: the CSV opens with a UTF-8 BOM (Excel needs it) and

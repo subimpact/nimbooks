@@ -666,8 +666,8 @@ export default function Analytics({
           tabIndex={0}
           aria-label={
             selected
-              ? `Daily net flow chart — ${dayTitle(selected.ts)} selected. Arrow keys change day, Enter opens that day's transactions.`
-              : "Daily net flow chart — tap a bar, or use arrow keys and Enter, for that day's transactions"
+              ? `Daily net flow chart: ${dayTitle(selected.ts)} selected. Arrow keys change day, Enter opens that day's transactions.`
+              : "Daily net flow chart: tap a bar, or use arrow keys and Enter, for that day's transactions"
           }
           onClick={(e) => pickDay(e.clientX, e.currentTarget)}
           onKeyDown={onChartKey}
@@ -879,7 +879,7 @@ export default function Analytics({
                     <span className="tx-amount">{formatLuna(tx.value, lang)} NIM</span>
                   </div>
                   <div className="tx-sub">
-                    {tx.timestamp ? new Date(tx.timestamp).toLocaleTimeString(lang) : '—'} ·{' '}
+                    {tx.timestamp ? new Date(tx.timestamp).toLocaleTimeString(lang) : '…'} ·{' '}
                     {/* Reward rollups carry a synthetic key, not a chain hash — never link one */}
                     {tx.synthetic ? (
                       <span className="tx-synthetic">{tx.hash.slice(0, 10)}…</span>

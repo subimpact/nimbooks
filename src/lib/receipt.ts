@@ -200,7 +200,7 @@ export async function verifyReceiptFull(receipt: SignedReceipt): Promise<{
       signatureValid: false,
       onChainValid: false,
       signerBound: false,
-      details: 'Your browser cannot check Ed25519 signatures — open this link in an updated browser.',
+      details: 'Your browser cannot check Ed25519 signatures. Open this link in an updated browser.',
     }
   }
   const payload = canonicalPayload(receipt)
@@ -211,7 +211,7 @@ export async function verifyReceiptFull(receipt: SignedReceipt): Promise<{
       signatureValid: false,
       onChainValid: false,
       signerBound: false,
-      details: 'Signature invalid — receipt is not authentic.',
+      details: 'Signature invalid: receipt is not authentic.',
     }
   }
 

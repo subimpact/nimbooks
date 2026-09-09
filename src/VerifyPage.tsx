@@ -50,7 +50,7 @@ export default function VerifyPage() {
     const r = decodeReceipt(routePayload)
     if (!r) {
       setStatus('error')
-      setDetails('Receipt could not be decoded — the link may be corrupted.')
+      setDetails('Receipt could not be decoded. The link may be corrupted.')
       return
     }
     setReceipt(r)
@@ -112,7 +112,7 @@ export default function VerifyPage() {
                   hands the user the explorer rather than a verdict. */}
               <p className="details">
                 That is a transaction hash, not a receipt. NimBooks can't verify a payment from a
-                hash alone — a receipt carries the sender's signature over the payment's details,
+                hash alone. A receipt carries the sender's signature over the payment's details,
                 and a hash carries none. Look the transaction up on the explorer, and ask whoever
                 paid you for their receipt link.
               </p>
@@ -144,7 +144,7 @@ export default function VerifyPage() {
           ) : (
             <>
               <p className="details">
-                Paste a NimBooks receipt link — or the receipt code from one — and this page checks
+                Paste a NimBooks receipt link, or the receipt code from one, and this page checks
                 its signature against the Nimiq blockchain. Nothing is uploaded: the whole receipt
                 travels in the link and is verified here in your browser.
               </p>
@@ -169,7 +169,7 @@ export default function VerifyPage() {
               </form>
             </>
           )}
-          <p className="hint small">Powered by NimBooks — the books for your Nimiq wallet.</p>
+          <p className="hint small">Powered by NimBooks: the books for your Nimiq wallet.</p>
         </div>
       </div>
     )
@@ -263,7 +263,7 @@ export default function VerifyPage() {
         <p className="hint small">
           Signed with Ed25519 · signer public key {receipt.publicKey.slice(0, 16)}…
           <br />
-          Powered by NimBooks — the books for your Nimiq wallet.
+          Powered by NimBooks: the books for your Nimiq wallet.
         </p>
         <button className="btn-secondary" onClick={() => window.print()} style={{ marginTop: 12 }}>
           🖨 Print / Save as PDF
