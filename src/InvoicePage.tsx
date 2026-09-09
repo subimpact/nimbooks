@@ -32,6 +32,17 @@ import { encodeReceipt, type SignedReceipt } from './lib/receipt'
 
 type PayState = 'idle' | 'confirm' | 'sending' | 'locating' | 'sent'
 
+// A lookup that answers "what does the chain say", where an RPC hiccup and a
+// tx the index hasn't picked up yet are the same answer: not yet.
+async function fetchTx(hash: string) {
+  try {
+    return await getNimiqTransactionByHash(hash)
+  } catch (e) {
+    console.warn('Receipt tx lookup failed:', e)
+    return null
+  }
+}
+
 export default function InvoicePage() {
   const [invoice, setInvoice] = useState<InvoicePayload | null>(null)
   const [decodeError, setDecodeError] = useState<string | null>(null)
@@ -143,19 +154,26 @@ export default function InvoicePage() {
     setSigning(true)
     setError(null)
     try {
-      // Prefer the on-chain record for the timestamp and data so the signed
-      // payload matches exactly what a verifier will fetch.
-      let timestamp = Math.floor(Date.now() / 1000)
-      let data: string | undefined = encodeMemo(invoiceMemo(invoice.id))
-      try {
-        const tx = await getNimiqTransactionByHash(txHash)
-        if (tx) {
-          if (tx.timestamp) timestamp = Math.floor(tx.timestamp / 1000)
-          data = tx.data
-        }
-      } catch {
-        /* RPC hiccup — sign with the local values */
+      // The verifier requires the signed timestamp to sit within 60s of the
+      // block time (lib/receipt.ts), so a receipt signed off the local clock
+      // is permanently unverifiable — worse than no receipt at all. Only the
+      // on-chain record will do; a tx that has just been broadcast may need a
+      // moment to reach the index, so give it one retry.
+      let tx = await fetchTx(txHash)
+      if (!tx?.timestamp) {
+        await new Promise((r) => setTimeout(r, 3000))
+        tx = await fetchTx(txHash)
       }
+      if (!tx?.timestamp) {
+        setError(
+          "Couldn't confirm this payment on-chain yet — sign it from History instead, once it appears there."
+        )
+        return
+      }
+      const timestamp = Math.floor(tx.timestamp / 1000)
+      // Exactly what the chain carries, never the local guess: the verifier
+      // rejects a receipt claiming a memo the transaction doesn't have.
+      const data: string | undefined = tx.data
       const signed = await signReceipt(
         {
           app: 'nimbooks',

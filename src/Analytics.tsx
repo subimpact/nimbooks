@@ -1,7 +1,7 @@
 // Analytics — in-depth charts derived from the loaded NIM transaction history.
 // Pure SVG, zero dependencies: daily net flow bars + cumulative balance trajectory.
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { CurrencyCode, NimiqTx, TxLabel } from './lib/chain'
 import {
   decodeMemo,
@@ -11,6 +11,7 @@ import {
   isLabelledTxKind,
   txLabel,
 } from './lib/chain'
+import { parseInvoiceMemo } from './lib/invoice'
 import DetailSheet from './DetailSheet'
 
 export type AnalyticsPeriod = 7 | 30 | 0 // days; 0 = all available
@@ -54,6 +55,12 @@ function dayKey(tsMs: number): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
+function startOfDay(tsMs: number): number {
+  const d = new Date(tsMs)
+  d.setHours(0, 0, 0, 0)
+  return d.getTime()
+}
+
 function dayLabel(tsMs: number): string {
   const d = new Date(tsMs)
   return `${d.getDate()}/${d.getMonth() + 1}`
@@ -76,7 +83,10 @@ function shortAddr(spaced: string): string {
 // memo that didn't actually decode falls through to the address instead.
 function memoName(data?: string): string {
   const decoded = decodeMemo(data).trim()
-  return decoded && decoded !== (data ?? '').trim() ? decoded : ''
+  if (!decoded || decoded === (data ?? '').trim()) return ''
+  // `nimbooks:invoice:<id>` is a machine reference this app wrote itself — it
+  // decodes cleanly but naming the payer after it is worse than no name.
+  return parseInvoiceMemo(decoded) ? '' : decoded
 }
 
 interface Counterparty {
@@ -174,11 +184,12 @@ function CounterpartyRows({
 function buildTrajectory(
   txs: NimiqTx[],
   currentBalanceNim: number,
-  ownAddressNorm: string
+  ownAddressNorm: string,
+  now: number
 ): { ts: number; balance: number }[] {
   const sorted = [...txs].sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
   let bal = currentBalanceNim
-  const pts: { ts: number; balance: number }[] = [{ ts: Date.now(), balance: bal }]
+  const pts: { ts: number; balance: number }[] = [{ ts: now, balance: bal }]
   for (const tx of sorted) {
     const isOut = tx.sender.replace(/\s+/g, '').toUpperCase() === ownAddressNorm
     const v = Number(tx.value) / 100000
@@ -218,10 +229,20 @@ export default function Analytics({
   // index shifts when the period switch changes the bucket span.
   const [selectedDay, setSelectedDay] = useState<string | null>(null)
   const [statSheet, setStatSheet] = useState<StatSheet | null>(null)
+  // One clock for every derivation below, read once per mount instead of per
+  // memo: `Date.now()` in a memo body makes render impure, and three separate
+  // reads let the buckets, the trajectory and the trend window disagree about
+  // where "now" is. Re-stamped at midnight and only then: a frozen clock would
+  // leave the newest bucket labelled yesterday — and drop every one of today's
+  // transactions, which land in a day key no bucket was seeded for.
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const untilMidnight = startOfDay(now) + 86400000 - Date.now()
+    const id = setTimeout(() => setNow(Date.now()), Math.max(1000, untilMidnight))
+    return () => clearTimeout(id)
+  }, [now])
 
   const data = useMemo(() => {
-    const now = Date.now()
-    const cutoff = period === 0 ? 0 : now - period * 86400000
     const buckets = new Map<string, { ts: number; in: number; out: number; txs: NimiqTx[] }>()
     const t = new Date(now)
     // Seed buckets so empty days render as flat segments.
@@ -232,11 +253,18 @@ export default function Analytics({
       const earliest = txs.reduce((min, tx) => (tx.timestamp && tx.timestamp < min ? tx.timestamp : min), now)
       seedDays = Math.min(90, Math.max(1, Math.ceil((now - earliest) / 86400000)))
     }
+    let oldestSeeded = now
     for (let i = 0; i < seedDays; i++) {
       const k = dayKey(t.getTime())
       buckets.set(k, { ts: t.getTime(), in: 0, out: 0, txs: [] })
+      oldestSeeded = t.getTime()
       t.setDate(t.getDate() - 1)
     }
+    // The window has to start where the oldest *bucket* starts. A rolling
+    // `now − period days` cutoff lands mid-day, so everything between it and
+    // that day's 00:00 was counted by no bucket and by no total — and the
+    // "vs previous" comparison measured calendar days against a rolling window.
+    const cutoff = period === 0 ? 0 : startOfDay(oldestSeeded)
     let totalIn = 0
     let totalOut = 0
     let count = 0
@@ -255,7 +283,12 @@ export default function Analytics({
       const k = dayKey(ts)
       const b = buckets.get(k)
       if (b) {
-        if (isOut) {
+        // Sending to yourself is net-zero — the money never left. Counting only
+        // the outgoing leg would read as a spend the wallet never made, so it
+        // stays out of both flow totals and shows up in the day sheet only.
+        if (isOut && tx.recipient.replace(/\s+/g, '').toUpperCase() === ownNorm) {
+          // no flow either way
+        } else if (isOut) {
           b.out += v
           totalOut += v
           outCount++
@@ -294,17 +327,22 @@ export default function Analytics({
       largestIn,
       largestOut,
     }
-    return { points, stats }
-  }, [txs, period, ownNorm])
+    // `cutoff` travels with the data: the trajectory and the trend window are
+    // the same window as the bars, or they are lying about the same period.
+    return { points, stats, cutoff }
+  }, [txs, period, ownNorm, now])
 
   const trajectory = useMemo(
     () => {
       if (currentBalanceNim === null) return []
-      const cutoff = period === 0 ? 0 : Date.now() - period * 86400000
-      const filtered = txs.filter((tx) => (tx.timestamp ?? 0) >= cutoff)
-      return buildTrajectory(filtered, Number(currentBalanceNim) / 100000, ownNorm)
+      const filtered = txs.filter(
+        // A reverted tx moved no NIM — walking the balance back through one
+        // rewrites every point before it (same guard as the bucket loop).
+        (tx) => tx.executionResult !== false && (tx.timestamp ?? 0) >= data.cutoff
+      )
+      return buildTrajectory(filtered, Number(currentBalanceNim) / 100000, ownNorm, now)
     },
-    [txs, currentBalanceNim, ownNorm, period]
+    [txs, currentBalanceNim, ownNorm, data.cutoff, now]
   )
 
   const W = 340
@@ -385,13 +423,20 @@ export default function Analytics({
     const own = ownAddress ?? ''
     const all = data.points.flatMap((p) => p.txs)
     const isOut = (tx: NimiqTx) => tx.sender.replace(/\s+/g, '').toUpperCase() === ownNorm
-    const inTxs = all.filter((tx) => !isOut(tx))
-    const outTxs = all.filter(isOut)
+    const isSelf = (tx: NimiqTx) =>
+      isOut(tx) && tx.recipient.replace(/\s+/g, '').toUpperCase() === ownNorm
+    // Same exclusion the buckets make: a self-transfer is not a flow, so it
+    // can't be a top recipient either (it would also push the percentages,
+    // which are shares of the bucket totals, past 100%). Its fee was still
+    // real money spent, so `all` — not `flow` — is what fees are summed over.
+    const flow = all.filter((tx) => !isSelf(tx))
+    const inTxs = flow.filter((tx) => !isOut(tx))
+    const outTxs = flow.filter(isOut)
 
     // Composition: in − out per kind, so "you didn't spend 50k NIM, you staked
     // it" reads straight off the list rather than needing to be inferred.
     const byKind = new Map<TxLabel, { in: number; out: number; count: number }>()
-    for (const tx of all) {
+    for (const tx of flow) {
       const v = Number(tx.value) / 100000
       if (!Number.isFinite(v)) continue
       const kind = txLabel(tx, own)
@@ -405,21 +450,25 @@ export default function Analytics({
       .map(([kind, e]) => ({ kind, net: e.in - e.out, count: e.count }))
       .sort((a, b) => Math.abs(b.net) - Math.abs(a.net))
 
-    // Previous window [cutoff − period, cutoff). The buckets only span the
+    // Previous window [cutoff − period days, cutoff). The buckets only span the
     // selected window, so the comparison needs its own pass over the raw txs,
-    // under the same guards the bucket pass uses.
-    const now = Date.now()
+    // under the same guards the bucket pass uses. Both ends are day-aligned
+    // (stepped by calendar days off the bucket cutoff), so this is period
+    // calendar days against period calendar days — not against a rolling window.
     let prevNet = 0
     let prevCount = 0
     if (period !== 0) {
-      const cutoff = now - period * 86400000
-      const start = cutoff - period * 86400000
+      const cutoff = data.cutoff
+      const startDate = new Date(cutoff)
+      startDate.setDate(startDate.getDate() - period)
+      const start = startDate.getTime()
       for (const tx of txs) {
         if (tx.executionResult === false) continue
         const ts = tx.timestamp ?? now
         if (ts < start || ts >= cutoff) continue
         const v = Number(tx.value) / 100000
         if (!Number.isFinite(v) || v <= 0) continue
+        if (isSelf(tx)) continue // net-zero, same as the current window
         prevNet += isOut(tx) ? -v : v
         prevCount++
       }
@@ -440,7 +489,7 @@ export default function Analytics({
       recipients: groupCounterparties(outTxs, (tx) => tx.recipient),
       inKinds: tallyKinds(inTxs, own),
       outKinds: tallyKinds(outTxs, own),
-      fees: outTxs.reduce((sum, tx) => {
+      fees: all.filter(isOut).reduce((sum, tx) => {
         const f = Number(tx.fee) / 100000
         return sum + (Number.isFinite(f) ? f : 0)
       }, 0),
@@ -449,7 +498,7 @@ export default function Analytics({
       best: best && best.in - best.out > 0 ? best : null,
       worst: worst && worst.in - worst.out < 0 ? worst : null,
     }
-  }, [statSheet, data, txs, ownAddress, ownNorm, period])
+  }, [statSheet, data, txs, ownAddress, ownNorm, period, now])
 
   // "All" truncates at 90 days of buckets — never call any of this all-time.
   const scopeLabel = period === 0 ? 'the loaded history (capped at 90 days)' : `the last ${period} days`
@@ -463,11 +512,16 @@ export default function Analytics({
     new Date(ts).toLocaleDateString(lang, { day: 'numeric', month: 'short' })
 
   const selNet = selected ? selected.in - selected.out : 0
+  // Fees you paid, so only the txs you sent: an incoming tx carries the
+  // *sender's* fee, and adding those made "Total fees" a bill for other
+  // people's transactions.
   const selFees = selected
-    ? selected.txs.reduce((sum, tx) => {
-        const f = Number(tx.fee) / 100000
-        return sum + (Number.isFinite(f) ? f : 0)
-      }, 0)
+    ? selected.txs
+        .filter((tx) => tx.sender.replace(/\s+/g, '').toUpperCase() === ownNorm)
+        .reduce((sum, tx) => {
+          const f = Number(tx.fee) / 100000
+          return sum + (Number.isFinite(f) ? f : 0)
+        }, 0)
     : 0
 
   const TX_CAP = 50
@@ -726,6 +780,9 @@ export default function Analytics({
               Showing the {TX_CAP} most recent of {selected.txs.length} transactions.
             </p>
           )}
+          {/* Rewards compound straight into the staking contract, so they are
+              not a flow through this balance — History is where they land. */}
+          <p className="hint small">Staking rewards roll up in History, not in flow.</p>
         </DetailSheet>
       )}
 
