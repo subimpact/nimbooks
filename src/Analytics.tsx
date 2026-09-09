@@ -2,6 +2,7 @@
 // Pure SVG, zero dependencies: daily net flow bars + cumulative balance trajectory.
 
 import { useEffect, useMemo, useState } from 'react'
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { CurrencyCode, NimiqTx, TxLabel } from './lib/chain'
 import {
   decodeMemo,
@@ -229,6 +230,13 @@ export default function Analytics({
   // index shifts when the period switch changes the bucket span.
   const [selectedDay, setSelectedDay] = useState<string | null>(null)
   const [statSheet, setStatSheet] = useState<StatSheet | null>(null)
+  // Keyboard cursor into the flow chart's slots; -1 until a key or a tap puts
+  // it somewhere. An index is right here (unlike `selectedDay`) because it is
+  // pure focus state — it is clamped to the new range on a period switch, not
+  // carried by day. Only drawn while the chart holds focus, so the tap path
+  // looks exactly as it did before.
+  const [cursor, setCursor] = useState(-1)
+  const [chartFocus, setChartFocus] = useState(false)
   // One clock for every derivation below, read once per mount instead of per
   // memo: `Date.now()` in a memo body makes render impure, and three separate
   // reads let the buckets, the trajectory and the trend window disagree about
@@ -389,6 +397,9 @@ export default function Analytics({
   // is open closes it rather than showing a day outside the new range.
   const selIdx = selectedDay ? data.points.findIndex((p) => p.key === selectedDay) : -1
   const selected = selIdx >= 0 ? data.points[selIdx] : null
+  // Clamped rather than reset on period change: switching 7d → All must never
+  // leave the cursor pointing past the end of the new bucket list.
+  const curIdx = cursor >= 0 && cursor < n ? cursor : -1
 
   // Bars are ~48px wide at 7d but 3.2px at "All", and zero-flow days render no
   // rect at all — so the whole plot area is the hit target and the tap snaps
@@ -399,7 +410,32 @@ export default function Analytics({
     const xInView = (clientX - r.left) * (W / r.width)
     const i = Math.min(n - 1, Math.max(0, Math.floor((xInView - PAD_L) / slotW)))
     setStatSheet(null) // one sheet at a time — two overlays would stack
+    setCursor(i)
     setSelectedDay(data.points[i].key)
+  }
+
+  // Keyboard equivalent of the tap: arrows walk the cursor along the days,
+  // Enter/Space opens the one it is sitting on. The cursor is separate state
+  // from `selectedDay` on purpose — arrowing across the chart should move a
+  // marker, not fire the drill-down sheet open on every keypress. Once the
+  // sheet *is* open the arrows carry it along, so a keyboard user can page
+  // through days the same way a tap-and-swipe user would.
+  const onChartKey = (e: ReactKeyboardEvent<SVGSVGElement>) => {
+    if (n === 0) return
+    const at = curIdx >= 0 ? curIdx : selIdx >= 0 ? selIdx : n - 1
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      e.preventDefault()
+      const next = Math.min(n - 1, Math.max(0, at + (e.key === 'ArrowRight' ? 1 : -1)))
+      setCursor(next)
+      if (selIdx >= 0) setSelectedDay(data.points[next].key)
+      return
+    }
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      setStatSheet(null)
+      setCursor(at)
+      setSelectedDay(data.points[at].key)
+    }
   }
 
   const openStat = (which: StatSheet) => {
@@ -586,10 +622,33 @@ export default function Analytics({
         <svg
           viewBox={`0 0 ${W} ${H}`}
           className="chart chart-tappable"
-          role="img"
-          aria-label="Daily net flow chart — tap a bar for that day's transactions"
+          role="button"
+          tabIndex={0}
+          aria-label={
+            selected
+              ? `Daily net flow chart — ${dayTitle(selected.ts)} selected. Arrow keys change day, Enter opens that day's transactions.`
+              : "Daily net flow chart — tap a bar, or use arrow keys and Enter, for that day's transactions"
+          }
           onClick={(e) => pickDay(e.clientX, e.currentTarget)}
+          onKeyDown={onChartKey}
+          onFocus={() => setChartFocus(true)}
+          onBlur={() => setChartFocus(false)}
         >
+          {/* keyboard cursor — only while the chart has focus and it sits
+              somewhere the selection highlight below isn't already marking */}
+          {chartFocus && curIdx >= 0 && curIdx !== selIdx && (
+            <rect
+              x={PAD_L + curIdx * slotW}
+              y={PAD_T}
+              width={slotW}
+              height={plotH}
+              fill="none"
+              stroke="var(--accent)"
+              strokeWidth="1"
+              strokeDasharray="3 2"
+              rx="2"
+            />
+          )}
           {/* selected slot — drawn first so the bars stay on top of it */}
           {selIdx >= 0 && (
             <rect
@@ -695,7 +754,9 @@ export default function Analytics({
         </div>
       </div>
 
-      <p className="hint small">Based on the loaded transaction history (up to 1000 txs).</p>
+      <p className="hint small">
+        Based on the loaded transaction history (capped at 90 days for charts).
+      </p>
 
       {selected && (
         <DetailSheet
