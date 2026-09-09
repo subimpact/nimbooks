@@ -5,6 +5,7 @@ import App from './App'
 import VerifyPage from './VerifyPage'
 import InvoicePage from './InvoicePage'
 import { applyTheme, getInitialTheme } from './lib/theme'
+import { checkHubRedirect, isHubRedirectReturn } from './lib/wallet'
 
 // Apply the saved/system theme before first paint to avoid a flash.
 applyTheme(getInitialTheme())
@@ -43,7 +44,8 @@ function Router() {
     return () => window.removeEventListener('hashchange', onHashChange)
   }, [])
 
-  if (hash.startsWith('#/verify/')) {
+  // Bare `#/verify` is the interactive verifier — paste a receipt link there.
+  if (hash === '#/verify' || hash.startsWith('#/verify/')) {
     return <VerifyPage key={hash} />
   }
   if (hash.startsWith('#/invoice/')) {
@@ -52,10 +54,23 @@ function Router() {
   return <App />
 }
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <ErrorBoundary>
-      <Router />
-    </ErrorBoundary>
-  </StrictMode>
-)
+function start() {
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <ErrorBoundary>
+        <Router />
+      </ErrorBoundary>
+    </StrictMode>
+  )
+}
+
+// A Hub login from a mobile browser comes back as a full-page redirect. Take
+// the response off the URL and restore the route *before* the router reads the
+// hash, so the user lands back on the invoice they were paying, signed in.
+if (isHubRedirectReturn()) {
+  void checkHubRedirect()
+    .catch((e) => console.warn('Hub redirect check failed:', e))
+    .finally(start)
+} else {
+  start()
+}

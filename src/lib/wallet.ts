@@ -4,10 +4,15 @@
 
 import { init, requestDeviceIdentifier, getHostLanguage } from '@nimiq/mini-app-sdk'
 import type { NimiqProvider } from '@nimiq/mini-app-sdk'
+// Only the default export is real at runtime: hub-api 1.15.0's types/index.d.ts
+// re-exports RedirectRequestBehavior, but dist/HubApi.es.js exports nothing but
+// `default`, so a named import type-checks and then fails to bundle. The
+// behaviours are reachable as statics on the class instead.
 import HubApi from '@nimiq/hub-api'
 import type { SignedReceipt } from './receipt'
 import { canonicalPayload } from './receipt'
 import { broadcastRawTransaction, encodeMemo, getNimiqBlockNumber } from './chain'
+import { isInNimiqPay, isMobileDevice } from './device'
 
 export interface WalletAccount {
   nimiqAddress?: string
@@ -94,9 +99,120 @@ export async function connectWallet(): Promise<WalletAccount> {
   return account
 }
 
-// Browser fallback: Nimiq Hub web-wallet login (choose-address popup).
+// --- Nimiq Hub redirect login (mobile browsers) ---
+
+// Where the app was when it sent the user to the Hub. Parked in sessionStorage
+// rather than carried on the return URL: the Hub answers on the URL fragment
+// (@nimiq/rpc UrlRpcEncoder), and NimBooks routes on the fragment too, so a
+// return URL that already has one comes back percent-mangled.
+const HUB_ROUTE_KEY = 'nimbooks:hub-return-route'
+
+let hubRedirectError: string | null = null
+
+/**
+ * Mobile browsers block the Hub's popup, so the Hub API prescribes a full-page
+ * redirect there. Desktop keeps the popup — it never leaves the page.
+ */
+function shouldRedirectToHub(): boolean {
+  return isMobileDevice() && !isInNimiqPay()
+}
+
+/**
+ * Is this page load the return leg of a Hub redirect? Matches what
+ * @nimiq/rpc looks for: the response in the fragment, or the `rpcId` search
+ * param pointing at a stored one.
+ */
+export function isHubRedirectReturn(): boolean {
+  if (typeof window === 'undefined') return false
+  return (
+    /(^|[#&])status=/.test(window.location.hash) ||
+    new URLSearchParams(window.location.search).has('rpcId')
+  )
+}
+
+/** Why the last redirect login failed, if it did — for the page to surface. */
+export function getHubRedirectError(): string | null {
+  return hubRedirectError
+}
+
+// Put back the route the redirect could not carry. Runs before the app
+// renders, so the router reads the restored hash on its first pass.
+function restoreHubRoute(): void {
+  let parked: string | null = null
+  try {
+    parked = sessionStorage.getItem(HUB_ROUTE_KEY)
+    sessionStorage.removeItem(HUB_ROUTE_KEY)
+  } catch {
+    /* no session storage — the user lands on the app root, still signed in */
+  }
+  if (!parked || !parked.startsWith('#/') || window.location.hash === parked) return
+  history.replaceState(history.state, '', `${window.location.pathname}${window.location.search}${parked}`)
+}
+
+/**
+ * Pick up a Hub login that came back by redirect, and restore the route.
+ *
+ * Must run BEFORE the app renders (see main.tsx): the response lives in the
+ * URL fragment the router reads, and `on()` has to be registered before
+ * `checkRedirectResponse()` dispatches it. Returns the account on success,
+ * `null` when this load is not a return leg (or the login did not complete —
+ * `getHubRedirectError()` then says why).
+ */
+export async function checkHubRedirect(): Promise<WalletAccount | null> {
+  if (!isHubRedirectReturn()) return null
+  const hub = getHub()
+  // The Hub dispatches into these callbacks synchronously from within
+  // checkRedirectResponse(); an object carries the result back out.
+  const picked: { account?: WalletAccount } = {}
+  hub.on(
+    HubApi.RequestType.CHOOSE_ADDRESS,
+    (result) => {
+      if (!result?.address) {
+        hubRedirectError = 'No address returned from Nimiq Hub.'
+        return
+      }
+      activeProvider = 'hub'
+      currentAccount = { nimiqAddress: result.address, provider: 'hub', consensus: true }
+      picked.account = currentAccount
+    },
+    (error) => {
+      hubRedirectError = error?.message || 'The Nimiq Hub login did not complete.'
+    }
+  )
+  try {
+    await hub.checkRedirectResponse()
+  } catch (e) {
+    console.warn('Hub redirect response could not be read:', e)
+    hubRedirectError = e instanceof Error ? e.message : String(e)
+  }
+  restoreHubRoute()
+  return picked.account ?? null
+}
+
+// Browser fallback: Nimiq Hub web-wallet login — a choose-address popup on
+// desktop, a full-page redirect on mobile browsers, which block popups.
 // Gives NIM address only — EVM assets stay a Nimiq Pay bonus.
 export async function connectHub(): Promise<WalletAccount> {
+  hubRedirectError = null
+  if (shouldRedirectToHub()) {
+    try {
+      sessionStorage.setItem(HUB_ROUTE_KEY, window.location.hash)
+    } catch {
+      /* private mode — the user comes back to the app root, still signed in */
+    }
+    // Fragment-free return URL: the Hub appends its response to the fragment.
+    // The behaviour type has to be named explicitly — HubApi only uses it in a
+    // conditional return type, which TypeScript cannot infer an argument from,
+    // so it would otherwise fall back to the popup default.
+    await getHub().chooseAddress<typeof HubApi.BehaviorType.REDIRECT>(
+      { appName: 'NimBooks' },
+      new HubApi.RedirectRequestBehavior(`${window.location.origin}${window.location.pathname}`)
+    )
+    // The browser is on its way to the Hub and this frame is going away.
+    // Resolving would flash "no address" over the outgoing page, so don't:
+    // the answer arrives on the next page load, via checkHubRedirect().
+    return new Promise<WalletAccount>(() => {})
+  }
   const result = await getHub().chooseAddress({ appName: 'NimBooks' })
   if (!result?.address) throw new Error('No address returned from Nimiq Hub.')
   activeProvider = 'hub'

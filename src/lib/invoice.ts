@@ -143,8 +143,16 @@ export function isValidInvoice(x: unknown): x is InvoicePayload {
   return true
 }
 
+/** The app route this request lives at — the whole payload rides in the hash. */
+export function invoiceRoute(inv: InvoicePayload): string {
+  return `#/invoice/${encodeInvoice(inv)}`
+}
+
+// The link this page would produce for itself. Used for the QR code, which is
+// scanned off whatever screen the request is shown on; a link that leaves this
+// origin (a share) goes through device.appLink instead.
 export function invoiceUrl(inv: InvoicePayload): string {
-  return `${window.location.origin}${window.location.pathname}#/invoice/${encodeInvoice(inv)}`
+  return `${window.location.origin}${window.location.pathname}${invoiceRoute(inv)}`
 }
 
 // --- Status ---
