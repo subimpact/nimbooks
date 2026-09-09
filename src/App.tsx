@@ -12,6 +12,7 @@ import {
   unstakeDeactivate,
   unstakeRetire,
   unstakeRemove,
+  getCurrentBlock,
   getDeviceId,
   getLanguage,
   signReceipt,
@@ -23,7 +24,6 @@ import {
   getStakingHolding,
   getVestingHoldings,
   getNimiqTransactionHistory,
-  getNimiqBlockNumber,
   waitForTxMined,
   getEvmBalances,
   getAllFiatRates,
@@ -112,6 +112,12 @@ function readRates(): RateCache {
 
 type RateAsset = 'nim' | 'usdt' | 'eth' | 'pol'
 
+// EVM balances cost 5 chains × up to 2 viem calls, and the 10s auto-refresh
+// was paying that every tick — which is also why the EVM card blinked out
+// mid-read. They move far slower than that; 60s is plenty for a balance sheet.
+const EVM_CACHE_TTL = 60 * 1000
+const evmBalanceCache = new Map<string, { at: number; balances: EvmBalance[] }>()
+
 const ZERO_RATES: FiatRates = { usd: 0, myr: 0, eur: 0, sgd: 0, gbp: 0 }
 
 // Overlay whatever the cache holds onto the placeholder rates: a cache written
@@ -197,6 +203,12 @@ const MIN_REMAINDER_COPY = 'Your stake must stay ≥ 100 NIM'
 // user as "RPC HTTP 429" or "The operation was aborted".
 const NODE_BUSY_COPY = "Nimiq's public node is busy — retrying…"
 
+// Shown when the Pay host reports no consensus yet. Deliberately a dim note,
+// never a gate: NimBooks reads the chain over its own RPC, so a syncing host
+// only affects what the *wallet* can sign — the books still load. One constant
+// so the connect screen and the Overview can never word it differently.
+const PAY_SYNCING_COPY = 'Nimiq Pay is still syncing — your wallet may look empty for a moment.'
+
 function isTransientChainError(e: unknown): boolean {
   const msg = e instanceof Error ? `${e.name} ${e.message}` : String(e)
   return /\b429\b|too many requests|rate limit|abort|timed? ?out|timeout|network ?error|failed to fetch/i.test(
@@ -214,6 +226,9 @@ function txVerifyLabel(state: TxVerify | null): string {
 
 export default function App() {
   const [account, setAccount] = useState<WalletAccount | null>(null)
+  // Nimiq Pay's sync state at connect time. `null` = not asked / not applicable
+  // (Hub, demo, browser). Never gates the UI — see the note it renders.
+  const [payConsensus, setPayConsensus] = useState<boolean | null>(null)
   const [connecting, setConnecting] = useState(false)
   const [hubConnecting, setHubConnecting] = useState(false)
   const [view, setView] = useState<View>('dashboard')
@@ -224,6 +239,10 @@ export default function App() {
   // validator) from the v2 events API — the tx index doesn't carry them.
   const [rewardTxs, setRewardTxs] = useState<NimiqTx[]>([])
   const [htlcHoldings, setHtlcHoldings] = useState<HtlcHolding[]>([])
+  // `address:txCount:newestHash` of the last successful HTLC + vesting sweep.
+  // Both are pure functions of the tx list, so an unchanged key means the
+  // holdings below are still current and the sweeps can be skipped entirely.
+  const contractSweepRef = useRef<string | null>(null)
   const [stakingHolding, setStakingHolding] = useState<StakingHolding | null>(null)
   // Chain head, refreshed alongside the balances. Unstake steps are gated on
   // block height, not wall clock — 0 means "not known yet".
@@ -530,6 +549,9 @@ export default function App() {
     setError(null)
     try {
       const acc = await connectWallet()
+      // Recorded even when the connect turns up nothing: "still syncing" is
+      // exactly the explanation for an empty result on this screen.
+      setPayConsensus(acc.consensus ?? null)
       if (!acc.nimiqAddress && !acc.evmAddress) {
         setError('No wallet found. Open this app inside Nimiq Pay, or use the browser login below.')
         return
@@ -548,6 +570,7 @@ export default function App() {
     setError(null)
     try {
       const acc = await connectHub()
+      setPayConsensus(acc.consensus ?? null)
       setAccount(acc)
       await refresh(acc)
     } catch (e) {
@@ -566,6 +589,7 @@ export default function App() {
       //  client payments, staking rewards, cooled-down unstaking. Funded + curated
       //  for the Sep 16 competition demo; read-only in app, keys held by owner.)
       const acc = connectDemoAccount('NQ43 Y1RH P1K7 JH78 LRTS 95RY GAUU UBDK FFGX')
+      setPayConsensus(acc.consensus ?? null)
       setAccount(acc)
       await refresh(acc)
       setToast('Demo mode — read-only sample wallet.')
@@ -607,14 +631,12 @@ export default function App() {
           console.warn('Staking holding lookup failed:', e)
           setStakingHolding(null)
         }
-        // Chain head — needed to tell whether a retire is already valid.
-        // Best effort: a failure keeps the previous height and the 10s
-        // auto-refresh picks it up on the next pass.
-        try {
-          setCurrentBlock(await getNimiqBlockNumber())
-        } catch (e) {
-          console.warn('Block number lookup failed:', e)
-        }
+        // Chain head — needed to tell whether a retire is already valid. Comes
+        // from the Pay provider when there is one, otherwise the public RPC
+        // (see wallet.getCurrentBlock). Best effort: an unknown height keeps
+        // the previous one and the 10s auto-refresh picks it up next pass.
+        const head = await getCurrentBlock()
+        if (head !== null) setCurrentBlock(head)
         // Pending unstake resolution: the marker clears when the staker record
         // shows the retire took effect (inactive balance appeared, or active
         // dropped by the pending amount) — the chain flip is the only real
@@ -643,17 +665,31 @@ export default function App() {
         // Swapped and vesting NIM sit outside the basic account, where the
         // plain balance can't see them — add each up separately.
         // Best effort: a failed lookup must not take the balance view down.
-        try {
-          setHtlcHoldings(await getHtlcHoldings(addr, txs))
-        } catch (e) {
-          console.warn('HTLC holdings lookup failed:', e)
-          setHtlcHoldings([])
-        }
-        try {
-          setVestingHoldings(await getVestingHoldings(addr, txs))
-        } catch (e) {
-          console.warn('Vesting holdings lookup failed:', e)
-          setVestingHoldings([])
+        //
+        // Both sweeps are derived purely from the tx list (up to 10 paced RPC
+        // calls each), so they can only change when that list does. Keying on
+        // it turns the 10s auto-refresh from ~20 calls a tick into zero, and
+        // stops "Locked in swaps" blinking out while the sweep re-runs.
+        const sweepKey = `${addr}:${txs.length}:${txs[0]?.hash ?? ''}`
+        if (contractSweepRef.current !== sweepKey) {
+          let swept = true
+          try {
+            setHtlcHoldings(await getHtlcHoldings(addr, txs))
+          } catch (e) {
+            console.warn('HTLC holdings lookup failed:', e)
+            swept = false
+            setHtlcHoldings([])
+          }
+          try {
+            setVestingHoldings(await getVestingHoldings(addr, txs))
+          } catch (e) {
+            console.warn('Vesting holdings lookup failed:', e)
+            swept = false
+            setVestingHoldings([])
+          }
+          // Only a clean sweep is worth remembering — a failed one must retry
+          // on the next tick rather than cache its empty result.
+          if (swept) contractSweepRef.current = sweepKey
         }
         // Reward income lives in a separate v2 API (the tx index has no
         // staking activity at all). Additive and already failure-tolerant —
@@ -667,8 +703,14 @@ export default function App() {
         }
       }
       if (acc.evmAddress) {
-        const evm = await getEvmBalances(acc.evmAddress)
-        setEvmBalances(evm)
+        const cached = evmBalanceCache.get(acc.evmAddress)
+        if (cached && Date.now() - cached.at < EVM_CACHE_TTL) {
+          setEvmBalances(cached.balances)
+        } else {
+          const evm = await getEvmBalances(acc.evmAddress)
+          evmBalanceCache.set(acc.evmAddress, { at: Date.now(), balances: evm })
+          setEvmBalances(evm)
+        }
       }
     } catch (e) {
       // A rate-limited or timed-out refresh is not a broken connection: the
@@ -752,14 +794,16 @@ export default function App() {
 
   // --- Staking (Nimiq Pay) ---
 
-  // Fetch the validator list whenever a wallet is connected (10-min cache in
-  // chain.ts, so reconnects are free). The balance card and the stake panel
-  // both resolve validator names from it.
+  // The validator list is a 1.4 MB payload — 13× the whole gzipped bundle —
+  // so it is fetched only when something actually renders from it, never just
+  // because a wallet connected:
+  //   - the stake panel is open (the picker needs the full list), or
+  //   - this wallet has a delegation (the balance card resolves its name).
+  // A connected non-staker who never opens the panel now pays nothing.
+  // Cached 10 min in chain.ts, so reopening the panel is free.
   useEffect(() => {
-    // Fetch whenever a wallet is connected (and lazily when the panel opens):
-    // the balance card and the stake panel both resolve validator names from
-    // this list, so it must exist outside the panel too. Cached 10 min.
     if (!account?.nimiqAddress || validators.length > 0) return
+    if (!stakeOpen && !stakingHolding?.delegation) return
     let cancelled = false
     setValidatorsLoading(true)
     setValidatorsError(null)
@@ -778,7 +822,7 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [account?.nimiqAddress, stakeOpen, validators.length])
+  }, [account?.nimiqAddress, stakeOpen, validators.length, stakingHolding?.delegation])
 
   // Escape closes whichever panel is open.
   useEffect(() => {
@@ -1352,18 +1396,9 @@ export default function App() {
     }
     setTimeout(revoke, 10000)
     window.addEventListener('pagehide', revoke, { once: true })
-    // Inside Nimiq Pay's WebView: no download listener (anchor silently
-    // no-ops) and window.open(data:) renders a blank window (verified on
-    // device). Clipboard is the one path that always works — go straight to
-    // it with a clear toast.
-    if (window.nimiqPay) {
-      try {
-        await navigator.clipboard.writeText(csv)
-        setToast('CSV copied to clipboard — paste into any app to save it ✓')
-      } catch {
-        setError('Could not copy CSV — try the Copy button instead.')
-      }
-    }
+    // No Nimiq Pay branch here: inside Pay both Export buttons render the
+    // download-link route instead (getDownloadLink), so this function is only
+    // ever reached on desktop/Hub, where the anchor works.
   }
 
   const exportCsv = () => {
@@ -1415,6 +1450,8 @@ export default function App() {
   const disconnect = () => {
     disconnectWallet()
     setAccount(null)
+    setPayConsensus(null)
+    contractSweepRef.current = null
     setNimBalance(null)
     setNimTxs([])
     setRewardTxs([])
@@ -1580,6 +1617,7 @@ export default function App() {
                 {connecting ? 'Connecting…' : 'Connect Wallet'}
               </button>
               <p className="hint">Connect your Nimiq wallet to start keeping the books.</p>
+              {payConsensus === false && <p className="hint small dim">{PAY_SYNCING_COPY}</p>}
               <div className="connect-divider">or</div>
             </>
           ) : isMobile ? (
@@ -1764,6 +1802,13 @@ export default function App() {
                 )}
               </div>
             </div>
+
+            {/* Connected, but the wallet host hasn't caught up and there is
+                nothing on screen yet — say why rather than let it read as an
+                empty wallet. Nothing is gated on this. */}
+            {payConsensus === false && totalNimLuna === 0 && allTxs.length === 0 && (
+              <p className="hint small dim">{PAY_SYNCING_COPY}</p>
+            )}
 
             {unstakeActivity && (
               <div className="pending-unstake-banner" role="status">
@@ -2416,8 +2461,11 @@ export default function App() {
                       <span>Sent + fees</span>
                       <span>
                         {(statement.totals.sentNim + statement.totals.feeNim).toFixed(5)} NIM
+                        {/* feeUsd is accumulated per day at that day's close,
+                            like sentUsd — so Received − (Sent + fees) is
+                            exactly the Net below, to the cent. */}
                         {statement.totals.sentUsd !== null &&
-                          ` · $${(statement.totals.sentUsd + statement.totals.feeNim * (statement.rows[0]?.closeUsd ?? 0)).toFixed(4)}`}
+                          ` · $${(statement.totals.sentUsd + (statement.totals.feeUsd ?? 0)).toFixed(2)}`}
                       </span>
                     </div>
                     <div className="row">
@@ -2678,6 +2726,20 @@ export default function App() {
                             .join(' ')}
                         >
                           <span className="option-dot" aria-hidden="true" />
+                          {/* Logos ride along on the payload we already paid
+                              for. Decorative: the name below is the label. */}
+                          {v.logo && (
+                            <img
+                              className="validator-logo"
+                              src={v.logo}
+                              alt=""
+                              aria-hidden="true"
+                              width={28}
+                              height={28}
+                              loading="lazy"
+                              style={v.accentColor ? { background: v.accentColor } : undefined}
+                            />
+                          )}
                           <span className="option-main">
                             <strong>{v.name}</strong>
                             <span className="option-meta">

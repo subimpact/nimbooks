@@ -199,6 +199,11 @@ a:focus-visible {
   font-size: 12px;
   margin-top: 8px;
 }
+/* One step quieter than a hint — for status the user did not ask about and
+   does not have to act on (e.g. the Pay sync note). */
+.hint.dim {
+  opacity: 0.75;
+}
 .error {
   color: var(--red);
   font-size: 13px;
@@ -1347,6 +1352,18 @@ a.btn-ghost.btn-link {
 .validator-list .option-main {
   gap: 3px;
   font-size: 13px;
+}
+/* Pool logo, tinted with the pool's own accent colour: most are transparent
+   marks that would vanish against the card in one theme or the other. */
+.validator-logo {
+  align-self: flex-start;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  object-fit: contain;
+  padding: 3px;
+  background: var(--card-2);
 }
 .validator-list .badge.inactive {
   align-self: flex-start;

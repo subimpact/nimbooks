@@ -1,8 +1,8 @@
 // Release notes shown in the version badge modal. Newest first — the git log is
 // the source of truth, so every line here maps to shipped commits.
-export const APP_VERSION = '1.1.0'
-// Badge text. Spelled out rather than built with `'v' + APP_VERSION` so the exact
+// Badge text. Spelled out rather than built from a version constant so the exact
 // label ships as one string in the bundle (JSX would emit "v" as a separate node).
+// package.json carries the machine-readable version.
 export const APP_VERSION_LABEL = 'v1.1.0'
 
 export interface ChangelogEntry {
