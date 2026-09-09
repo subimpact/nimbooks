@@ -3,7 +3,7 @@
 // Badge text. Spelled out rather than built from a version constant so the exact
 // label ships as one string in the bundle (JSX would emit "v" as a separate node).
 // package.json carries the machine-readable version.
-export const APP_VERSION_LABEL = 'v1.1.0'
+export const APP_VERSION_LABEL = 'v1.2.0'
 
 export interface ChangelogEntry {
   version: string
@@ -12,6 +12,20 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '1.2.0',
+    date: '2026-09-09',
+    items: [
+      'Protocol-hardened staking: 100 NIM minimum enforced, full retired balance withdrawn, failed transactions never pollute the charts',
+      'Backup & restore your books — export everything to your clipboard and re-import it any time, on any device',
+      '“Your books start here” first-run card for fresh wallets: receive NIM, create a request, or stake 100 NIM',
+      'Statement fixes: daily-priced fees reconcile exactly with the net row; CSV carries a feeUSD column',
+      'Inside Nimiq Pay: consensus-aware connects (no more $0 screens while syncing) and provider-native block height',
+      'Validator logos in the stake picker; validator list loads only when you open staking',
+      'Fiat formatting: thousands separators and correct decimals for zero-decimal currencies (JPY, KRW, VND, IDR, CLP)',
+      'Keyboard-accessible charts and Escape closes every dialog',
+    ],
+  },
   {
     version: '1.1.0',
     date: '2026-09-09',
