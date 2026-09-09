@@ -527,11 +527,26 @@ export interface FiatRates {
 }
 
 const CURRENCY_KEY = 'nimbooks:currency'
+// Written by App.tsx once the Nimiq Pay host hands over a device identifier.
+const DEVICE_ID_KEY = 'nimbooks:deviceId'
 
-/** The user's display currency, remembered across sessions (default USD). */
+// Null outside Nimiq Pay (no host API, so no device ID) — the callers then fall
+// back to the single legacy key, which is the pre-device behaviour.
+function deviceCurrencyKey(): string | null {
+  try {
+    const id = localStorage.getItem(DEVICE_ID_KEY)
+    return id ? `nimbooks:d:${id}:currency` : null
+  } catch {
+    return null
+  }
+}
+
+/** The user's display currency, remembered per device across sessions (default USD). */
 export function loadCurrency(): CurrencyCode {
   try {
-    const saved = localStorage.getItem(CURRENCY_KEY)
+    const dk = deviceCurrencyKey()
+    // Device-scoped wins; falls back to the pre-device legacy key.
+    const saved = (dk && localStorage.getItem(dk)) ?? localStorage.getItem(CURRENCY_KEY)
     if (CURRENCIES.some((c) => c.code === saved)) return saved as CurrencyCode
   } catch {
     /* storage unavailable */
@@ -541,7 +556,9 @@ export function loadCurrency(): CurrencyCode {
 
 export function saveCurrency(code: CurrencyCode): void {
   try {
-    localStorage.setItem(CURRENCY_KEY, code)
+    localStorage.setItem(CURRENCY_KEY, code) // legacy mirror — never lose a pref on the old key
+    const dk = deviceCurrencyKey()
+    if (dk) localStorage.setItem(dk, code)
   } catch {
     /* storage unavailable */
   }
