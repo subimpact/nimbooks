@@ -3,6 +3,7 @@ import './App.css'
 import QrCode from './QrCode'
 import { applyTheme, getInitialTheme, type Theme } from './lib/theme'
 import { isInNimiqPay, isMobileDevice, NIMIQ_PAY_APP_URL, payDeepLink, siteLink } from './lib/device'
+import { shortenUrl } from './lib/shorten'
 import {
   canSend,
   connectHub,
@@ -224,7 +225,9 @@ export default function InvoicePage() {
 
   const shareReceipt = useCallback(async () => {
     if (!receipt) return
-    const url = siteLink(`#/verify/${encodeReceipt(receipt)}`)
+    // Short link for the share sheet; falls back to the long one on any
+    // shortener failure. The QR path is deliberately untouched here.
+    const url = await shortenUrl(siteLink(`#/verify/${encodeReceipt(receipt)}`))
     try {
       if (navigator.share) {
         await navigator.share({ title: 'NimBooks receipt', text: 'Verified payment receipt', url })
