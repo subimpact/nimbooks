@@ -20,6 +20,8 @@ export const CHANGELOG: ChangelogEntry[] = [
       'Received, Sent and Net flow cards expand into detail sheets — top counterparties, fees paid, flow composition and period comparison',
       'Side-by-side Total value and NIM balance tiles on the Overview, with the balance breakdown in its own card',
       'Txs stat jumps straight to History',
+      'Device preferences: your currency choice is remembered per device (in Nimiq Pay) and keeps working across sessions',
+      'Staking history keeps the last 500 actions per address (up from 50)',
     ],
   },
   {
