@@ -82,11 +82,14 @@ const CONTRACT_LOOKUP_DELAY = 150 // ms — nimiqwatch 429s on unpaced bursts
 
 // Distinct contract addresses the user has funded, newest-first, capped at the
 // fan-out budget. `toType` selects the contract flavour (1 = vesting, 2 = HTLC).
-function contractCandidates(txs: NimiqTx[], toType: number): string[] {
+// `fundedBy` narrows it to contracts this address actually paid into.
+function contractCandidates(txs: NimiqTx[], toType: number, fundedBy?: string): string[] {
+  const from = fundedBy ? cleanAddress(fundedBy).toUpperCase() : null
   const candidates: string[] = []
   const seen = new Set<string>()
   for (const tx of [...txs].sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))) {
     if (tx.toType !== toType || !tx.recipient) continue
+    if (from && cleanAddress(tx.sender).toUpperCase() !== from) continue
     const key = cleanAddress(tx.recipient).toUpperCase()
     if (seen.has(key)) continue
     seen.add(key)
@@ -134,6 +137,38 @@ export async function getHtlcHoldings(ownAddress: string, txs: NimiqTx[]): Promi
     }
   }
   return holdings
+}
+
+/**
+ * Total Luna still parked in the HTLC contracts this address has funded.
+ *
+ * Nimiq Pay hands the app a *relay* address: every transfer lands there and is
+ * immediately forwarded into a fresh HTLC, so the basic balance reads 0 while
+ * the money is really sitting in the newest contract. `getNimiqBalance` alone
+ * therefore reports a wallet with nothing in it.
+ *
+ * Deliberately looser than `getHtlcHoldings`, which answers "what is locked in
+ * a pending swap" and so filters on the account still being an unsettled HTLC
+ * whose sender/recipient is the user. This answers "how much of the user's
+ * money is in flight", so it takes any positive balance left in a contract the
+ * address funded — that balance *is* the user's, whatever the settlement state
+ * of the swap around it. Best effort throughout: a failed lookup counts as 0
+ * rather than costing the user their whole balance view.
+ */
+export async function getHtlcInTransit(address: string, txs: NimiqTx[]): Promise<number> {
+  const candidates = contractCandidates(txs, 2, address)
+  let sum = 0
+  for (let i = 0; i < candidates.length; i++) {
+    if (i > 0) await new Promise((r) => setTimeout(r, CONTRACT_LOOKUP_DELAY))
+    try {
+      const data = await rpcCall('getAccountByAddress', [cleanAddress(candidates[i])])
+      const balance = Number(data?.balance)
+      if (Number.isFinite(balance) && balance > 0) sum += balance
+    } catch (e) {
+      console.warn('HTLC in-transit lookup failed for', candidates[i], e)
+    }
+  }
+  return sum
 }
 
 // --- Staking holdings (NIM delegated to a validator) ---

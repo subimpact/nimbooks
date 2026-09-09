@@ -23,6 +23,7 @@ import {
 import {
   getNimiqBalance,
   getHtlcHoldings,
+  getHtlcInTransit,
   getStakingHolding,
   getVestingHoldings,
   getNimiqTransactionHistory,
@@ -246,6 +247,11 @@ export default function App() {
   // validator) from the v2 events API — the tx index doesn't carry them.
   const [rewardTxs, setRewardTxs] = useState<NimiqTx[]>([])
   const [htlcHoldings, setHtlcHoldings] = useState<HtlcHolding[]>([])
+  // Luna sitting in HTLC contracts this address funded (Luna, 0 when none).
+  // Nimiq Pay routes everything through a relay address whose basic balance is
+  // 0, so without this the user's real money is invisible — see
+  // getHtlcInTransit.
+  const [htlcInTransit, setHtlcInTransit] = useState(0)
   // `address:txCount:newestHash` of the last successful HTLC + vesting sweep.
   // Both are pure functions of the tx list, so an unchanged key means the
   // holdings below are still current and the sweeps can be skipped entirely.
@@ -703,6 +709,19 @@ export default function App() {
             swept = false
             setVestingHoldings([])
           }
+          // Nimiq Pay's relay address holds nothing itself — the money is in
+          // the HTLC it forwarded into, so this is the user's real balance.
+          // Same tx-derived sweep as the two above, so it joins their paced
+          // section and their cache key. (A counterparty claiming out of the
+          // contract writes no tx to *this* address, so the figure only
+          // refreshes once the tx list moves or the app reloads.)
+          try {
+            setHtlcInTransit(await getHtlcInTransit(addr, txs))
+          } catch (e) {
+            console.warn('HTLC in-transit lookup failed:', e)
+            swept = false
+            setHtlcInTransit(0)
+          }
           // Only a clean sweep is worth remembering — a failed one must retry
           // on the next tick rather than cache its empty result.
           if (swept) contractSweepRef.current = sweepKey
@@ -800,13 +819,25 @@ export default function App() {
     () => vestingHoldings.reduce((sum, v) => sum + (Number(v.balance) || 0), 0),
     [vestingHoldings]
   )
-  const offBalanceLuna = lockedLuna + stakedLuna + vestedLuna
-  const totalNimLuna = (Number(nimBalance) || 0) + offBalanceLuna
+  // The HTLC figure every total is built on. `lockedLuna` counts only swaps
+  // still pending; `htlcInTransit` counts every contract this address funded
+  // that still holds NIM (the relay case — see getHtlcInTransit). The two sets
+  // overlap, so the effective figure is the larger of them and never the sum:
+  // adding them would double-count a wallet whose relay-routed funds are also
+  // an open swap, which is the common case.
+  const htlcLuna = Math.max(lockedLuna, htlcInTransit)
+  // Money the user can spend or is about to receive: the basic account plus
+  // anything in flight through an HTLC. This — not the basic balance — is what
+  // Nimiq Pay shows as the wallet's balance, and what anchors the trajectory.
+  const effectiveBalanceLuna = (Number(nimBalance) || 0) + htlcLuna
+  const offBalanceLuna = htlcLuna + stakedLuna + vestedLuna
+  const totalNimLuna = effectiveBalanceLuna + stakedLuna + vestedLuna
 
   const totalFiat = useMemo(() => {
     let total = 0
-    if (nimBalance !== null)
-      total += (((Number(nimBalance) || 0) + offBalanceLuna) / 100000) * shown.nim
+    // Priced off the same effective total as the NIM tile, so the two can
+    // never disagree about how much the wallet holds.
+    if (nimBalance !== null) total += (totalNimLuna / 100000) * shown.nim
     for (const b of evmBalances) {
       const val = Number(b.balance) / 10 ** b.decimals
       if (!Number.isFinite(val)) continue
@@ -815,7 +846,7 @@ export default function App() {
       else total += val * shown.eth
     }
     return Number.isFinite(total) ? total : 0
-  }, [nimBalance, offBalanceLuna, evmBalances, shown])
+  }, [nimBalance, totalNimLuna, evmBalances, shown])
 
   // Flag/label for the chip on the Total value tile. Falls back to the first
   // entry so a stale saved code can never blank the chip.
@@ -1918,6 +1949,14 @@ export default function App() {
                     <span className="sub">
                       ≈ {formatFiat((totalNimLuna / 100000) * shown.nim, currency, 4)}
                     </span>
+                    {/* A relay-routed wallet reads 0 in its basic account, so
+                        say where the money actually is rather than let the
+                        total look like it came from nowhere. */}
+                    {htlcLuna > 0 && (
+                      <span className="sub dim">
+                        {formatLuna(String(htlcLuna), lang)} NIM in transit (HTLC)
+                      </span>
+                    )}
                   </>
                 )}
               </div>
@@ -2190,10 +2229,13 @@ export default function App() {
             {/* Raw indexed txs only: restaked rewards compound into the
                 staking contract and never touch the basic balance, so feeding
                 them to a trajectory anchored on the current basic balance
-                would rewrite history by the reward total. */}
+                would rewrite history by the reward total.
+                The anchor is the *effective* balance (basic + HTLC): on a
+                relay-routed wallet the basic account is 0, which drew a flat
+                line at zero under a wallet holding thousands of NIM. */}
             <Analytics
               txs={nimTxs}
-              currentBalanceNim={nimBalance}
+              currentBalanceNim={nimBalance === null ? null : String(effectiveBalanceLuna)}
               ownAddress={account.nimiqAddress ?? null}
               period={analyticsPeriod}
               onPeriodChange={setAnalyticsPeriod}
