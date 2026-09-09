@@ -33,7 +33,7 @@ const ALLOWED: ReadonlyArray<{ prefix: string; maxUrl: number }> = [
 const isShareLink = (url: string): boolean =>
   ALLOWED.some(({ prefix, maxUrl }) => url.startsWith(prefix) && url.length <= maxUrl)
 
-const DEFAULT_DOMAIN = 'nimbooks.s.gy'
+const DEFAULT_DOMAIN = 'nimbook.s.gy'
 
 const json = (body: unknown, status: number): Response =>
   new Response(JSON.stringify(body), {
