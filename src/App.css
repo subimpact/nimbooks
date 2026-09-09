@@ -869,9 +869,8 @@ a.btn-ghost.btn-link {
 }
 .stat-btn:active { transform: scale(0.97); }
 .stat-btn .value {
-  text-decoration: underline dotted;
-  text-decoration-color: var(--muted);
-  text-underline-offset: 3px;
+  /* Clickable stat tiles: the drilldown sheet opening is the affordance.
+     A dotted underline reads as a text-selection artifact in screenshots. */
 }
 .chart-card .chart {
   width: 100%;
