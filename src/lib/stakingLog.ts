@@ -35,7 +35,7 @@ export interface StakingAction {
 const KEY_PREFIX = 'nimbooks:stakingLog:'
 // Deep enough that a heavy staker's actions survive, shallow enough that the
 // log can never crowd out the tx cache in a WebView's storage quota.
-const MAX_ENTRIES = 50
+const MAX_ENTRIES = 500
 
 export function stakingLogKey(address: string): string {
   return KEY_PREFIX + address.replace(/\s+/g, '').toUpperCase()
