@@ -183,6 +183,27 @@ const STAKING_ACTION_LABEL: Record<StakingActionKind, string> = {
   withdraw: 'withdrawn',
 }
 
+// Nimiq's minimum stake is 10,000,000 Luna (getPolicyConstants). A first stake
+// below it is rejected by the protocol, and a partial unstake that would leave
+// a staker record below it is rejected the same way.
+const MIN_STAKE_NIM = 100
+const MIN_STAKE_LUNA = MIN_STAKE_NIM * 100000
+const MIN_STAKE_COPY = 'Nimiq needs at least 100 NIM to open a stake.'
+const MIN_REMAINDER_COPY = 'Your stake must stay ≥ 100 NIM'
+
+// The public RPC rate-limits bursts and our own fetches time out; the 10s
+// auto-refresh then retries and usually succeeds. Neither is a broken wallet,
+// so neither belongs in the red alarm banner — and neither should reach the
+// user as "RPC HTTP 429" or "The operation was aborted".
+const NODE_BUSY_COPY = "Nimiq's public node is busy — retrying…"
+
+function isTransientChainError(e: unknown): boolean {
+  const msg = e instanceof Error ? `${e.name} ${e.message}` : String(e)
+  return /\b429\b|too many requests|rate limit|abort|timed? ?out|timeout|network ?error|failed to fetch/i.test(
+    msg
+  )
+}
+
 // "submitted" only ever means "handed to the network" — don't claim more than
 // the verification poll has actually established.
 function txVerifyLabel(state: TxVerify | null): string {
@@ -319,15 +340,22 @@ export default function App() {
     [account?.nimiqAddress]
   )
 
+  // Soft failures (stale rates, a rate-limited node) go to the auto-dismissing
+  // toast; only a failure that actually leaves the app unusable earns the red
+  // banner, which on the connect screen also pushes the hero around.
+  const reportSoftFailure = useCallback((e: unknown, fallback: string) => {
+    setToast(isTransientChainError(e) ? NODE_BUSY_COPY : fallback)
+  }, [])
+
   const fetchRates = useCallback(async () => {
     try {
       const all = await getAllFiatRates()
       setFiat({ nim: all.nim, usdt: all.usdt, eth: all.eth, pol: all.pol })
     } catch (e) {
       console.warn('Rate fetch failed:', e)
-      setError('Live rates unavailable — showing cached values.')
+      reportSoftFailure(e, 'Live rates unavailable — showing cached values.')
     }
-  }, [])
+  }, [reportSoftFailure])
 
   useEffect(() => {
     setLang(getLanguage() ?? navigator.language.split('-')[0] ?? 'en')
@@ -401,7 +429,10 @@ export default function App() {
     if (!account?.nimiqAddress || invoices.length === 0 || nimTxs.length === 0) return
     let changed = false
     const next = invoices.map((inv) => {
-      if (inv.paid || inv.role !== 'payee') return inv
+      // `unpaidByUser` is the one thing that outranks the chain here: the
+      // tagged tx never stops matching, so without it "Mark unpaid" would be
+      // undone by this effect on its very next run.
+      if (inv.paid || inv.unpaidByUser || inv.role !== 'payee') return inv
       const payee = inv.payee.replace(/\s+/g, '').toUpperCase()
       const match = nimTxs.find((t) => {
         if (t.executionResult === false) return false
@@ -482,8 +513,9 @@ export default function App() {
       invoices.map((i) =>
         i.id === id
           ? i.paid
-            ? { ...i, paid: false, paidAt: undefined, paidTxHash: undefined }
-            : { ...i, paid: true, paidAt: Date.now() }
+            ? { ...i, paid: false, paidAt: undefined, paidTxHash: undefined, unpaidByUser: true }
+            : // Marking it paid again hands reconciliation back to the chain.
+              { ...i, paid: true, paidAt: Date.now(), unpaidByUser: undefined }
           : i
       )
     )
@@ -548,26 +580,27 @@ export default function App() {
     setError(null)
     try {
       if (acc.nimiqAddress) {
-        const [bal, txs] = await Promise.all([
-          getNimiqBalance(acc.nimiqAddress),
-          // Full history via cursor pagination (up to 1000 txs) — the 50-tx
-          // cap silently truncated "accountant-ready" statements.
-          getNimiqTransactionHistory(acc.nimiqAddress, 1000),
-        ])
-        setNimBalance(bal)
+        const addr = acc.nimiqAddress
+        // The balance is a single RPC call (~300ms); the history walk pages
+        // through up to 1000 txs and takes seconds. Awaiting both together
+        // left the flagship tile showing "…" for the whole walk, so the
+        // balance is fired independently and lands as soon as it answers.
+        void getNimiqBalance(addr)
+          .then(setNimBalance)
+          .catch((e) => {
+            console.warn('Balance lookup failed:', e)
+            reportSoftFailure(e, 'Balance unavailable right now — retrying.')
+          })
+        // Full history via cursor pagination (up to 1000 txs) — the 50-tx
+        // cap silently truncated "accountant-ready" statements.
+        const txs = await getNimiqTransactionHistory(addr, 1000)
         setNimTxs(txs)
-        // Swapped, staked and vesting NIM all sit outside the basic account,
-        // where the plain balance can't see them — add each up separately.
-        // Best effort: a failed lookup must not take the balance view down.
-        try {
-          setHtlcHoldings(await getHtlcHoldings(acc.nimiqAddress, txs))
-        } catch (e) {
-          console.warn('HTLC holdings lookup failed:', e)
-          setHtlcHoldings([])
-        }
+        // Staker record and chain head come before the contract sweeps below:
+        // the unstake banner is gated on both, and the sweeps are up to 20
+        // paced RPC calls that would leave it waiting for nothing it needs.
         let freshHolding: StakingHolding | null = null
         try {
-          freshHolding = await getStakingHolding(acc.nimiqAddress)
+          freshHolding = await getStakingHolding(addr)
           setStakingHolding(freshHolding)
         } catch (e) {
           console.warn('Staking holding lookup failed:', e)
@@ -597,7 +630,7 @@ export default function App() {
             try {
               // Keyed off the account being refreshed, not the `account`
               // state — on first connect the state isn't set yet.
-              const key = pendingUnstakeKeyFor(acc.nimiqAddress)
+              const key = pendingUnstakeKeyFor(addr)
               if (key) localStorage.removeItem(key)
             } catch {
               /* ignore */
@@ -606,8 +639,17 @@ export default function App() {
           }
           return prev
         })
+        // Swapped and vesting NIM sit outside the basic account, where the
+        // plain balance can't see them — add each up separately.
+        // Best effort: a failed lookup must not take the balance view down.
         try {
-          setVestingHoldings(await getVestingHoldings(acc.nimiqAddress, txs))
+          setHtlcHoldings(await getHtlcHoldings(addr, txs))
+        } catch (e) {
+          console.warn('HTLC holdings lookup failed:', e)
+          setHtlcHoldings([])
+        }
+        try {
+          setVestingHoldings(await getVestingHoldings(addr, txs))
         } catch (e) {
           console.warn('Vesting holdings lookup failed:', e)
           setVestingHoldings([])
@@ -617,7 +659,7 @@ export default function App() {
         // a non-staker simply has none.
         try {
           const { fromMs, toMs } = restakeWindow()
-          setRewardTxs(await getRestakeRewardTxs(acc.nimiqAddress, fromMs, toMs))
+          setRewardTxs(await getRestakeRewardTxs(addr, fromMs, toMs))
         } catch (e) {
           console.warn('Restake events lookup failed:', e)
           setRewardTxs([])
@@ -628,7 +670,11 @@ export default function App() {
         setEvmBalances(evm)
       }
     } catch (e) {
-      setError('Refresh failed: ' + (e as Error).message)
+      // A rate-limited or timed-out refresh is not a broken connection: the
+      // 10s auto-refresh is already retrying, so it stays out of the red
+      // banner. Anything else is a real failure and keeps it.
+      if (isTransientChainError(e)) setToast(NODE_BUSY_COPY)
+      else setError('Refresh failed: ' + (e as Error).message)
     } finally {
       setLoading(false)
     }
@@ -757,7 +803,13 @@ export default function App() {
     [validators, lockedDelegation]
   )
   const stakeAmountNim = Number(stakeAmount)
-  const stakeAmountValid = Number.isFinite(stakeAmountNim) && stakeAmountNim > 0
+  // A first stake creates the staker record, and the protocol refuses to create
+  // one below the 100 NIM minimum — the tx is rejected and never mines. Adding
+  // to an existing record has no minimum.
+  const stakeAmountValid =
+    Number.isFinite(stakeAmountNim) &&
+    stakeAmountNim > 0 &&
+    (hasStaker || stakeAmountNim >= MIN_STAKE_NIM)
   // Slider ceiling: the liquid NIM balance (basic account) after parked HTLC
   // funds — staking spends only what the wallet is holding as spendable NIM.
   const stakeMaxLuna = Math.max(0, (Number(nimBalance) || 0) - lockedLuna)
@@ -767,6 +819,12 @@ export default function App() {
     setStakeError(null)
     setStakeHash(null)
     setStakeVerify(null)
+    // A first stake can't be smaller than the minimum, and the slider floor is
+    // set there — so open on that value rather than on a 0 the panel would
+    // only reject (and which would leave a tap on the floor doing nothing).
+    if (!stakingHolding && stakeMaxNim >= MIN_STAKE_NIM && !(stakeAmountNim >= MIN_STAKE_NIM)) {
+      setStakeAmount(String(MIN_STAKE_NIM))
+    }
     setStakeOpen(true)
   }
 
@@ -793,13 +851,18 @@ export default function App() {
   }
 
   const submitStake = async () => {
+    // No staker record yet → this transaction creates one, and that is the
+    // only moment the validator can be chosen (and the only one with a
+    // minimum amount).
+    const firstStake = !stakingHolding
     if (!stakeAmountValid) {
-      setStakeError('Enter an amount above 0.')
+      setStakeError(
+        firstStake && stakeAmountNim > 0 && stakeAmountNim < MIN_STAKE_NIM
+          ? MIN_STAKE_COPY
+          : 'Enter an amount above 0.'
+      )
       return
     }
-    // No staker record yet → this transaction creates one, and that is the
-    // only moment the validator can be chosen.
-    const firstStake = !stakingHolding
     if (firstStake && !selectedValidator) {
       setStakeError('Choose a validator first.')
       return
@@ -969,8 +1032,12 @@ export default function App() {
     try {
       let remainingNim = amountNim
       // 1. Withdraw anything already fully cooled (retired → basic balance).
+      //    `remove_stake` takes no amount: the protocol withdraws the whole
+      //    retired balance or nothing (protocol.md — "Remove ALL retired
+      //    funds; partial not allowed"). Asking for less than all of it used
+      //    to send a tx for the smaller figure and get the full balance back.
       if (retiredLuna > 0 && remainingNim > 0) {
-        const removeNim = Math.min(remainingNim, retiredLuna / 100000)
+        const removeNim = retiredLuna / 100000
         const remove = await unstakeRemove(removeNim)
         if (!remove.ok) {
           setUnstakeError(remove.error)
@@ -978,14 +1045,42 @@ export default function App() {
         }
         setUnstakeHash(remove.hash)
         verifyUnstakeTx(remove.hash, { kind: 'withdraw', amountNim: removeNim })
-        remainingNim -= removeNim
+        if (removeNim > remainingNim) {
+          setToast(
+            "Withdrew your full retired balance (partial withdrawals aren't allowed on Nimiq)."
+          )
+        }
+        // Clamped: withdrawing the whole retired balance can cover more than
+        // was asked for, and the steps below only run on what's still owed.
+        remainingNim = Math.max(0, remainingNim - removeNim)
       }
       // 2. Deactivate the rest of the ACTIVE stake (active → inactive). The
       //    protocol only retires *inactive* stake, so this — not retire — is
       //    the first step for live stake. `setActiveStake` sets an absolute
       //    balance, so pass what stays staked, not what leaves.
       if (remainingNim > 0 && retireableLuna > 0) {
-        const deactivateLuna = Math.min(Math.round(remainingNim * 100000), retireableLuna)
+        let deactivateLuna = Math.min(Math.round(remainingNim * 100000), retireableLuna)
+        // A staker record may not sit below the 100 NIM minimum: leaving 40 NIM
+        // active is rejected outright, so snap the deactivation down until the
+        // remainder is exactly the minimum. Deactivating everything is fine —
+        // that closes the record rather than shrinking it below the floor.
+        const remainderLuna = retireableLuna - deactivateLuna
+        let snapped = false
+        if (remainderLuna > 0 && remainderLuna < MIN_STAKE_LUNA) {
+          deactivateLuna = retireableLuna - MIN_STAKE_LUNA
+          snapped = true
+          if (deactivateLuna <= 0) {
+            // The whole active balance is at or under the minimum — nothing
+            // partial is legal here, only unstaking all of it.
+            setUnstakeError(
+              `${MIN_REMAINDER_COPY} — unstake the full ${formatLuna(String(retireableLuna), lang)} NIM instead.`
+            )
+            return
+          }
+          setToast(
+            `${MIN_REMAINDER_COPY} — deactivating ${formatLuna(String(deactivateLuna), lang)} NIM instead.`
+          )
+        }
         const deactivateNim = deactivateLuna / 100000
         const deactivate = await unstakeDeactivate((retireableLuna - deactivateLuna) / 100000)
         if (!deactivate.ok) {
@@ -1004,7 +1099,10 @@ export default function App() {
           /* storage full — in-memory only */
         }
         verifyUnstakeTx(deactivate.hash, { kind: 'deactivate', amountNim: deactivateNim })
-        remainingNim -= deactivateNim
+        // When the amount was snapped to the minimum, the shortfall is staying
+        // staked on purpose — it is not "still cooling down" (step 3), so it
+        // must not be reported as such.
+        remainingNim = snapped ? 0 : remainingNim - deactivateNim
       }
       // 3. Anything left is already cooling down (inactive). It still needs a
       //    retire transaction once the reporting window passes — that is the
@@ -1190,7 +1288,10 @@ export default function App() {
             t.recipient,
             (Number(t.value) / 100000).toFixed(5), // raw decimals — no locale separators (accounting-safe)
             (Number(t.fee) / 100000).toFixed(5),
-            ((Number(t.value) / 100000) * rates.nim).toFixed(6),
+            // No rate yet (cold cache, CoinGecko still in flight) means the
+            // USD value is unknown, and an unknown value is blank — a column
+            // of 0.000000 reads as "these transactions were worthless".
+            rates.nim > 0 ? ((Number(t.value) / 100000) * rates.nim).toFixed(6) : '',
             decodeMemo(t.data) ?? '',
           ]
         }),
@@ -1366,7 +1467,7 @@ export default function App() {
       } catch (e) {
         if (cancelled) return
         console.warn('Statement failed:', e)
-        setError('Statement prices unavailable right now — try again shortly.')
+        reportSoftFailure(e, 'Statement prices unavailable right now — try again shortly.')
         setStatement(null)
       } finally {
         if (!cancelled) setStatementLoading(false)
@@ -1375,7 +1476,7 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [account?.nimiqAddress, allTxs, statementYear])
+  }, [account?.nimiqAddress, allTxs, statementYear, reportSoftFailure])
 
   const exportStatementCsv = () => {
     const e = csvExport('statement')
@@ -1393,6 +1494,9 @@ export default function App() {
         } catch {
           /* storage unavailable — session-only */
         }
+        // Seed the now-available device-scoped key with what's on screen —
+        // otherwise the first read falls back to the legacy key and rewrites it.
+        saveCurrency(currency)
         setToast('Device preferences enabled — settings are saved to this device.')
       } else {
         setError('Device preferences unavailable — this works inside Nimiq Pay.')
@@ -1507,12 +1611,18 @@ export default function App() {
           </button>
           <ul className="feature-list">
             <li>Balance &amp; history with live fiat values — 37 currencies</li>
-            <li>Stake, unstake &amp; track rewards</li>
+            {/* Staking is signed by the injected Pay provider, so the browser
+                and mobile-web paths can read it but never send it — say so
+                here rather than in the stake panel the user has yet to open. */}
+            <li>Stake, unstake &amp; track rewards{!inNimiqPay && ' (in Nimiq Pay)'}</li>
             <li>Payment requests (invoices) that settle on-chain</li>
             <li>Signed receipts — verifiable proof of payment</li>
             <li>Tax-ready CSV statements &amp; exports</li>
           </ul>
           {error && <p className="error">{error}</p>}
+          {/* Soft warnings (stale rates, a busy node) land in the toast, which
+              this screen has no room for — a dim note carries them instead. */}
+          {toast && !error && <p className="hint small">{toast}</p>}
         </main>
         {changelogModal}
       </div>
@@ -1637,7 +1747,6 @@ export default function App() {
                 >
                   {formatFiat(totalFiat, currency)}
                 </button>
-                <span className="sub">≈ {currency.toUpperCase()} · {lang}</span>
               </div>
 
               <div className="card nim-tile">
@@ -2367,7 +2476,6 @@ export default function App() {
             <button className="btn-secondary" onClick={requestDeviceId}>
               {deviceId ? `Device: ${deviceId.slice(0, 12)}…` : 'Enable device preferences'}
             </button>
-            <p className="hint small">Lang: {lang}</p>
           </section>
         )}
       </main>
@@ -2598,7 +2706,11 @@ export default function App() {
                         id="stakeAmount"
                         className="stake-slider"
                         type="range"
-                        min={0}
+                        // A first stake can't legally be smaller than the
+                        // minimum, so the slider doesn't offer it — unless the
+                        // wallet can't reach it, where the floor would lock
+                        // the slider to a value it can't fund.
+                        min={!hasStaker && stakeMaxNim >= MIN_STAKE_NIM ? MIN_STAKE_NIM : 0}
                         max={stakeMaxNim}
                         step={0.1}
                         value={Math.min(stakeAmountNim, stakeMaxNim)}
@@ -2620,7 +2732,9 @@ export default function App() {
                         ? `≈ ${formatFiat(stakeAmountNim * shown.nim, currency)} · ${Math.round(
                             stakeAmountNim * 100000
                           ).toLocaleString(lang)} Luna`
-                        : `Available to stake: ${formatLuna(String(stakeMaxLuna), lang)} NIM`}
+                        : !hasStaker && stakeMaxNim < MIN_STAKE_NIM
+                          ? `${MIN_STAKE_COPY} This wallet holds ${formatLuna(String(stakeMaxLuna), lang)} NIM.`
+                          : `Available to stake: ${formatLuna(String(stakeMaxLuna), lang)} NIM`}
                     </span>
                   </>
                 ) : (

@@ -24,6 +24,10 @@ export interface StoredInvoice extends InvoicePayload {
   paid?: boolean
   paidTxHash?: string
   paidAt?: number
+  // Set when the user marked a request unpaid by hand. Auto-reconciliation
+  // matches the tagged transaction forever, so without this the effect just
+  // marks it paid again on the next pass and the toggle looks broken.
+  unpaidByUser?: boolean
 }
 
 export const MAX_INVOICES = 50
