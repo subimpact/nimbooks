@@ -87,6 +87,7 @@ import { exportBackup, importBackup, validateBackup } from './lib/backup'
 import { APP_VERSION_LABEL, CHANGELOG } from './lib/changelog'
 import QrCode from './QrCode'
 import Analytics, { type AnalyticsPeriod } from './Analytics'
+import InfoIcon from './InfoIcon'
 import {
   availableStatementYears,
   buildStatementCsv,
@@ -1907,7 +1908,10 @@ export default function App() {
             <div className="stat-row">
               <div className="card total">
                 <div className="total-header">
-                  <span className="label">Total value</span>
+                  <span className="label label-with-info">
+                    Total value
+                    <InfoIcon text="Your NIM and EVM assets at the current market rate, in the display currency. Staked, unstaking and HTLC-in-transit funds are included. Everything that is yours." />
+                  </span>
                   {/* Visible affordance for the currency picker — the value
                       itself used to be the (invisible) button. */}
                   <button
@@ -1948,7 +1952,10 @@ export default function App() {
               </div>
 
               <div className="card nim-tile">
-                <span className="label">NIM balance</span>
+                <span className="label label-with-info">
+                  NIM balance
+                  <InfoIcon text="Your NIM on the Nimiq chain: available, staked, unstaking, and funds held in HTLC swap contracts (shown as in transit)." />
+                </span>
                 {nimBalance === null ? (
                   <span className="value dim">…</span>
                 ) : (
@@ -2041,7 +2048,10 @@ export default function App() {
                 With nothing off-balance the tile above is the whole story. */}
             {nimBalance !== null && offBalanceLuna > 0 && (
               <div className="card">
-                <span className="label">Balance details</span>
+                <span className="label label-with-info">
+                  Balance details
+                  <InfoIcon text="Where your NIM sits: available in your wallet, staked with a validator, cooling down after unstaking, ready to withdraw, or locked in swap contracts." />
+                </span>
                 <div className="balance-breakdown">
                   <div className="row">
                     <span>Available</span>
@@ -2097,7 +2107,10 @@ export default function App() {
 
             {evmBalances.length > 0 && (
               <div className="card">
-                <span className="label">EVM assets</span>
+                <span className="label label-with-info">
+                  EVM assets
+                  <InfoIcon text="Tokens on EVM chains connected through your wallet. Values are included in the Total value tile above." />
+                </span>
                 {evmBalances
                   .filter((b) => Number.isFinite(Number(b.balance)) && Number(b.balance) > 0)
                   .map((b) => (
@@ -2115,7 +2128,10 @@ export default function App() {
             )}
 
             <div className="card">
-              <span className="label">Addresses</span>
+              <span className="label label-with-info">
+                Addresses
+                <InfoIcon text="The addresses your wallet uses. Tap the NIM address to copy it. The EVM address is the one connected to your wallet for EVM assets." />
+              </span>
               {account.nimiqAddress && (() => {
                 const addr = account.nimiqAddress
                 return (
