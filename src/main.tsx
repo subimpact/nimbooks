@@ -5,6 +5,7 @@ import App from './App'
 import VerifyPage from './VerifyPage'
 import InvoicePage from './InvoicePage'
 import { applyTheme, getInitialTheme } from './lib/theme'
+import { hashRouteFromQuery } from './lib/device'
 import { checkHubRedirect, isHubRedirectReturn } from './lib/wallet'
 
 // Apply the saved/system theme before first paint to avoid a flash.
@@ -63,6 +64,12 @@ function start() {
     </StrictMode>
   )
 }
+
+// A route that arrived as `?route=…&p=…` — from a host that forwards the query
+// string but drops the fragment — goes back on the hash before the router
+// reads it. An existing hash always wins: it is the route the user asked for.
+const queryRoute = window.location.hash ? null : hashRouteFromQuery(window.location.search)
+if (queryRoute) window.location.replace(queryRoute)
 
 // A Hub login from a mobile browser comes back as a full-page redirect. Take
 // the response off the URL and restore the route *before* the router reads the

@@ -31,12 +31,43 @@ export const NIMBOOKS_SITE_URL = 'https://nimbooks.subimpact.net'
  * Absolute link to a NimBooks hash route (`#/invoice/…`, `#/verify/…`) for
  * sharing — share sheet, clipboard, QR.
  *
- * Gated on the SHARER's device, the only signal there is: someone sharing from
- * a phone is almost certainly sending to a phone, where the wallet lives in
- * Nimiq Pay, so the link opens the route inside the app. A desktop user gets
- * the plain site and is never pushed into an app they may not have.
+ * Every share goes to the plain site, never through the Pay deep link:
+ * nimpay.app drops the fragment when it hands a miniapp off to the Pay
+ * WebView, so a shared `…/miniapps/open/nimbooks.subimpact.net/#/verify/…`
+ * arrives with the payload gone and lands on the miniapps page. The site URL
+ * keeps the route, opens in any browser, and is shorter; the invoice page
+ * offers its own hand-off into Pay once it is open.
  */
-export function appLink(route: string): string {
-  const base = isInNimiqPay() || isMobileDevice() ? NIMIQ_PAY_APP_URL : NIMBOOKS_SITE_URL
-  return `${base}/${route.startsWith('#') ? route : `#${route}`}`
+export function siteLink(route: string): string {
+  return `${NIMBOOKS_SITE_URL}/${route.startsWith('#') ? route : `#${route}`}`
+}
+
+/**
+ * Hand-off from a mobile browser into the Nimiq Pay app, carrying the route.
+ * The custom scheme takes the whole site URL as a query param, which survives
+ * the hand-off intact — unlike the fragment on the https miniapps link.
+ *
+ * Silently does nothing when Pay is not installed, so every caller must leave
+ * a second path (the Hub login) on screen.
+ */
+export function payDeepLink(route: string): string {
+  return `nimiqpay://miniapp?url=${encodeURIComponent(siteLink(route))}`
+}
+
+const QUERY_ROUTES = ['verify', 'invoice']
+
+/**
+ * `?route=invoice&p=<payload>` → `#/invoice/<payload>`, or null if the params
+ * are missing or the route is not one we serve.
+ *
+ * A fallback for hosts that forward a link's query string but drop its
+ * fragment. Nothing NimBooks hands out is in this shape; it only has to be
+ * here for the day something arrives that way.
+ */
+export function hashRouteFromQuery(search: string): string | null {
+  const params = new URLSearchParams(search)
+  const route = params.get('route')
+  const payload = params.get('p')
+  if (!route || !payload || !QUERY_ROUTES.includes(route)) return null
+  return `#/${route}/${payload}`
 }
