@@ -78,6 +78,7 @@ import {
 import { getRestakeRewardTxs, restakeWindow } from './lib/stakingEvents'
 import { isInNimiqPay, isMobileDevice, NIMIQ_PAY_APP_URL } from './lib/device'
 import { buildDownloadLink } from './lib/downloadLink'
+import { exportBackup, importBackup, validateBackup } from './lib/backup'
 import { APP_VERSION_LABEL, CHANGELOG } from './lib/changelog'
 import QrCode from './QrCode'
 import Analytics, { type AnalyticsPeriod } from './Analytics'
@@ -283,6 +284,10 @@ export default function App() {
   // Real-HTTPS download link for WebViews that can't save files (see downloadLink.ts).
   const [downloadLink, setDownloadLink] = useState<string | null>(null)
   const [linkBusy, setLinkBusy] = useState(false)
+  // Backup/restore modal: which half is showing, plus the two text buffers.
+  const [backupMode, setBackupMode] = useState<'backup' | 'restore' | null>(null)
+  const [backupJson, setBackupJson] = useState('')
+  const [restoreText, setRestoreText] = useState('')
   const [invoices, setInvoices] = useState<StoredInvoice[]>([])
   const [amountInput, setAmountInput] = useState('')
   const [memoInput, setMemoInput] = useState('')
@@ -824,17 +829,34 @@ export default function App() {
     }
   }, [account?.nimiqAddress, stakeOpen, validators.length, stakingHolding?.delegation])
 
-  // Escape closes whichever panel is open.
+  // Escape closes whichever overlay is open — one handler for all of them, so
+  // a new modal never ships without the key. (DetailSheet brings its own.)
+  // The unstake confirmation sits on top of the stake modal, so it takes the
+  // key first: one press should peel one layer, not the whole stack.
   useEffect(() => {
-    if (!stakeOpen && !currencyOpen) return
+    const anyOpen =
+      stakeOpen ||
+      currencyOpen ||
+      changelogOpen ||
+      confirmUnstakeOpen ||
+      !!downloadLink ||
+      !!backupMode
+    if (!anyOpen) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
+      if (confirmUnstakeOpen) {
+        setConfirmUnstakeOpen(false)
+        return
+      }
       setStakeOpen(false)
       setCurrencyOpen(false)
+      setChangelogOpen(false)
+      setDownloadLink(null)
+      setBackupMode(null)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [stakeOpen, currencyOpen])
+  }, [stakeOpen, currencyOpen, changelogOpen, confirmUnstakeOpen, downloadLink, backupMode])
 
   // A staker's delegation is fixed when the record is created, so an existing
   // stake locks the picker to that validator — adding stake can't move it.
@@ -1544,6 +1566,41 @@ export default function App() {
     }
   }
 
+  const openBackup = () => {
+    const file = exportBackup()
+    setBackupJson(JSON.stringify(file, null, 2))
+    setBackupMode('backup')
+  }
+
+  const openRestore = () => {
+    setRestoreText('')
+    setBackupMode('restore')
+  }
+
+  const runRestore = () => {
+    const file = validateBackup(restoreText)
+    if (!file) {
+      setError("That doesn't look like a NimBooks backup — paste the whole file, braces included.")
+      return
+    }
+    const total = Object.keys(file.keys).length
+    if (total === 0) {
+      setError('That backup is empty — there was nothing stored when it was taken.')
+      return
+    }
+    const { restored } = importBackup(file)
+    if (restored === 0) {
+      setError('Everything in that backup is already on this device — nothing to restore.')
+      return
+    }
+    setBackupMode(null)
+    setToast(`Restored ${restored} of ${total} items — reloading…`)
+    // Currency, theme and the device ID are all read once at mount, so the
+    // restored values only take effect on a fresh load. Delayed so the count
+    // is actually readable before the page goes.
+    setTimeout(() => window.location.reload(), 1200)
+  }
+
   // Both headers carry the version badge, and the connect screen returns early —
   // so the modal is built once here and rendered in each tree.
   const changelogModal = changelogOpen && (
@@ -2016,6 +2073,56 @@ export default function App() {
                 )
               })()}
             </div>
+
+            {/* A wallet that has never transacted has nothing to chart, and a
+                grid of zeros above an empty frame reads as "this app is
+                broken". Say what to do instead. Gated on `loading` so it can't
+                flash during the first fetch, and on consensus so a wallet that
+                is merely still syncing isn't told its books are empty — that
+                case already has its own note above. */}
+            {!loading && payConsensus !== false && allTxs.length === 0 && (
+              <div className="card empty-books">
+                <svg
+                  viewBox="0 0 24 24"
+                  className="empty-books-glyph"
+                  aria-hidden="true"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H19v13H5.5A1.5 1.5 0 0 0 4 18.5z" />
+                  <path d="M4 18.5A1.5 1.5 0 0 0 5.5 20H19v-3" />
+                  <path d="M8 8.5h7M8 12h4" />
+                </svg>
+                <h3>Your books start here</h3>
+                <ul className="empty-books-steps">
+                  <li>
+                    <strong>Receive some NIM.</strong> Send NIM to your address above — it appears
+                    here automatically, no import step.
+                  </li>
+                  <li>
+                    <strong>Create a payment request.</strong> A link or QR your customer can pay,
+                    reconciled against your history the moment it lands.
+                    <button className="btn-secondary" onClick={() => setView('request')}>
+                      New payment request
+                    </button>
+                  </li>
+                  <li>
+                    <strong>Stake 100 NIM to start earning.</strong> Delegate to a validator and
+                    the rewards show up as income.
+                    {canStake() ? (
+                      <button className="btn-secondary" onClick={() => setStakeOpen(true)}>
+                        Stake NIM
+                      </button>
+                    ) : (
+                      ' (in Nimiq Pay)'
+                    )}
+                  </li>
+                </ul>
+              </div>
+            )}
 
             {/* Raw indexed txs only: restaked rewards compound into the
                 staking contract and never touch the basic balance, so feeding
@@ -2522,6 +2629,21 @@ export default function App() {
               )}
             </div>
 
+            <div className="card backup-card">
+              <span className="label">Backup &amp; restore</span>
+              <p className="hint small">
+                Your books are yours — take them out any time. Receipts, payment requests, the
+                staking log and your preferences live on this device only, so a cleared cache
+                takes them with it.
+              </p>
+              <button className="btn-secondary" onClick={openBackup}>
+                Back up my data
+              </button>
+              <button className="btn-secondary" onClick={openRestore}>
+                Restore from backup
+              </button>
+            </div>
+
             <button className="btn-secondary" onClick={requestDeviceId}>
               {deviceId ? `Device: ${deviceId.slice(0, 12)}…` : 'Enable device preferences'}
             </button>
@@ -2586,6 +2708,83 @@ export default function App() {
             <p className="hint small">
               The link carries the CSV itself, compressed. Nothing is stored on a server.
             </p>
+          </div>
+        </div>
+      )}
+
+      {/* Text in, text out — no download, no clipboard permission, no host
+          file API. That is the one route that works identically in Pay's
+          WebView, in Safari and on desktop. */}
+      {backupMode && (
+        <div className="modal-overlay" onClick={() => setBackupMode(null)}>
+          <div
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label={backupMode === 'backup' ? 'Back up your data' : 'Restore from backup'}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-head">
+              <h2>{backupMode === 'backup' ? 'Back up your data' : 'Restore from backup'}</h2>
+              <button className="btn-ghost" onClick={() => setBackupMode(null)} aria-label="Close">
+                ✕
+              </button>
+            </div>
+
+            {backupMode === 'backup' ? (
+              <>
+                <p className="hint">
+                  Your books are yours — take them out any time. Copy this and keep it somewhere
+                  safe; paste it back into Restore on any device to bring them along.
+                </p>
+                <textarea
+                  className="input download-link"
+                  readOnly
+                  rows={8}
+                  value={backupJson}
+                  onFocus={(e) => e.currentTarget.select()}
+                  aria-label="Backup data"
+                />
+                <button
+                  className="btn-primary"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(backupJson)
+                      setToast('Backup copied — paste it somewhere safe ✓')
+                    } catch {
+                      setError('Could not copy — select the text above and copy it manually.')
+                    }
+                  }}
+                >
+                  Copy backup
+                </button>
+                <p className="hint small">
+                  Receipts, payment requests, the staking log and your preferences. Prices and
+                  transaction history are left out — those come back from the chain on their own.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="hint">
+                  Paste a backup below. Anything already on this device is kept as-is — a restore
+                  fills in what's missing, it never overwrites your current books.
+                </p>
+                <textarea
+                  className="input download-link"
+                  rows={8}
+                  value={restoreText}
+                  onChange={(e) => setRestoreText(e.target.value)}
+                  placeholder='{"app":"nimbooks","version":1,…}'
+                  aria-label="Backup data to restore"
+                />
+                <button className="btn-primary" onClick={runRestore} disabled={!restoreText.trim()}>
+                  Restore
+                </button>
+                <p className="hint small">
+                  NimBooks reloads afterwards so the restored preferences take effect.
+                </p>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -2908,7 +3107,8 @@ export default function App() {
                                 Your stake stops earning at the next election block (~12h). It
                                 becomes withdrawable after the reporting window — by{' '}
                                 <strong>{unstakeEstimate.worstLabel}</strong> at the latest
-                                (up to ~24h, depending on where the epoch boundary falls).
+                                (up to ~24h, depending on where the epoch boundary falls — and
+                                longer if your validator is jailed).
                               </p>
                               <p className="hint small">
                                 You'll need two more transactions once it has cooled down —
