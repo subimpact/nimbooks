@@ -499,9 +499,11 @@ a:focus-visible {
   margin-bottom: 0;
 }
 /* The label is a flex item of .total-header: let it grow so the explainer
-   (flex-basis 100% inside the label) spans the card, not just the label text. */
+   (flex-basis 100% inside the label) spans the card, not just the label text.
+   flex-basis 0 (not auto): auto resolves circularly against the explainer's
+   own 100% basis and the label collapses to its text width. */
 .total-header .label.label-with-info {
-  flex: 1 1 auto;
+  flex: 1 1 0;
 }
 .currency-chip {
   display: inline-flex;
