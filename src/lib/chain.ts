@@ -612,41 +612,6 @@ function pickRates(entry: any): FiatRates {
   return rates
 }
 
-export async function getFiatRates(asset: 'nim' | 'usdt' | 'usdc' | 'eth' | 'pol'): Promise<FiatRates> {
-  const cache = readRateCache()
-  const cached = cache[asset]
-  if (cached && hasAllCurrencies(cached.rates) && Date.now() - cached.at < CACHE_TTL) return cached.rates
-
-  const id =
-    asset === 'nim'
-      ? 'nimiq-2'
-      : asset === 'usdt'
-        ? 'tether'
-        : asset === 'usdc'
-          ? 'usd-coin'
-          : asset === 'eth'
-            ? 'ethereum'
-            : 'matic-network'
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 8000)
-  try {
-    const res = await fetch(
-      `https://api.coingecko.com/api/v3/simple/price?ids=${id}&vs_currencies=${VS_CURRENCIES}`,
-      { signal: controller.signal }
-    )
-    if (!res.ok) throw new Error(`CoinGecko HTTP ${res.status}`)
-    const json = await res.json()
-    const rates: FiatRates = pickRates(json[id])
-    if (rates.usd > 0) {
-      cache[asset] = { rates, at: Date.now() }
-      writeRateCache(cache)
-    }
-    return rates
-  } finally {
-    clearTimeout(timer)
-  }
-}
-
 // Single consolidated CoinGecko request for all tracked assets — one call,
 // one cache entry. Prevents 429 rate-limit storms from 4 parallel requests.
 export async function getAllFiatRates(): Promise<Record<'nim' | 'usdt' | 'eth' | 'pol', FiatRates>> {
@@ -706,6 +671,11 @@ export interface ValidatorInfo {
   isListed: boolean
   balance: number // Luna staked with this validator (for network total)
   annualReward: number | null // net annual yield after fee, as a fraction (0.0831 = 8.31% p.a.)
+  // Picker branding. In-memory only: the logos are inlined data URIs and the
+  // 24-validator payload is ~1.4 MB, so they are stripped before caching (see
+  // getValidators). A cache hit therefore renders name + metrics, no logo.
+  logo?: string // data:image/… URI
+  accentColor?: string // '#F39C12' — the pool's brand colour
 }
 
 const VALIDATORS_URL = 'https://validators-api-main.je-cf9.workers.dev/api/v1/validators/'
@@ -776,8 +746,10 @@ export async function getValidators(): Promise<ValidatorInfo[]> {
     if (!res.ok) throw new Error(`Validators API HTTP ${res.status}`)
     const json = await res.json()
     if (!Array.isArray(json)) throw new Error('Validators API returned no list')
-    // Keep only the fields the picker needs: the raw payload inlines logo
-    // images (~1.4 MB for 24 validators) and would blow the storage quota.
+    // Keep only the fields the picker needs. The raw payload inlines logo
+    // images (~1.4 MB for 24 validators): they are kept on the in-memory list
+    // the picker renders, but stripped before the list is cached — 1.4 MB
+    // would blow the storage quota.
     const raw: any[] = json.filter((v: any) => v?.address)
     // The yield formula divides by the network's TOTAL active stake (all
     // validators on chain), but the API only lists registered pools. Each
@@ -807,13 +779,23 @@ export async function getValidators(): Promise<ValidatorInfo[]> {
         // Same convention as the Nimiq wallet's validator list: annual yield
         // on the network's total active stake, net of this pool's fee.
         annualReward: annualRewardFor(fee, networkStakeLuna),
+        // Third-party content rendered into an <img src>: accept only inline
+        // image data URIs, never a remote or javascript:/data:text/html URL.
+        ...(typeof v?.logo === 'string' && v.logo.startsWith('data:image/') ? { logo: v.logo } : {}),
+        ...(typeof v?.accentColor === 'string' && /^#[0-9a-f]{3,8}$/i.test(v.accentColor)
+          ? { accentColor: v.accentColor }
+          : {}),
       }
     })
     if (validators.length === 0) throw new Error('Validators API returned no validators')
     try {
+      // Logos are dropped here and only here: they are ~1.4 MB of base64 and
+      // localStorage is a ~5 MB budget shared with history, receipts and
+      // invoices. The returned list keeps them for this session's picker.
+      const cacheable = validators.map(({ logo: _logo, ...v }) => v)
       localStorage.setItem(
         VALIDATORS_CACHE_KEY,
-        JSON.stringify({ at: Date.now(), validators } satisfies ValidatorCacheEntry)
+        JSON.stringify({ at: Date.now(), validators: cacheable } satisfies ValidatorCacheEntry)
       )
     } catch {
       /* storage full — the list just isn't cached */
