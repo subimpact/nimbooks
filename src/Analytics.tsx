@@ -2,7 +2,7 @@
 // Pure SVG, zero dependencies: daily net flow bars + cumulative balance trajectory.
 
 import { useMemo, useState } from 'react'
-import type { CurrencyCode, NimiqTx } from './lib/chain'
+import type { CurrencyCode, NimiqTx, TxLabel } from './lib/chain'
 import {
   decodeMemo,
   explorerTxUrl,
@@ -31,10 +31,22 @@ interface Stats {
   totalOut: number
   net: number
   count: number
+  inCount: number
+  outCount: number
   avgIn: number
   avgOut: number
   largestIn: number
   largestOut: number
+}
+
+// Which stat card was tapped. The day sheet keys off a date instead, so the
+// two drilldowns can't both be open.
+type StatSheet = 'in' | 'out' | 'net'
+
+const SHEET_TITLE: Record<StatSheet, string> = {
+  in: 'Received',
+  out: 'Sent',
+  net: 'Net flow',
 }
 
 function dayKey(tsMs: number): string {
@@ -45,6 +57,116 @@ function dayKey(tsMs: number): string {
 function dayLabel(tsMs: number): string {
   const d = new Date(tsMs)
   return `${d.getDate()}/${d.getMonth() + 1}`
+}
+
+// Addresses reach us from the index already grouped (NQ12 34AB …) but that
+// isn't guaranteed — regroup from the stripped form so two spellings of the
+// same address can never render as two separate counterparties.
+function spacedAddr(addr: string): string {
+  const clean = addr.replace(/\s+/g, '').toUpperCase()
+  return clean.match(/.{1,4}/g)?.join(' ') ?? addr
+}
+
+function shortAddr(spaced: string): string {
+  return spaced.length <= 12 ? spaced : `${spaced.slice(0, 9)}…`
+}
+
+// `decodeMemo` hands back the raw hex when the bytes aren't printable text.
+// That's honest as a `memo:` line but useless as a stand-in for a name, so a
+// memo that didn't actually decode falls through to the address instead.
+function memoName(data?: string): string {
+  const decoded = decodeMemo(data).trim()
+  return decoded && decoded !== (data ?? '').trim() ? decoded : ''
+}
+
+interface Counterparty {
+  norm: string
+  addr: string // canonical spaced form
+  name: string // decoded memo, when one decoded
+  sum: number // NIM
+  count: number
+}
+
+// Sum + count per counterparty address, biggest first. There is no contacts
+// feature, so the first memo that decoded doubles as the party's name.
+function groupCounterparties(txs: NimiqTx[], pick: (tx: NimiqTx) => string): Counterparty[] {
+  const byAddr = new Map<string, Counterparty>()
+  for (const tx of txs) {
+    const raw = pick(tx)
+    const norm = raw.replace(/\s+/g, '').toUpperCase()
+    if (!norm) continue
+    const v = Number(tx.value) / 100000
+    if (!Number.isFinite(v)) continue
+    let entry = byAddr.get(norm)
+    if (!entry) {
+      entry = { norm, addr: spacedAddr(raw), name: '', sum: 0, count: 0 }
+      byAddr.set(norm, entry)
+    }
+    entry.sum += v
+    entry.count++
+    if (!entry.name) entry.name = memoName(tx.data)
+  }
+  return [...byAddr.values()].sort((a, b) => b.sum - a.sum)
+}
+
+function tallyKinds(txs: NimiqTx[], own: string): { kind: TxLabel; n: number }[] {
+  const counts = new Map<TxLabel, number>()
+  for (const tx of txs) {
+    const kind = txLabel(tx, own)
+    counts.set(kind, (counts.get(kind) ?? 0) + 1)
+  }
+  return [...counts.entries()]
+    .map(([kind, n]) => ({ kind, n }))
+    .sort((a, b) => b.n - a.n)
+}
+
+function KindPills({ counts }: { counts: { kind: TxLabel; n: number }[] }) {
+  if (counts.length === 0) return null
+  return (
+    <div className="kind-pills">
+      {counts.map(({ kind, n }) => (
+        <span key={kind} className="kind-pill">
+          <span className={`tx-kind ${kind}`}>{kind}</span>
+          <span className="kind-n">{n}</span>
+        </span>
+      ))}
+    </div>
+  )
+}
+
+function CounterpartyRows({
+  rows,
+  total,
+  incoming,
+  fmt,
+}: {
+  rows: Counterparty[]
+  total: number
+  incoming: boolean
+  fmt: (v: number) => string
+}) {
+  return (
+    <div className="sheet-counterparties">
+      {rows.map((c) => (
+        <div key={c.norm} className="sheet-counterparty">
+          <div className="sheet-cp-who">
+            <div className="sheet-cp-name">{c.name || shortAddr(c.addr)}</div>
+            <div className="sheet-cp-addr mono">{c.addr}</div>
+          </div>
+          <div className="sheet-cp-amt">
+            <div className={incoming ? 'green' : 'red'}>
+              {incoming ? '+' : '−'}
+              {fmt(c.sum)} NIM
+            </div>
+            <div className="sheet-cp-meta">
+              {c.count} {c.count === 1 ? 'tx' : 'txs'} ·{' '}
+              {total > 0 ? ((c.sum / total) * 100).toFixed(1) : '0.0'}%
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
 }
 
 // Reconstruct historical balance by walking txs newest → oldest from the current balance.
@@ -95,6 +217,7 @@ export default function Analytics({
   // Day key (YYYY-MM-DD) of the bar being drilled into, not an index: the
   // index shifts when the period switch changes the bucket span.
   const [selectedDay, setSelectedDay] = useState<string | null>(null)
+  const [statSheet, setStatSheet] = useState<StatSheet | null>(null)
 
   const data = useMemo(() => {
     const now = Date.now()
@@ -164,6 +287,8 @@ export default function Analytics({
       totalOut,
       net: totalIn - totalOut,
       count,
+      inCount,
+      outCount,
       avgIn: totalIn / Math.max(1, inCount),
       avgOut: totalOut / Math.max(1, outCount),
       largestIn,
@@ -235,7 +360,13 @@ export default function Analytics({
     if (!r.width || n === 0) return
     const xInView = (clientX - r.left) * (W / r.width)
     const i = Math.min(n - 1, Math.max(0, Math.floor((xInView - PAD_L) / slotW)))
+    setStatSheet(null) // one sheet at a time — two overlays would stack
     setSelectedDay(data.points[i].key)
+  }
+
+  const openStat = (which: StatSheet) => {
+    setSelectedDay(null)
+    setStatSheet(which)
   }
 
   const dayTitle = (ts: number) =>
@@ -246,6 +377,91 @@ export default function Analytics({
       year: 'numeric',
     })
 
+  // Everything the three stat sheets show, derived from the same bucket txs the
+  // bars are drawn from — so a stat card and the chart can never disagree.
+  // Returns null until a card is tapped: zero cost while the sheets are closed.
+  const drill = useMemo(() => {
+    if (!statSheet) return null
+    const own = ownAddress ?? ''
+    const all = data.points.flatMap((p) => p.txs)
+    const isOut = (tx: NimiqTx) => tx.sender.replace(/\s+/g, '').toUpperCase() === ownNorm
+    const inTxs = all.filter((tx) => !isOut(tx))
+    const outTxs = all.filter(isOut)
+
+    // Composition: in − out per kind, so "you didn't spend 50k NIM, you staked
+    // it" reads straight off the list rather than needing to be inferred.
+    const byKind = new Map<TxLabel, { in: number; out: number; count: number }>()
+    for (const tx of all) {
+      const v = Number(tx.value) / 100000
+      if (!Number.isFinite(v)) continue
+      const kind = txLabel(tx, own)
+      const e = byKind.get(kind) ?? { in: 0, out: 0, count: 0 }
+      if (isOut(tx)) e.out += v
+      else e.in += v
+      e.count++
+      byKind.set(kind, e)
+    }
+    const composition = [...byKind.entries()]
+      .map(([kind, e]) => ({ kind, net: e.in - e.out, count: e.count }))
+      .sort((a, b) => Math.abs(b.net) - Math.abs(a.net))
+
+    // Previous window [cutoff − period, cutoff). The buckets only span the
+    // selected window, so the comparison needs its own pass over the raw txs,
+    // under the same guards the bucket pass uses.
+    const now = Date.now()
+    let prevNet = 0
+    let prevCount = 0
+    if (period !== 0) {
+      const cutoff = now - period * 86400000
+      const start = cutoff - period * 86400000
+      for (const tx of txs) {
+        if (tx.executionResult === false) continue
+        const ts = tx.timestamp ?? now
+        if (ts < start || ts >= cutoff) continue
+        const v = Number(tx.value) / 100000
+        if (!Number.isFinite(v) || v <= 0) continue
+        prevNet += isOut(tx) ? -v : v
+        prevCount++
+      }
+    }
+    // An empty previous window means there is nothing to compare against —
+    // never a −100% that would read as a real collapse.
+    const prevDelta =
+      period !== 0 && prevCount > 0 && prevNet !== 0
+        ? ((data.stats.net - prevNet) / Math.abs(prevNet)) * 100
+        : null
+
+    const byNet = [...data.points].sort((a, b) => b.in - b.out - (a.in - a.out))
+    const best = byNet[0]
+    const worst = byNet[byNet.length - 1]
+
+    return {
+      senders: groupCounterparties(inTxs, (tx) => tx.sender),
+      recipients: groupCounterparties(outTxs, (tx) => tx.recipient),
+      inKinds: tallyKinds(inTxs, own),
+      outKinds: tallyKinds(outTxs, own),
+      fees: outTxs.reduce((sum, tx) => {
+        const f = Number(tx.fee) / 100000
+        return sum + (Number.isFinite(f) ? f : 0)
+      }, 0),
+      composition,
+      prevDelta,
+      best: best && best.in - best.out > 0 ? best : null,
+      worst: worst && worst.in - worst.out < 0 ? worst : null,
+    }
+  }, [statSheet, data, txs, ownAddress, ownNorm, period])
+
+  // "All" truncates at 90 days of buckets — never call any of this all-time.
+  const scopeLabel = period === 0 ? 'the loaded history (capped at 90 days)' : `the last ${period} days`
+  const scopeShort = period === 0 ? 'loaded history' : `last ${period}d`
+  const flowTotal = data.stats.totalIn + data.stats.totalOut
+  const inPct = flowTotal > 0 ? (data.stats.totalIn / flowTotal) * 100 : 0
+
+  // Compact form for the peak-day rows — the full `dayTitle` would crowd the
+  // amount out of a space-between row.
+  const shortDay = (ts: number) =>
+    new Date(ts).toLocaleDateString(lang, { day: 'numeric', month: 'short' })
+
   const selNet = selected ? selected.in - selected.out : 0
   const selFees = selected
     ? selected.txs.reduce((sum, tx) => {
@@ -255,6 +471,7 @@ export default function Analytics({
     : 0
 
   const TX_CAP = 50
+  const TOP_N = 5
 
   return (
     <section className="analytics">
@@ -274,15 +491,30 @@ export default function Analytics({
       </div>
 
       <div className="stat-grid">
-        <button type="button" className="stat stat-btn" title="Total NIM received over the period">
+        <button
+          type="button"
+          className="stat stat-btn"
+          onClick={() => openStat('in')}
+          title="Total NIM received over the period"
+        >
           <span className="label">Received</span>
           <span className="value green">+{fmt(data.stats.totalIn)}</span>
         </button>
-        <button type="button" className="stat stat-btn" title="Total NIM sent over the period">
+        <button
+          type="button"
+          className="stat stat-btn"
+          onClick={() => openStat('out')}
+          title="Total NIM sent over the period"
+        >
           <span className="label">Sent</span>
           <span className="value red">−{fmt(data.stats.totalOut)}</span>
         </button>
-        <button type="button" className="stat stat-btn" title="Received minus sent over the period">
+        <button
+          type="button"
+          className="stat stat-btn"
+          onClick={() => openStat('net')}
+          title="Received minus sent over the period"
+        >
           <span className="label">Net flow</span>
           <span className={`value ${data.stats.net >= 0 ? 'green' : 'red'}`}>
             {data.stats.net >= 0 ? '+' : '−'}
@@ -493,6 +725,227 @@ export default function Analytics({
             <p className="hint small">
               Showing the {TX_CAP} most recent of {selected.txs.length} transactions.
             </p>
+          )}
+        </DetailSheet>
+      )}
+
+      {statSheet && drill && (
+        <DetailSheet
+          title={SHEET_TITLE[statSheet]}
+          onClose={() => setStatSheet(null)}
+          footer={
+            <button
+              className="btn-ghost-lg"
+              onClick={() => {
+                setStatSheet(null)
+                onOpenHistory()
+              }}
+            >
+              View all in History
+            </button>
+          }
+        >
+          {statSheet === 'in' && (
+            <>
+              <div className="day-net green">+{fmt(data.stats.totalIn)} NIM</div>
+              {nimRate && currency && (
+                <p className="hint small">
+                  ≈ {formatFiat(data.stats.totalIn * nimRate, currency)} at current rate
+                </p>
+              )}
+              <p className="hint small">Over {scopeLabel}.</p>
+
+              <div className="sheet-metrics">
+                <div className="row">
+                  <span>Incoming txs</span>
+                  <span>{data.stats.inCount}</span>
+                </div>
+                <div className="row">
+                  <span>Avg received/tx</span>
+                  <span>{fmt(data.stats.avgIn)}</span>
+                </div>
+                <div className="row">
+                  <span>Largest received</span>
+                  <span className="green">+{fmt(data.stats.largestIn)}</span>
+                </div>
+              </div>
+
+              <span className="label">Top senders · {scopeShort}</span>
+              {drill.senders.length === 0 ? (
+                <p className="hint small">No incoming transactions in this period.</p>
+              ) : (
+                <>
+                  <CounterpartyRows
+                    rows={drill.senders.slice(0, TOP_N)}
+                    total={data.stats.totalIn}
+                    incoming
+                    fmt={fmt}
+                  />
+                  {drill.senders.length > TOP_N && (
+                    <p className="hint small">
+                      {drill.senders.length - TOP_N} more sender
+                      {drill.senders.length - TOP_N === 1 ? '' : 's'} in this period.
+                    </p>
+                  )}
+                </>
+              )}
+
+              <span className="label">By kind</span>
+              <KindPills counts={drill.inKinds} />
+
+              <p className="hint small">Staking rewards roll up in History, not here.</p>
+            </>
+          )}
+
+          {statSheet === 'out' && (
+            <>
+              <div className="day-net red">−{fmt(data.stats.totalOut)} NIM</div>
+              {nimRate && currency && (
+                <p className="hint small">
+                  ≈ {formatFiat(data.stats.totalOut * nimRate, currency)} at current rate
+                </p>
+              )}
+              <p className="hint small">Over {scopeLabel}.</p>
+
+              <div className="sheet-metrics">
+                <div className="row">
+                  <span>Outgoing txs</span>
+                  <span>{data.stats.outCount}</span>
+                </div>
+                <div className="row">
+                  <span>Avg sent/tx</span>
+                  <span>{fmt(data.stats.avgOut)}</span>
+                </div>
+                <div className="row">
+                  <span>Largest sent</span>
+                  <span className="red">−{fmt(data.stats.largestOut)}</span>
+                </div>
+                <div className="row">
+                  <span>Fees paid</span>
+                  <span>{fmt(drill.fees)} NIM</span>
+                </div>
+              </div>
+
+              <span className="label">Top recipients · {scopeShort}</span>
+              {drill.recipients.length === 0 ? (
+                <p className="hint small">No outgoing transactions in this period.</p>
+              ) : (
+                <>
+                  <CounterpartyRows
+                    rows={drill.recipients.slice(0, TOP_N)}
+                    total={data.stats.totalOut}
+                    incoming={false}
+                    fmt={fmt}
+                  />
+                  {drill.recipients.length > TOP_N && (
+                    <p className="hint small">
+                      {drill.recipients.length - TOP_N} more recipient
+                      {drill.recipients.length - TOP_N === 1 ? '' : 's'} in this period.
+                    </p>
+                  )}
+                </>
+              )}
+
+              <span className="label">By kind</span>
+              <KindPills counts={drill.outKinds} />
+            </>
+          )}
+
+          {statSheet === 'net' && (
+            <>
+              <div className={`day-net ${data.stats.net >= 0 ? 'green' : 'red'}`}>
+                {data.stats.net >= 0 ? '+' : '−'}
+                {fmt(Math.abs(data.stats.net))} NIM
+              </div>
+              {nimRate && currency && (
+                <p className="hint small">
+                  ≈ {formatFiat(Math.abs(data.stats.net) * nimRate, currency)} at current rate
+                </p>
+              )}
+              <p className="hint small">
+                {data.stats.net >= 0 ? 'Surplus' : 'Deficit'} over {scopeLabel}.
+              </p>
+
+              {flowTotal > 0 && (
+                <>
+                  <span className="label">In / out proportion</span>
+                  <div
+                    className="flow-ratio-bar"
+                    role="img"
+                    aria-label={`${inPct.toFixed(0)}% in, ${(100 - inPct).toFixed(0)}% out`}
+                  >
+                    <div className="seg-in" style={{ width: `${inPct}%` }} />
+                    <div className="seg-out" style={{ width: `${100 - inPct}%` }} />
+                  </div>
+                  <div className="flow-ratio-legend">
+                    <span className="green">{inPct.toFixed(1)}% in</span>
+                    <span className="red">{(100 - inPct).toFixed(1)}% out</span>
+                  </div>
+                </>
+              )}
+
+              <span className="label">Composition by kind</span>
+              {drill.composition.length === 0 ? (
+                <p className="hint small">No transactions in this period.</p>
+              ) : (
+                <div className="sheet-metrics">
+                  {drill.composition.map((k) => (
+                    <div key={k.kind} className="row">
+                      <span>
+                        <span className={`tx-kind ${k.kind}`}>{k.kind}</span> · {k.count}{' '}
+                        {k.count === 1 ? 'tx' : 'txs'}
+                      </span>
+                      <span className={k.net >= 0 ? 'green' : 'red'}>
+                        {k.net >= 0 ? '+' : '−'}
+                        {fmt(Math.abs(k.net))}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* No previous window exists for "All" — the panel is dropped, not zeroed. */}
+              {period !== 0 && (
+                <>
+                  <span className="label">Trend</span>
+                  <div className="sheet-metrics">
+                    <div className="row">
+                      <span>vs previous {period}d</span>
+                      {drill.prevDelta === null ? (
+                        <span>no comparable data</span>
+                      ) : (
+                        <span className={drill.prevDelta >= 0 ? 'green' : 'red'}>
+                          {drill.prevDelta >= 0 ? '+' : '−'}
+                          {Math.abs(drill.prevDelta).toFixed(1)}%
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {(drill.best || drill.worst) && (
+                <>
+                  <span className="label">Peak days</span>
+                  <div className="sheet-metrics">
+                    {drill.best && (
+                      <div className="row">
+                        <span>Best · {shortDay(drill.best.ts)}</span>
+                        <span className="green">+{fmt(drill.best.in - drill.best.out)}</span>
+                      </div>
+                    )}
+                    {drill.worst && (
+                      <div className="row">
+                        <span>Worst · {shortDay(drill.worst.ts)}</span>
+                        <span className="red">
+                          −{fmt(Math.abs(drill.worst.in - drill.worst.out))}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </>
           )}
         </DetailSheet>
       )}
