@@ -182,6 +182,8 @@ function CounterpartyRows({
 
 // Reconstruct historical balance by walking txs newest → oldest from the current balance.
 // Outgoing txs cost value + fee; balances are clamped at 0 (can't go negative).
+// One point per day, not per tx: a day's txs collapse into a single end-of-day
+// close, so a busy day reads as its net move instead of an intra-day sawtooth.
 function buildTrajectory(
   txs: NimiqTx[],
   currentBalanceNim: number,
@@ -191,16 +193,30 @@ function buildTrajectory(
   const sorted = [...txs].sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
   let bal = currentBalanceNim
   const pts: { ts: number; balance: number }[] = [{ ts: now, balance: bal }]
+  // Newest → oldest, so the first tx seen for a day is that day's last one and
+  // its timestamp is the day's close. The point is emitted once the day has been
+  // fully applied — when the day key changes, and after the loop for the oldest.
+  let dayKeyOpen = ''
+  let dayCloseTs = 0
   for (const tx of sorted) {
+    const ts = tx.timestamp ?? 0
+    if (ts) {
+      const k = dayKey(ts)
+      if (k !== dayKeyOpen) {
+        if (dayKeyOpen) pts.push({ ts: dayCloseTs, balance: bal })
+        dayKeyOpen = k
+        dayCloseTs = ts
+      }
+    }
     const isOut = tx.sender.replace(/\s+/g, '').toUpperCase() === ownAddressNorm
     const v = Number(tx.value) / 100000
     const fee = Number(tx.fee) / 100000
     if (Number.isFinite(v)) {
       bal = isOut ? bal + v + (Number.isFinite(fee) ? fee : 0) : bal - v // walk backwards
       bal = Math.max(0, bal)
-      if (tx.timestamp) pts.push({ ts: tx.timestamp, balance: bal })
     }
   }
+  if (dayKeyOpen) pts.push({ ts: dayCloseTs, balance: bal })
   return pts.reverse() // oldest → newest for the area chart
 }
 
@@ -373,18 +389,22 @@ export default function Analytics({
 
   const y = (v: number) => PAD_T + plotH - ((v - yMin) / yRange) * plotH
 
+  // Bounded y-floor: 25% headroom below the data min (never below 0). Scaling
+  // from the min instead makes any wobble, however small, fill the plot height.
+  const trajMax = trajectory.length ? Math.max(...trajectory.map((q) => q.balance)) : 0
+  const trajMin = trajectory.length ? Math.min(...trajectory.map((q) => q.balance)) : 0
+  const trajFloor = Math.max(0, trajMin - 0.25 * (trajMax - trajMin))
+
   const trajPoints = trajectory.length
     ? (() => {
         const minTs = Math.min(...trajectory.map((q) => q.ts))
         const maxTs = Math.max(...trajectory.map((q) => q.ts))
-        const minBal = Math.min(...trajectory.map((q) => q.balance))
-        const maxBal = Math.max(...trajectory.map((q) => q.balance))
-        const span = Math.max(0.000001, maxBal - minBal)
+        const span = Math.max(0.000001, trajMax - trajFloor)
         return trajectory
           .map((p) => {
             // Time-scaled x-axis: gaps in time render as gaps in the chart
             const x = PAD_L + plotW * (maxTs === minTs ? 1 : (p.ts - minTs) / (maxTs - minTs))
-            const yv = PAD_T + plotH - 4 - ((p.balance - minBal) / span) * (plotH - 8)
+            const yv = PAD_T + plotH - 4 - ((p.balance - trajFloor) / span) * (plotH - 8)
             return `${x},${yv}`
           })
           .join(' ')
@@ -720,16 +740,22 @@ export default function Analytics({
 
       {trajectory.length > 1 && (
         <div className="card chart-card">
-          <span className="label">Balance trajectory (NIM, from history)</span>
+          <span className="label">Balance trajectory (NIM, end of day)</span>
           <svg viewBox={`0 0 ${W} ${H}`} className="chart" role="img" aria-label="Balance trajectory chart">
+            <defs>
+              <linearGradient id="trajFill" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.18" />
+                <stop offset="100%" stopColor="var(--accent)" stopOpacity="0" />
+              </linearGradient>
+            </defs>
             <polyline points={trajPoints} fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinejoin="round" />
-            {/* area fill */}
-            <polygon points={`${PAD_L},${PAD_T + plotH} ${trajPoints} ${W - 4},${PAD_T + plotH}`} fill="var(--accent)" opacity="0.08" />
+            {/* area fill: fades out toward the floor line, which is the bounded y-floor */}
+            <polygon points={`${PAD_L},${PAD_T + plotH} ${trajPoints} ${W - 4},${PAD_T + plotH}`} fill="url(#trajFill)" />
             <text x={PAD_L - 6} y={PAD_T + 10} fontSize="8" fill="var(--muted)" textAnchor="end">
-              {fmt(Math.max(...trajectory.map((q) => q.balance)))}
+              {fmt(trajMax)}
             </text>
             <text x={PAD_L - 6} y={PAD_T + plotH - 4} fontSize="8" fill="var(--muted)" textAnchor="end">
-              {fmt(Math.min(...trajectory.map((q) => q.balance)))}
+              {fmt(trajFloor)}
             </text>
           </svg>
         </div>
