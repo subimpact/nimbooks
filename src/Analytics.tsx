@@ -182,8 +182,9 @@ function CounterpartyRows({
 
 // Reconstruct historical balance by walking txs newest → oldest from the current balance.
 // Outgoing txs cost value + fee; balances are clamped at 0 (can't go negative).
-// One point per day, not per tx: a day's txs collapse into a single end-of-day
-// close, so a busy day reads as its net move instead of an intra-day sawtooth.
+// One point per day, not per tx: each point is stamped at that day's close and
+// carries that day's end-of-day balance, so a busy day reads as its net move
+// instead of an intra-day sawtooth.
 function buildTrajectory(
   txs: NimiqTx[],
   currentBalanceNim: number,
@@ -193,19 +194,17 @@ function buildTrajectory(
   const sorted = [...txs].sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
   let bal = currentBalanceNim
   const pts: { ts: number; balance: number }[] = [{ ts: now, balance: bal }]
-  // Newest → oldest, so the first tx seen for a day is that day's last one and
-  // its timestamp is the day's close. The point is emitted once the day has been
-  // fully applied — when the day key changes, and after the loop for the oldest.
   let dayKeyOpen = ''
-  let dayCloseTs = 0
   for (const tx of sorted) {
     const ts = tx.timestamp ?? 0
     if (ts) {
       const k = dayKey(ts)
       if (k !== dayKeyOpen) {
-        if (dayKeyOpen) pts.push({ ts: dayCloseTs, balance: bal })
+        // A new day opens: walking backwards, bal is still that day's
+        // end-of-day balance (its txs are applied below), and the first tx
+        // seen for the day is its last — so its timestamp is the day's close.
+        pts.push({ ts, balance: bal })
         dayKeyOpen = k
-        dayCloseTs = ts
       }
     }
     const isOut = tx.sender.replace(/\s+/g, '').toUpperCase() === ownAddressNorm
@@ -216,7 +215,6 @@ function buildTrajectory(
       bal = Math.max(0, bal)
     }
   }
-  if (dayKeyOpen) pts.push({ ts: dayCloseTs, balance: bal })
   return pts.reverse() // oldest → newest for the area chart
 }
 
