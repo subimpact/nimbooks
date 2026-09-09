@@ -448,10 +448,20 @@ a:focus-visible {
   position: absolute;
   inset: -4px;
 }
-.info-btn:hover,
-.info-btn:focus-visible {
+/* Amber only while the explainer is open, or while a real mouse hovers.
+   A plain :hover rule would stick after a tap on touch devices (sticky
+   hover), leaving the icon glowing after the explainer is closed. */
+.info-btn[aria-expanded='true'] {
   color: var(--accent);
   border-color: var(--accent);
+}
+@media (hover: hover) {
+  .info-btn:hover:not([aria-expanded='true']) {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+}
+.info-btn:focus-visible {
   outline: none;
 }
 .info-text {
