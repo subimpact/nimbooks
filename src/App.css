@@ -498,6 +498,11 @@ a:focus-visible {
 .total-header .label {
   margin-bottom: 0;
 }
+/* The label is a flex item of .total-header: let it grow so the explainer
+   (flex-basis 100% inside the label) spans the card, not just the label text. */
+.total-header .label.label-with-info {
+  flex: 1 1 auto;
+}
 .currency-chip {
   display: inline-flex;
   align-items: center;
