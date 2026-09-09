@@ -92,6 +92,9 @@ import {
 type View = 'dashboard' | 'history' | 'receipts' | 'request' | 'export'
 
 const RATES_KEY = 'nimbooks:rates'
+// The Nimiq Pay host's device identifier, cached so the prompt is asked once.
+// chain.ts reads the same key to scope per-device preferences.
+const DEVICE_ID_KEY = 'nimbooks:deviceId'
 
 // chain.ts owns this key and writes { asset: { rates: {usd,myr,eur,…}, at } }.
 // Read that schema for the no-flash initial state.
@@ -217,7 +220,13 @@ export default function App() {
   const [currency, setCurrency] = useState<CurrencyCode>(loadCurrency)
   const [currencyOpen, setCurrencyOpen] = useState(false)
   const [changelogOpen, setChangelogOpen] = useState(false)
-  const [deviceId, setDeviceId] = useState<string | null>(null)
+  const [deviceId, setDeviceId] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem(DEVICE_ID_KEY)
+    } catch {
+      return null
+    }
+  })
   const [lang, setLang] = useState<string>('en')
   const [receipts, setReceipts] = useState<SignedReceipt[]>([])
   const [loading, setLoading] = useState(false)
@@ -1379,6 +1388,11 @@ export default function App() {
       const id = await getDeviceId()
       if (id) {
         setDeviceId(id)
+        try {
+          localStorage.setItem(DEVICE_ID_KEY, id)
+        } catch {
+          /* storage unavailable — session-only */
+        }
         setToast('Device preferences enabled — settings are saved to this device.')
       } else {
         setError('Device preferences unavailable — this works inside Nimiq Pay.')
