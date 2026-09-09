@@ -490,6 +490,7 @@ a:focus-visible {
    affordance for the picker (the value used to be an invisible button). */
 .total-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
@@ -498,12 +499,12 @@ a:focus-visible {
 .total-header .label {
   margin-bottom: 0;
 }
-/* The label is a flex item of .total-header: let it grow so the explainer
-   (flex-basis 100% inside the label) spans the card, not just the label text.
-   flex-basis 0 (not auto): auto resolves circularly against the explainer's
-   own 100% basis and the label collapses to its text width. */
+/* The label is a flex item of .total-header competing with the currency
+   chip. Let it shrink so the chip keeps its row; the explainer (flex-basis
+   100% inside the label) then wraps to its own full-width row below. */
 .total-header .label.label-with-info {
-  flex: 1 1 0;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 .currency-chip {
   display: inline-flex;
