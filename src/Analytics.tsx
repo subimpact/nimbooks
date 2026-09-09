@@ -376,6 +376,12 @@ export default function Analytics({
   const plotH = H - PAD_T - PAD_B
   const n = data.points.length
   const maxFlow = Math.max(1, ...data.points.map((p) => Math.abs(p.in - p.out)), 0.000001)
+  // The 1-NIM floor above keeps a near-zero period from being magnified into a
+  // full-height plot — but when the floor is what's setting the scale, every bar
+  // is a sliver against an axis the user never asked for. That is a real reading
+  // of the data (a relay address nets out to ~0 daily), so say it in words
+  // rather than leaving the chart to look broken.
+  const flowFlat = maxFlow <= 1
   const barW = Math.max(2, (plotW / n) * 0.62)
   const slotW = plotW / n
 
@@ -392,13 +398,17 @@ export default function Analytics({
   const trajMax = trajectory.length ? Math.max(...trajectory.map((q) => q.balance)) : 0
   const trajMin = trajectory.length ? Math.min(...trajectory.map((q) => q.balance)) : 0
   const trajFloor = Math.max(0, trajMin - 0.25 * (trajMax - trajMin))
-  // A single-value trajectory (every tx on one day) has no span to scale
-  // against, and scaling it anyway pins every point to the floor — which reads
-  // as "the balance went to zero" while both axis labels say it did not. Draw a
-  // flat balance along the top instead: steady, not empty. The area fill is
-  // suppressed in this case (see below) — filling from the top line down to the
-  // floor paints the whole plot, which reads as a rendering fault.
+  // A single-value trajectory (every tx on one day, or a relay address that
+  // holds ~0) has no span to scale against, and scaling it anyway pins every
+  // point to the floor — which reads as "the balance went to zero" while both
+  // axis labels say it did not. Draw the flat balance through the vertical
+  // CENTRE instead: a line hugging either edge of the plot reads as a clipped
+  // chart, one through the middle reads as deliberate. The flat case also drops
+  // to a single axis label (two identical numbers look like a bug) and gets a
+  // caption saying the balance held steady. The area fill is suppressed too
+  // (see below) — filling from the line down to the floor paints half the plot.
   const trajFlat = trajectory.length > 0 && trajMax - trajFloor < 1e-9
+  const trajFlatY = PAD_T + plotH / 2
 
   const trajPoints = trajectory.length
     ? (() => {
@@ -409,7 +419,7 @@ export default function Analytics({
           .map((p) => {
             // Time-scaled x-axis: gaps in time render as gaps in the chart
             const x = PAD_L + plotW * (maxTs === minTs ? 1 : (p.ts - minTs) / (maxTs - minTs))
-            const yv = trajFlat ? PAD_T + 4 : PAD_T + plotH - 4 - ((p.balance - trajFloor) / span) * (plotH - 8)
+            const yv = trajFlat ? trajFlatY : PAD_T + plotH - 4 - ((p.balance - trajFloor) / span) * (plotH - 8)
             return `${x},${yv}`
           })
           .join(' ')
@@ -741,6 +751,7 @@ export default function Analytics({
             0
           </text>
         </svg>
+        {flowFlat && <p className="hint small">No significant daily flow in this period</p>}
       </div>
 
       {trajectory.length > 1 && (
@@ -755,18 +766,30 @@ export default function Analytics({
             </defs>
             <polyline points={trajPoints} fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinejoin="round" />
             {/* area fill: fades out toward the floor line, which is the bounded y-floor.
-                Skipped when flat — the line sits at the top, so the fill would be a
-                full-height block rather than a shape that tracks the balance. */}
+                Skipped when flat — the line sits at mid-plot, so the fill would be a
+                half-height block rather than a shape that tracks the balance. */}
             {!trajFlat && (
               <polygon points={`${PAD_L},${PAD_T + plotH} ${trajPoints} ${W - 4},${PAD_T + plotH}`} fill="url(#trajFill)" />
             )}
-            <text x={PAD_L - 6} y={PAD_T + 10} fontSize="8" fill="var(--muted)" textAnchor="end">
-              {fmt(trajMax)}
-            </text>
-            <text x={PAD_L - 6} y={PAD_T + plotH - 4} fontSize="8" fill="var(--muted)" textAnchor="end">
-              {fmt(trajFloor)}
-            </text>
+            {/* Flat: one label, on the line. The max/floor pair collapses to the
+                same number when the balance never moves, and two identical
+                numbers stacked up the axis read as a broken axis. */}
+            {trajFlat ? (
+              <text x={PAD_L - 6} y={trajFlatY + 3} fontSize="8" fill="var(--muted)" textAnchor="end">
+                {fmt(trajMax)}
+              </text>
+            ) : (
+              <>
+                <text x={PAD_L - 6} y={PAD_T + 10} fontSize="8" fill="var(--muted)" textAnchor="end">
+                  {fmt(trajMax)}
+                </text>
+                <text x={PAD_L - 6} y={PAD_T + plotH - 4} fontSize="8" fill="var(--muted)" textAnchor="end">
+                  {fmt(trajFloor)}
+                </text>
+              </>
+            )}
           </svg>
+          {trajFlat && <p className="hint small">Balance steady at {fmt(trajMax)} NIM over this period</p>}
         </div>
       )}
 
