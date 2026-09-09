@@ -3,7 +3,7 @@
 // Badge text. Spelled out rather than built from a version constant so the exact
 // label ships as one string in the bundle (JSX would emit "v" as a separate node).
 // package.json carries the machine-readable version.
-export const APP_VERSION_LABEL = 'v1.2.0'
+export const APP_VERSION_LABEL = 'v1.3.0'
 
 export interface ChangelogEntry {
   version: string
@@ -12,6 +12,16 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '1.3.0',
+    date: '2026-09-09',
+    items: [
+      'Shared payment links now open straight inside Nimiq Pay, on the right page — invoices keep their place when handed across devices',
+      'Phone browser? Continue with Nimiq Hub via a redirected sign-in, and verify any receipt by pasting its link, payload or transaction hash',
+      'Validator switch dialog explains the cool-down protocol instead of “coming soon”',
+      'Rate sanity guard: NIM prices outside the real range are never shown or cached — your books stay correct even if a price feed misbehaves',
+    ],
+  },
   {
     version: '1.2.0',
     date: '2026-09-09',
