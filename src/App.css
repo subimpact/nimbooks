@@ -255,7 +255,7 @@ a:focus-visible {
   background: var(--card-2);
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-sm);
   padding: 13px 20px;
   font-size: 14px;
   font-weight: 600;
@@ -564,7 +564,7 @@ a:focus-visible {
 .tx {
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius);
   padding: 12px 14px;
   margin-bottom: 8px;
   transition: border-color 0.15s ease;
@@ -615,7 +615,7 @@ a:focus-visible {
 .receipt {
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius);
   padding: 12px 14px;
   margin-bottom: 8px;
 }
@@ -630,7 +630,7 @@ a:focus-visible {
   background: linear-gradient(180deg, var(--accent), color-mix(in srgb, var(--accent) 88%, #000));
   color: var(--on-accent);
   border: none;
-  border-radius: 12px;
+  border-radius: var(--radius-sm);
   padding: 14px 28px;
   font-size: 15px;
   font-weight: 700;
@@ -700,7 +700,7 @@ a.btn-ghost.btn-link {
   background: transparent;
   color: var(--muted);
   border: 1px solid var(--card-2);
-  border-radius: 12px;
+  border-radius: var(--radius-sm);
   padding: 12px 20px;
   font-size: 14px;
   font-weight: 600;
@@ -1191,7 +1191,7 @@ a.btn-ghost.btn-link {
 .invoice-item {
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius);
   padding: 12px 14px;
   margin-bottom: 8px;
 }

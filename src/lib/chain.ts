@@ -868,7 +868,7 @@ export async function getValidators(): Promise<ValidatorInfo[]> {
     return sortValidators(validators)
   } catch (e) {
     if (stale) {
-      console.warn('Validators refresh failed — serving cached list:', e)
+      console.warn('Validators refresh failed, serving cached list:', e)
       return sortValidators(stale)
     }
     throw e

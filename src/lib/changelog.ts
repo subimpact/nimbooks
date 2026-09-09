@@ -16,10 +16,10 @@ export const CHANGELOG: ChangelogEntry[] = [
     version: '1.3.0',
     date: '2026-09-09',
     items: [
-      'Shared payment links now open straight inside Nimiq Pay, on the right page — invoices keep their place when handed across devices',
+      'Shared payment links now open straight inside Nimiq Pay, on the right page: invoices keep their place when handed across devices',
       'Phone browser? Continue with Nimiq Hub via a redirected sign-in, and verify any receipt by pasting its link, payload or transaction hash',
       'Validator switch dialog explains the cool-down protocol instead of “coming soon”',
-      'Rate sanity guard: NIM prices outside the real range are never shown or cached — your books stay correct even if a price feed misbehaves',
+      'Rate sanity guard: NIM prices outside the real range are never shown or cached, so your books stay correct even if a price feed misbehaves',
     ],
   },
   {
@@ -27,7 +27,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     date: '2026-09-09',
     items: [
       'Protocol-hardened staking: 100 NIM minimum enforced, full retired balance withdrawn, failed transactions never pollute the charts',
-      'Backup & restore your books — export everything to your clipboard and re-import it any time, on any device',
+      'Backup & restore your books: export everything to your clipboard and re-import it any time, on any device',
       '“Your books start here” first-run card for fresh wallets: receive NIM, create a request, or stake 100 NIM',
       'Statement fixes: daily-priced fees reconcile exactly with the net row; CSV carries a feeUSD column',
       'Inside Nimiq Pay: consensus-aware connects (no more $0 screens while syncing) and provider-native block height',
@@ -41,7 +41,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     date: '2026-09-09',
     items: [
       'Analytics drilldown: tap any bar on the daily net flow chart to see that day\'s transactions',
-      'Received, Sent and Net flow cards expand into detail sheets — top counterparties, fees paid, flow composition and period comparison',
+      'Received, Sent and Net flow cards expand into detail sheets: top counterparties, fees paid, flow composition and period comparison',
       'Side-by-side Total value and NIM balance tiles on the Overview, with the balance breakdown in its own card',
       'Txs stat jumps straight to History',
       'Device preferences: your currency choice is remembered per device (in Nimiq Pay) and keeps working across sessions',
@@ -54,7 +54,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     items: [
       'Protocol-correct unstaking: deactivate → retire → withdraw, each step gated on chain validity (no more dead clicks)',
       'Staking actions (deactivate/retire/withdraw) now appear in History with explorer links',
-      'Stake and unstake submits are verified on-chain — expired transactions are surfaced instead of hanging as pending',
+      'Stake and unstake submits are verified on-chain: expired transactions are surfaced instead of hanging as pending',
       'Unstake banner reads cooling/ready state from the chain, scoped per address',
       'Feature list on the connect screen; lazy-loaded viem (smaller first load) and an accessibility pass',
     ],
@@ -66,7 +66,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       'Staking: stake, unstake and rewards, with a validator picker showing live net yields',
       'Payment requests (invoices): create, share by link or QR, pay on-chain, auto-reconcile',
       'Tax-year statement with daily closes, per-year selector and CSV download',
-      'Currency switcher — 37 currencies with flag tiles',
+      'Currency switcher: 37 currencies with flag tiles',
       'CSV export via download link + QR, so exports work inside the Nimiq Pay WebView',
       'Full holdings coverage: staking, vesting and locked HTLC swap funds in the balance card',
       'Light/dark theme toggle with system-preference default',
