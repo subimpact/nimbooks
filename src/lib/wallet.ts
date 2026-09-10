@@ -19,6 +19,18 @@ export interface WalletAccount {
   evmAddress?: string
   provider: 'pay' | 'hub' | 'demo'
   /**
+   * The user's *remote account* — the HTLC their funds are actually stored in.
+   * Nimiq Pay hands back two addresses from `listAccounts()`: the basic account
+   * above, and this contract, which holds the money and releases it by
+   * co-signing (early-redeem) whenever the user pays. Its on-chain balance is
+   * therefore the authoritative "held in HTLC" figure (confirmed by Nimiq core
+   * dev sisou, nimiq/developer-center#212).
+   *
+   * Undefined for Hub and demo, which expose no remote account — those fall
+   * back to discovering contracts by scanning the tx history (chain.ts).
+   */
+  remoteAddress?: string
+  /**
    * Whether the wallet host has established consensus. Only Nimiq Pay reports
    * it; `true` for Hub (a web wallet talks to a synced node) and `null` for
    * demo mode, where there is no provider to ask.
@@ -62,9 +74,22 @@ export async function connectWallet(): Promise<WalletAccount> {
   // Nimiq side
   try {
     nimiqProvider = await init({ timeout: 10000 })
+    // Typed `Promise<string[] | ErrorResponse>` — anything that isn't an array
+    // means the host didn't answer, and the account stays addressless.
     const accounts = await nimiqProvider.listAccounts()
     if (Array.isArray(accounts) && accounts.length > 0) {
       account.nimiqAddress = accounts[0]
+      // Nimiq Pay returns a second address: the *remote account*, an HTLC the
+      // user's funds are stored in (not in transit — they sit there until a
+      // payment releases them by co-signing). Its balance is the real "held in
+      // HTLC" figure, so capture it rather than re-deriving one by scanning the
+      // chain for contracts this address funded. Order is not part of the
+      // contract beyond "the first is the base account", so nothing here
+      // assumes which flavour the second one is.
+      if (accounts.length > 1) account.remoteAddress = accounts[1]
+      if (accounts.length > 2) {
+        console.warn(`listAccounts returned ${accounts.length} addresses; using the first two.`)
+      }
     }
     // A Pay host that is still syncing answers `listAccounts` but has no chain
     // view yet, which reads to the user as an empty wallet. Ask, and let the
