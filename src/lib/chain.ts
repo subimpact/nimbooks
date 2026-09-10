@@ -413,7 +413,9 @@ export async function waitForTxMined(
   const timeoutMs = opts.timeoutMs ?? 2 * 60 * 60 * 1000 // tx validity window
   const deadline = Date.now() + timeoutMs
   let rpcFailed = false
+  let attempt = 0
   for (;;) {
+    attempt++
     try {
       // Resolves null only for a definitive "Transaction not found".
       if (await getNimiqTransactionByHash(hash)) return 'confirmed'
@@ -424,7 +426,11 @@ export async function waitForTxMined(
       console.warn('waitForTxMined lookup failed:', e)
     }
     if (Date.now() + intervalMs >= deadline) break
-    await new Promise((r) => setTimeout(r, intervalMs))
+    // Ramp: Nimiq mines in ~1s, so the first few checks come fast and the
+    // celebration fires almost immediately; back off to the caller's cadence
+    // once the fast window is past.
+    const wait = attempt <= 5 ? Math.min(2000, intervalMs) : intervalMs
+    await new Promise((r) => setTimeout(r, wait))
   }
   return rpcFailed ? 'unknown' : 'expired'
 }
