@@ -80,6 +80,7 @@ import {
   upsertInvoice,
   type StoredInvoice,
 } from './lib/invoice'
+import { seedDemoData } from './lib/demoData'
 import { getRestakeRewardTxs, restakeWindow } from './lib/stakingEvents'
 import { isInNimiqPay, isMobileDevice, NIMIQ_PAY_APP_URL, siteLink } from './lib/device'
 import { shortenUrl } from './lib/shorten'
@@ -622,6 +623,10 @@ export default function App() {
       //  client payments, staking rewards, cooled-down unstaking. Funded + curated
       //  for the Sep 16 competition demo; read-only in app, keys held by owner.)
       const acc = connectDemoAccount('NQ43 Y1RH P1K7 JH78 LRTS 95RY GAUU UBDK FFGX')
+      // Bake the demo story into localStorage BEFORE the account lands, so the
+      // receipts/invoices load effects pick it up: a real signed receipt and a
+      // chain-paid request appear in the tabs on any device, no console seed.
+      seedDemoData(acc.nimiqAddress ?? 'NQ43 Y1RH P1K7 JH78 LRTS 95RY GAUU UBDK FFGX')
       setPayConsensus(acc.consensus ?? null)
       setAccount(acc)
       await refresh(acc)
