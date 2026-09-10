@@ -367,21 +367,29 @@ export default function InvoicePage() {
           </div>
         </div>
 
-        {payState !== 'sent' && (
+        {payState !== 'sent' && !chainPaid && (
           <div className="invoice-qr">
             <QrCode value={invoiceUrl(invoice)} size={168} />
             <p className="hint small">Scan to open this request on another device.</p>
           </div>
         )}
 
-        {isExpired && payState !== 'sent' && (
+        {isExpired && payState !== 'sent' && !chainPaid && (
           <p className="hint small">
             This request has expired. You can still pay it. Check with the recipient first.
           </p>
         )}
 
         {/* --- Pay flow --- */}
-        {payState === 'sent' ? (
+        {chainPaid ? (
+          <div className="invoice-sent">
+            <p className="ok">✓ This request has already been paid on-chain.</p>
+            <p className="hint small">
+              The payment is settled. No further action needed — the payee's books marked it paid
+              automatically.
+            </p>
+          </div>
+        ) : payState === 'sent' ? (
           <div className="invoice-sent">
             <p className="ok">✓ Payment sent</p>
             {txHash ? (
