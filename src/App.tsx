@@ -89,6 +89,7 @@ import { APP_VERSION_LABEL, CHANGELOG } from './lib/changelog'
 import QrCode from './QrCode'
 import Analytics, { type AnalyticsPeriod } from './Analytics'
 import InfoIcon from './InfoIcon'
+import Confetti from './Confetti'
 import {
   availableStatementYears,
   buildStatementCsv,
@@ -370,6 +371,10 @@ export default function App() {
   const [stakeHash, setStakeHash] = useState<string | null>(null)
   const [stakeVerify, setStakeVerify] = useState<TxVerify | null>(null)
   const stakeVerifyRef = useRef<string | null>(null)
+  // Confetti burst on a confirmed stake: fires once per hash, then the panel
+  // closes itself after a short celebration beat.
+  const [stakeCelebrate, setStakeCelebrate] = useState<string | null>(null)
+  const stakeCelebrateTimer = useRef<number | null>(null)
 
   const toggleTheme = useCallback(() => {
     setTheme((t) => {
@@ -972,6 +977,16 @@ export default function App() {
       })
       if (stakeVerifyRef.current !== hash) return // superseded by a newer submit
       setStakeVerify(result)
+      if (result === 'confirmed') {
+        // Celebration beat: confetti burst, then the panel closes itself.
+        setStakeCelebrate(hash)
+        if (stakeCelebrateTimer.current) window.clearTimeout(stakeCelebrateTimer.current)
+        stakeCelebrateTimer.current = window.setTimeout(() => {
+          setStakeOpen(false)
+          setStakeCelebrate(null)
+        }, 3000)
+        return
+      }
       if (result !== 'expired') return
       // 'unknown' is not a failure — the RPC never answered, so say only that.
       setStakeError(
@@ -1734,7 +1749,7 @@ export default function App() {
           </div>
           <div className="logo">📒</div>
           <h1>NimBooks</h1>
-          <p className="tagline">The books for your Nimiq wallet.</p>
+          <p className="tagline">The books for your Nimiq wallet — and the world's first in-Pay staking.</p>
         </header>
         <main className="connect-panel">
           {inNimiqPay ? (
@@ -2983,6 +2998,7 @@ export default function App() {
             aria-label="Stake NIM"
             onClick={(e) => e.stopPropagation()}
           >
+            {stakeCelebrate && <Confetti />}
             <div className="modal-head">
               <h2>
                 Stake NIM
