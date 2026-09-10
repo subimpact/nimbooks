@@ -923,6 +923,14 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [stakeOpen, currencyOpen, changelogOpen, confirmUnstakeOpen, downloadLink, backupMode])
 
+  // Clean up the celebration timer on unmount so a pending auto-close can't
+  // fire into a dead tree.
+  useEffect(() => {
+    return () => {
+      if (stakeCelebrateTimer.current) window.clearTimeout(stakeCelebrateTimer.current)
+    }
+  }, [])
+
   // A staker's delegation is fixed when the record is created, so an existing
   // stake locks the picker to that validator — adding stake can't move it.
   const hasStaker = !!stakingHolding
@@ -2996,7 +3004,16 @@ export default function App() {
             role="dialog"
             aria-modal="true"
             aria-label="Stake NIM"
-            onClick={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation()
+              // Tap during the celebration keeps the panel open: cancel the
+              // auto-close and end the confetti burst.
+              if (stakeCelebrate) {
+                if (stakeCelebrateTimer.current) window.clearTimeout(stakeCelebrateTimer.current)
+                stakeCelebrateTimer.current = null
+                setStakeCelebrate(null)
+              }
+            }}
           >
             {stakeCelebrate && <Confetti />}
             <div className="modal-head">
@@ -3181,6 +3198,7 @@ export default function App() {
                   <p className="hint small ok">
                     Stake {txVerifyLabel(stakeVerify)}{' '}
                     <span className="mono">{stakeHash.slice(0, 20)}…</span>
+                    {stakeCelebrate && ' · tap to keep open'}
                   </p>
                 )}
 
