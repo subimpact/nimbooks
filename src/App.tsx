@@ -24,6 +24,7 @@ import {
   getNimiqBalance,
   getHtlcHoldings,
   getHtlcInTransit,
+  getRemoteAccountBalance,
   getStakingHolding,
   getVestingHoldings,
   getNimiqTransactionHistory,
@@ -253,11 +254,16 @@ export default function App() {
   // validator) from the v2 events API — the tx index doesn't carry them.
   const [rewardTxs, setRewardTxs] = useState<NimiqTx[]>([])
   const [htlcHoldings, setHtlcHoldings] = useState<HtlcHolding[]>([])
-  // Luna sitting in HTLC contracts this address funded (Luna, 0 when none).
-  // Nimiq Pay routes everything through a relay address whose basic balance is
-  // 0, so without this the user's real money is invisible — see
-  // getHtlcInTransit.
+  // Luna sitting in HTLC contracts this address funded (Luna, 0 when none),
+  // discovered by scanning the tx history. Nimiq Pay routes everything through
+  // a relay address whose basic balance is 0, so without this the user's real
+  // money is invisible — see getHtlcInTransit.
   const [htlcInTransit, setHtlcInTransit] = useState(0)
+  // Balance of the wallet's *remote account* — the HTLC Nimiq Pay stores the
+  // user's funds in, named outright by `listAccounts()`. `null` means "no such
+  // account, or not read yet" (Hub, demo, or a failed lookup), which is what
+  // sends the totals below back to the history scan above.
+  const [remoteAccountLuna, setRemoteAccountLuna] = useState<number | null>(null)
   // `address:txCount:newestHash` of the last successful HTLC + vesting sweep.
   // Both are pure functions of the tx list, so an unchanged key means the
   // holdings below are still current and the sweeps can be skipped entirely.
@@ -656,6 +662,26 @@ export default function App() {
             console.warn('Balance lookup failed:', e)
             reportSoftFailure(e, 'Balance unavailable right now, retrying.')
           })
+        // The wallet's remote account, where Nimiq Pay actually stores the
+        // money (see wallet.WalletAccount.remoteAddress). One RPC call, fired
+        // independently like the balance above and deliberately outside the
+        // tx-keyed sweep below: a counterparty redeeming out of the contract
+        // writes no tx to this user's address, so a figure gated on the tx list
+        // would sit stale. Nothing here waits on it — the fallback scan keeps
+        // the totals honest until it lands.
+        if (acc.remoteAddress) {
+          const remote = acc.remoteAddress
+          void getRemoteAccountBalance(remote)
+            .then((bal) => setRemoteAccountLuna(Number(bal) || 0))
+            .catch((e) => {
+              // Back to the history scan rather than a wrong number: `null`
+              // is "unknown", not "empty".
+              console.warn('Remote account balance lookup failed:', e)
+              setRemoteAccountLuna(null)
+            })
+        } else {
+          setRemoteAccountLuna(null)
+        }
         // Full history via cursor pagination (up to 1000 txs) — the 50-tx
         // cap silently truncated "accountant-ready" statements.
         const txs = await getNimiqTransactionHistory(addr, 1000)
@@ -837,13 +863,23 @@ export default function App() {
     () => vestingHoldings.reduce((sum, v) => sum + (Number(v.balance) || 0), 0),
     [vestingHoldings]
   )
-  // The HTLC figure every total is built on. `lockedLuna` counts only swaps
-  // still pending; `htlcInTransit` counts every contract this address funded
-  // that still holds NIM (the relay case — see getHtlcInTransit). The two sets
-  // overlap, so the effective figure is the larger of them and never the sum:
-  // adding them would double-count a wallet whose relay-routed funds are also
-  // an open swap, which is the common case.
-  const htlcLuna = Math.max(lockedLuna, htlcInTransit)
+  // The HTLC figure every total is built on. Three views of the same money,
+  // all overlapping, so the effective figure is the largest and never a sum —
+  // adding them would double-count a wallet whose stored funds are also an
+  // open swap, which is the common case.
+  //
+  // `remoteAccountLuna` is authoritative where the provider offers it: Nimiq
+  // Pay names the HTLC holding the funds, so no discovery is involved and no
+  // contract can be missed. `lockedLuna` still counts, because a pending swap
+  // the user is the *recipient* of isn't in their own remote account at all.
+  // With no remote account (Hub, demo, or a lookup that failed) this falls
+  // back to the scan pair: `lockedLuna` for swaps still pending, and
+  // `htlcInTransit` for every contract this address funded that still holds
+  // NIM (the relay case — see getHtlcInTransit).
+  const htlcLuna =
+    remoteAccountLuna !== null
+      ? Math.max(remoteAccountLuna, lockedLuna)
+      : Math.max(lockedLuna, htlcInTransit)
   // Money the user can spend or is about to receive: the basic account plus
   // anything in flight through an HTLC. This — not the basic balance — is what
   // Nimiq Pay shows as the wallet's balance, and what anchors the trajectory.
@@ -1630,6 +1666,8 @@ export default function App() {
     setNimTxs([])
     setRewardTxs([])
     setHtlcHoldings([])
+    setHtlcInTransit(0)
+    setRemoteAccountLuna(null)
     setStakingHolding(null)
     setVestingHoldings([])
     setEvmBalances([])
