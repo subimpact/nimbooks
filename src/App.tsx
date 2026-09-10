@@ -2509,7 +2509,22 @@ export default function App() {
                     )}
                     {tx.executionResult === false && <span className="tx-failed"> · failed</span>}
                   </div>
-                  {memo && <div className="tx-memo">memo: {memo}</div>}
+                  {memo && (
+                    <div className="tx-memo">
+                      memo:{' '}
+                      {(() => {
+                        // The on-chain memo is the invoice reference
+                        // (nimbooks:invoice:<id>); the human description
+                        // travels in the share link. When this tx settled a
+                        // request we know locally, show the friendly name.
+                        const invId = parseInvoiceMemo(memo)
+                        const inv = invId
+                          ? invoices.find((i) => i.id === invId)
+                          : undefined
+                        return inv?.memo ? `${inv.memo} (${memo})` : memo
+                      })()}
+                    </div>
+                  )}
                   {!tx.synthetic && (
                     <button
                       className="btn-small"
@@ -2564,6 +2579,9 @@ export default function App() {
                 <div className="tx-sub">
                   {r.txHash.slice(0, 12)}… · {new Date(r.timestamp * 1000).toLocaleDateString(lang)}
                 </div>
+                {r.memo && (
+                  <div className="tx-memo">{decodeMemo(r.memo)}</div>
+                )}
                 <button className="btn-small" onClick={() => shareReceipt(r)}>
                   Share verification link
                 </button>
