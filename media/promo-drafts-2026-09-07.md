@@ -1,6 +1,6 @@
 # NimBooks — Skool + X promo drafts (refreshed 2026-09-10, world-first hook)
 
-Facts locked: live https://nimbooks.subimpact.net (canonical; legacy nimbooks.pages.dev redirects) · repo https://github.com/subimpact/nimbooks (MIT) · demo video https://youtube.com/shorts/y6ZInV49tMc (v2, 20s, current 5-tab UI) · demo mode (sample wallet, no wallet needed) · **v1.6.0** · **WORLD FIRST: stake NIM from inside Nimiq Pay even while funds are in transit through HTLC swap contracts — verified on-chain 2026-09-10 (staked 100 NIM while the wallet's spendable balance showed 0; Pay's wallet redeemed the swap contract to fund the stake)** · staking in Nimiq Pay (stake/unstake/rewards) · payment requests (invoices) that settle on-chain · signed receipts w/ public verification · tax-ready CSV statements · 37-currency fiat · HTLC-aware balance · short share links (nimbook.s.gy) · confetti on confirmed stake · Cycle II closes Sep 18 23:59 UTC · Sip & Ship Sep 16 15:00 UTC.
+Facts locked: live https://nimbooks.subimpact.net (canonical; legacy nimbooks.pages.dev redirects) · repo https://github.com/subimpact/nimbooks (MIT) · demo video https://youtube.com/shorts/7UG5FxW46a0 (v3, 22s, world-first stake-confirmed climax) · demo mode (sample wallet, no wallet needed) · **v1.6.0** · **WORLD FIRST: stake NIM from inside Nimiq Pay even while funds are in transit through HTLC swap contracts — verified on-chain 2026-09-10 (staked 100 NIM while the wallet's spendable balance showed 0; Pay's wallet redeemed the swap contract to fund the stake)** · staking in Nimiq Pay (stake/unstake/rewards) · payment requests (invoices) that settle on-chain · signed receipts w/ public verification · tax-ready CSV statements · 37-currency fiat · HTLC-aware balance · short share links (nimbook.s.gy) · confetti on confirmed stake · Cycle II closes Sep 18 23:59 UTC · Sip & Ship Sep 16 15:00 UTC.
 
 ---
 
@@ -25,7 +25,7 @@ I staked 100 NIM from inside Nimiq Pay while my wallet's spendable balance showe
 **Try it in 30 seconds — no wallet needed:** demo mode with a sample wallet (1,000 NIM in, 700 staked, rewards accruing). https://nimbooks.subimpact.net
 
 Repo (MIT, open): https://github.com/subimpact/nimbooks
-Demo video: https://youtube.com/shorts/y6ZInV49tMc
+Demo video: https://youtube.com/shorts/7UG5FxW46a0
 
 Feedback very welcome — especially on the in-transit staking. Happy to walk through it at Sip & Ship.
 
