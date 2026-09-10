@@ -937,9 +937,12 @@ export default function App() {
     Number.isFinite(stakeAmountNim) &&
     stakeAmountNim > 0 &&
     (hasStaker || stakeAmountNim >= MIN_STAKE_NIM)
-  // Slider ceiling: the liquid NIM balance (basic account) after parked HTLC
-  // funds — staking spends only what the wallet is holding as spendable NIM.
-  const stakeMaxLuna = Math.max(0, (Number(nimBalance) || 0) - lockedLuna)
+  // Slider ceiling: the basic account balance is exactly what staking can
+  // spend. HTLC contract funds are separate accounts — they were never part
+  // of `nimBalance`, so subtracting them here would zero out genuinely
+  // spendable NIM whenever a swap is in flight (verified: relay + main-wallet
+  // cases). In-transit funds become stakable only after the swap settles.
+  const stakeMaxLuna = Math.max(0, Number(nimBalance) || 0)
   const stakeMaxNim = stakeMaxLuna / 100000
 
   const openStake = () => {
@@ -3140,7 +3143,9 @@ export default function App() {
                     <p className="hint small">
                       {hasStaker
                         ? `Your ${formatLuna(String(retireableLuna), lang)} NIM is already staked. Staked NIM can't be re-staked. To stake more, send NIM to this address first:`
-                        : 'No spendable NIM in this wallet to stake. Send NIM to this address first:'}
+                        : lockedLuna > 0 && stakeMaxLuna === 0
+                          ? 'Your NIM is in transit through a swap contract right now. Once it settles back to this wallet, it becomes available to stake. Send NIM to this address to stake sooner:'
+                          : 'No spendable NIM in this wallet to stake. Send NIM to this address first:'}
                     </p>
                     <p className="mono stake-empty-addr">{account?.nimiqAddress}</p>
                     <button
