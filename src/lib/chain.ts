@@ -61,12 +61,31 @@ export async function getNimiqBalance(address: string): Promise<string> {
   return String(data?.balance ?? '0')
 }
 
-// --- HTLC holdings (funds parked in a pending swap) ---
+/**
+ * Balance of the user's *remote account* — the HTLC Nimiq Pay stores their
+ * funds in, handed over as the second address from `listAccounts()` (see
+ * wallet.ts). One RPC call, no contract discovery: the wallet already told us
+ * which contract holds the money, so there is nothing to scan for.
+ *
+ * This is the authoritative "held in HTLC" figure wherever the provider offers
+ * a remote account. The history-scanning functions below stay as the fallback
+ * for Hub and demo, which don't.
+ */
+export async function getRemoteAccountBalance(remoteAddress: string): Promise<string> {
+  return getNimiqBalance(remoteAddress)
+}
+
+// --- HTLC holdings (funds stored in a contract, discovered by scanning) ---
 
 // Nimiq Pay routes transfers through HTLC contracts: the wallet funds a
-// contract, then the counterparty claims it (or it refunds). While a swap is
-// in flight the money lives in the contract, so the basic account reads 0 —
-// `getNimiqBalance` alone under-reports what the user actually holds.
+// contract, then the counterparty claims it (or it refunds). While the money
+// sits in the contract the basic account reads 0 — `getNimiqBalance` on the
+// basic address alone under-reports what the user actually holds.
+//
+// Everything below discovers those contracts from the user's own transaction
+// history. Prefer `getRemoteAccountBalance` when the provider names the remote
+// account outright; this scan is bounded (MAX_CONTRACT_LOOKUPS) and can only
+// see contracts that appear in the fetched history.
 export interface HtlcHolding {
   address: string
   balance: string // Luna
@@ -140,20 +159,24 @@ export async function getHtlcHoldings(ownAddress: string, txs: NimiqTx[]): Promi
 }
 
 /**
- * Total Luna still parked in the HTLC contracts this address has funded.
+ * Total Luna still held by the HTLC contracts this address has funded.
  *
- * Nimiq Pay hands the app a *relay* address: every transfer lands there and is
- * immediately forwarded into a fresh HTLC, so the basic balance reads 0 while
- * the money is really sitting in the newest contract. `getNimiqBalance` alone
- * therefore reports a wallet with nothing in it.
+ * Fallback for providers that don't name a remote account (Hub, demo) — where
+ * one exists, `getRemoteAccountBalance` answers the same question in a single
+ * call and without the discovery guesswork.
+ *
+ * Nimiq Pay's basic address is effectively a *relay*: every transfer lands
+ * there and is immediately forwarded into the user's HTLC, so the basic
+ * balance reads 0 while the money is really stored in the contract.
+ * `getNimiqBalance` on that address alone therefore reports an empty wallet.
  *
  * Deliberately looser than `getHtlcHoldings`, which answers "what is locked in
  * a pending swap" and so filters on the account still being an unsettled HTLC
  * whose sender/recipient is the user. This answers "how much of the user's
- * money is in flight", so it takes any positive balance left in a contract the
- * address funded — that balance *is* the user's, whatever the settlement state
- * of the swap around it. Best effort throughout: a failed lookup counts as 0
- * rather than costing the user their whole balance view.
+ * money is sitting in a contract", so it takes any positive balance left in a
+ * contract the address funded — that balance *is* the user's, whatever the
+ * settlement state of the swap around it. Best effort throughout: a failed
+ * lookup counts as 0 rather than costing the user their whole balance view.
  */
 export async function getHtlcInTransit(address: string, txs: NimiqTx[]): Promise<number> {
   const candidates = contractCandidates(txs, 2, address)
