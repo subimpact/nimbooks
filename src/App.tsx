@@ -68,6 +68,7 @@ import {
   EXPIRY_OPTIONS,
   MAX_MEMO_CHARS,
   formatLunaExact,
+  invoiceMemo,
   invoiceRoute,
   invoiceStatus,
   invoiceUrl,
@@ -2585,6 +2586,9 @@ export default function App() {
                       ).toLocaleDateString(lang)}`}
                   </div>
                   {inv.memo && <div className="tx-memo">{inv.memo}</div>}
+                  {/* The on-chain reference — matches the memo shown in History,
+                      so a payer can verify which payment settled this request. */}
+                  <div className="tx-sub mono">ref {invoiceMemo(inv.id)}</div>
                   {inv.paidTxHash && (
                     <div className="tx-sub">
                       <a
