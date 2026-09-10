@@ -1373,6 +1373,7 @@ a.btn-ghost.btn-link {
   animation: overlay-in 0.15s ease-out;
 }
 .modal {
+  position: relative;
   width: 100%;
   max-width: 456px;
   max-height: 82vh;

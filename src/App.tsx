@@ -632,9 +632,11 @@ export default function App() {
     }
   }
 
-  const refresh = async (acc: WalletAccount) => {
+  const refresh = async (acc: WalletAccount, opts?: { clearError?: boolean }) => {
     setLoading(true)
-    setError(null)
+    // Only a manual refresh (or a fresh connect) clears the error banner —
+    // the 10s auto-refresh must not wipe an error the user is still reading.
+    if (opts?.clearError !== false) setError(null)
     try {
       if (acc.nimiqAddress) {
         const addr = acc.nimiqAddress
@@ -913,6 +915,10 @@ export default function App() {
         setConfirmUnstakeOpen(false)
         return
       }
+      // Escape mid-celebration must not leave a stale timer behind either.
+      if (stakeCelebrateTimer.current) window.clearTimeout(stakeCelebrateTimer.current)
+      stakeCelebrateTimer.current = null
+      setStakeCelebrate(null)
       setStakeOpen(false)
       setCurrencyOpen(false)
       setChangelogOpen(false)
@@ -952,10 +958,11 @@ export default function App() {
     (hasStaker || stakeAmountNim >= MIN_STAKE_NIM)
   // Slider ceiling: the basic account balance PLUS HTLC in-transit funds.
   // Nimiq Pay's wallet decides how to fund a stake request — it may redeem
-  // a swap contract (its own key, timelock-only contracts). The 100 NIM
-  // stake on 09-08 was funded from a brief basic window, but whether Pay
-  // can fund from contracts directly is untested — this ceiling lets the
-  // user attempt it. If the wallet rejects, the error explains the lock.
+  // a swap contract (its own key, timelock-only contracts). Verified
+  // end-to-end 2026-09-10: staked 100 NIM while the relay's basic balance
+  // was 0 — the contract dropped exactly 100 NIM and the staker went
+  // active. In-transit funds are stakable; the ceiling lets the user
+  // attempt it and Pay's wallet does the redemption.
   const stakeMaxLuna = Math.max(0, (Number(nimBalance) || 0) + htlcLuna)
   const stakeMaxNim = stakeMaxLuna / 100000
 
@@ -963,6 +970,11 @@ export default function App() {
     setStakeError(null)
     setStakeHash(null)
     setStakeVerify(null)
+    // A reopen must never inherit a celebration from a previous session:
+    // clear the timer and burst so a fresh panel can't auto-close on its own.
+    if (stakeCelebrateTimer.current) window.clearTimeout(stakeCelebrateTimer.current)
+    stakeCelebrateTimer.current = null
+    setStakeCelebrate(null)
     // A first stake can't be smaller than the minimum, and the slider floor is
     // set there — so open on that value rather than on a 0 the panel would
     // only reject (and which would leave a tap on the floor doing nothing).
@@ -1014,6 +1026,15 @@ export default function App() {
         firstStake && stakeAmountNim > 0 && stakeAmountNim < MIN_STAKE_NIM
           ? MIN_STAKE_COPY
           : 'Enter an amount above 0.'
+      )
+      return
+    }
+    // The ceiling can shrink between opening the panel and submitting (a swap
+    // settles, a payment goes out, the 10s refresh lands). Never sign more
+    // than the wallet can fund — the unstake path does the same check.
+    if (stakeAmountNim > stakeMaxNim) {
+      setStakeError(
+        `Only ${formatLuna(String(stakeMaxLuna), lang)} NIM is available to stake right now.`
       )
       return
     }
@@ -1345,7 +1366,7 @@ export default function App() {
     const id = setInterval(() => {
       setCountdown((c) => {
         if (c <= 1) {
-          if (!loadingRef.current) void refresh(account)
+          if (!loadingRef.current) void refresh(account, { clearError: false })
           return 10
         }
         return c - 1
@@ -3019,6 +3040,15 @@ export default function App() {
               e.stopPropagation()
               // Tap during the celebration keeps the panel open: cancel the
               // auto-close and end the confetti burst.
+              if (stakeCelebrate) {
+                if (stakeCelebrateTimer.current) window.clearTimeout(stakeCelebrateTimer.current)
+                stakeCelebrateTimer.current = null
+                setStakeCelebrate(null)
+              }
+            }}
+            onScroll={() => {
+              // Scrolling the panel (e.g. to read the validator list) is also
+              // interaction — don't let the panel vanish under the finger.
               if (stakeCelebrate) {
                 if (stakeCelebrateTimer.current) window.clearTimeout(stakeCelebrateTimer.current)
                 stakeCelebrateTimer.current = null
