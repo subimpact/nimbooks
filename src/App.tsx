@@ -2980,7 +2980,10 @@ export default function App() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="modal-head">
-              <h2>Stake NIM</h2>
+              <h2>
+                Stake NIM
+                <InfoIcon text="Unstaking takes 3 transactions: deactivate, retire, then withdraw. The official wallet schedules the last two automatically with a watchtower; NimBooks has no watchtower, so you confirm each step yourself in Nimiq Pay. The balance banner guides you through." />
+              </h2>
               <button className="btn-ghost" onClick={() => setStakeOpen(false)} aria-label="Close">
                 ✕
               </button>
