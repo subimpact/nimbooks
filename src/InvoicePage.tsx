@@ -16,9 +16,11 @@ import {
 } from './lib/wallet'
 import {
   clearTxCache,
+  decodeMemo,
   explorerTxUrl,
   findSentTx,
   getNimiqTransactionByHash,
+  getNimiqTransactions,
   encodeMemo,
 } from './lib/chain'
 import {
@@ -27,6 +29,7 @@ import {
   invoiceMemo,
   invoiceStatus,
   invoiceUrl,
+  parseInvoiceMemo,
   upsertInvoice,
   type InvoicePayload,
 } from './lib/invoice'
@@ -66,6 +69,10 @@ export default function InvoicePage() {
   const [toast, setToast] = useState<string | null>(null)
   const [receipt, setReceipt] = useState<SignedReceipt | null>(null)
   const [signing, setSigning] = useState(false)
+  // Set when the payee's on-chain history shows the tagged payment. The
+  // shared link page is static by design (no wallet, no local storage), so
+  // this is what lets a re-opened request show "Paid" instead of "Open".
+  const [chainPaid, setChainPaid] = useState(false)
 
   const toggleTheme = () => {
     setTheme((t) => {
@@ -94,6 +101,34 @@ export default function InvoicePage() {
     const t = setTimeout(() => setToast(null), 4000)
     return () => clearTimeout(t)
   }, [toast])
+
+  // Chain check: does the payee's history already contain a payment tagged
+  // with this invoice's reference? Runs once on load (and again after paying
+  // in this session, so the pill flips without a reload).
+  useEffect(() => {
+    if (!invoice) return
+    let cancelled = false
+    const check = async () => {
+      try {
+        const txs = await getNimiqTransactions(invoice.payee, 50, null)
+        if (cancelled) return
+        const paid = txs.some(
+          (t) =>
+            t.executionResult !== false &&
+            parseInvoiceMemo(decodeMemo(t.data)) === invoice.id &&
+            /^\d+$/.test(String(t.value)) &&
+            BigInt(t.value) >= BigInt(invoice.amountNim)
+        )
+        if (paid) setChainPaid(true)
+      } catch {
+        /* index hiccup — leave the pill as-is; the payee's app reconciles */
+      }
+    }
+    check()
+    return () => {
+      cancelled = true
+    }
+  }, [invoice, payState])
 
   const status = useMemo(() => (invoice ? invoiceStatus(invoice) : 'pending'), [invoice])
   const isExpired = status === 'expired'
@@ -301,8 +336,8 @@ export default function InvoicePage() {
         <div className="invoice-amount">
           {amountNim} <span className="invoice-unit">NIM</span>
         </div>
-        <span className={`invoice-pill ${payState === 'sent' ? 'paid' : status}`}>
-          {payState === 'sent' ? 'Paid' : statusLabel}
+        <span className={`invoice-pill ${payState === 'sent' || chainPaid ? 'paid' : status}`}>
+          {payState === 'sent' || chainPaid ? 'Paid' : statusLabel}
         </span>
 
         <div className="verify-grid">
