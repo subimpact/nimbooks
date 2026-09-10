@@ -1390,6 +1390,32 @@ a.btn-ghost.btn-link {
 .modal.small {
   max-height: 70vh;
 }
+/* Confetti burst — absolute inside the modal, pieces fly from the center. */
+.confetti {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 5;
+  border-radius: 16px;
+}
+.confetti-piece {
+  position: absolute;
+  opacity: 0;
+  animation-name: confetti-fall;
+  animation-timing-function: cubic-bezier(0.2, 0.6, 0.4, 1);
+  animation-fill-mode: forwards;
+}
+@keyframes confetti-fall {
+  0% {
+    opacity: 1;
+    transform: translate(0, 0) rotate(0deg) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--cf-dx, 0px), 120px) rotate(540deg) scale(0.6);
+  }
+}
 @keyframes overlay-in {
   from {
     opacity: 0;

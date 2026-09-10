@@ -3,7 +3,7 @@
 // Badge text. Spelled out rather than built from a version constant so the exact
 // label ships as one string in the bundle (JSX would emit "v" as a separate node).
 // package.json carries the machine-readable version.
-export const APP_VERSION_LABEL = 'v1.5.0'
+export const APP_VERSION_LABEL = 'v1.6.0'
 
 export interface ChangelogEntry {
   version: string
@@ -12,6 +12,15 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '1.6.0',
+    date: '2026-09-10',
+    items: [
+      'World first: stake NIM from inside Nimiq Pay even while your funds are in transit — NimBooks lets Pay’s wallet fund your stake straight from HTLC swap contracts, so your NIM never needs to rest to start earning',
+      'Stake panel celebrates: confetti burst on a confirmed stake, then the panel closes itself — no more staring at a success line',
+      'Stake ceiling now counts your in-transit NIM: the slider shows your true stakable balance, not just the resting balance',
+    ],
+  },
   {
     version: '1.5.0',
     date: '2026-09-10',

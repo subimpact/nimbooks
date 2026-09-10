@@ -1,10 +1,10 @@
 # 📒 NimBooks
 
-**The books for your Nimiq wallet.**
+**The books for your Nimiq wallet — and the world's first in-Pay staking.**
 
 NimBooks is a Nimiq Pay Mini App that answers the question every payments wallet user eventually asks: *"What do I actually have, and what happened to it?"*
 
-It shows your NIM balance and transaction history with fiat values, lets you **stake and unstake** with a validator picker, exports CSV statements for tax records, issues **payment requests (invoices)** that settle on-chain and reconcile themselves, and lets you create **cryptographically signed proof-of-payment receipts** that anyone can verify on a public page.
+It shows your NIM balance and transaction history with fiat values, lets you **stake and unstake** with a validator picker — **including staking NIM that's still in transit through HTLC swap contracts, a world first for Nimiq Pay mini apps** — exports CSV statements for tax records, issues **payment requests (invoices)** that settle on-chain and reconcile themselves, and lets you create **cryptographically signed proof-of-payment receipts** that anyone can verify on a public page.
 
 **Live:** https://nimbooks.subimpact.net (legacy: https://nimbooks.pages.dev redirects)
 
