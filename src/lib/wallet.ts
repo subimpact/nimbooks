@@ -11,7 +11,7 @@ import type { NimiqProvider } from '@nimiq/mini-app-sdk'
 import HubApi from '@nimiq/hub-api'
 import type { SignedReceipt } from './receipt'
 import { canonicalPayload } from './receipt'
-import { broadcastRawTransaction, encodeMemo, getNimiqBlockNumber } from './chain'
+import { broadcastRawTransaction, getNimiqBlockNumber } from './chain'
 import { isInNimiqPay, isMobileDevice } from './device'
 
 export interface WalletAccount {
@@ -374,8 +374,12 @@ export async function sendNim({
   }
 
   if (!nimiqProvider) throw new Error('No Nimiq wallet connected.')
+  // Nimiq Pay hex-encodes the `data` string itself when building the
+  // transaction — pre-encoding here (encodeMemo) would put hex-of-hex
+  // on-chain and break memo matching (verified on a live payment). Pass the
+  // plain UTF-8 text; the wallet encodes it exactly once.
   const res = memo
-    ? await nimiqProvider.sendBasicTransactionWithData({ recipient: to, value, fee, data: encodeMemo(memo) })
+    ? await nimiqProvider.sendBasicTransactionWithData({ recipient: to, value, fee, data: memo })
     : await nimiqProvider.sendBasicTransaction({ recipient: to, value, fee })
   if (typeof res !== 'string') {
     const message = res && typeof res === 'object' && 'error' in res ? res.error?.message : null
