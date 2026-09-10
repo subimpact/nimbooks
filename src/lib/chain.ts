@@ -971,7 +971,23 @@ export function decodeMemo(data?: string): string {
     const bytes = new Uint8Array(hex.match(/.{2}/g)!.map((h) => parseInt(h, 16)))
     const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
     // Only accept printable text — reject binary garbage
-    return /^[\x20-\x7E\xA0-\xFF]*$/.test(text) ? text : data
+    if (!/^[\x20-\x7E\xA0-\xFF]*$/.test(text)) return data
+    // Older NimBooks builds pre-encoded the memo before handing it to Nimiq
+    // Pay, which hex-encodes again — so some live payments carry hex-of-hex.
+    // When the first decode is itself valid hex, decode once more — but only
+    // accept a pure-ASCII result, so a memo that merely *looks* like hex
+    // (e.g. "deadbeef") is never mangled into high-byte garbage.
+    const hex2 = text.trim()
+    if (/^[0-9a-fA-F]+$/.test(hex2) && hex2.length % 2 === 0) {
+      try {
+        const bytes2 = new Uint8Array(hex2.match(/.{2}/g)!.map((h) => parseInt(h, 16)))
+        const text2 = new TextDecoder('utf-8', { fatal: true }).decode(bytes2)
+        if (/^[\x20-\x7E]*$/.test(text2)) return text2
+      } catch {
+        /* keep the first-level text */
+      }
+    }
+    return text
   } catch {
     return data
   }
