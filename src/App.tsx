@@ -937,12 +937,13 @@ export default function App() {
     Number.isFinite(stakeAmountNim) &&
     stakeAmountNim > 0 &&
     (hasStaker || stakeAmountNim >= MIN_STAKE_NIM)
-  // Slider ceiling: the basic account balance is exactly what staking can
-  // spend. HTLC contract funds are separate accounts — they were never part
-  // of `nimBalance`, so subtracting them here would zero out genuinely
-  // spendable NIM whenever a swap is in flight (verified: relay + main-wallet
-  // cases). In-transit funds become stakable only after the swap settles.
-  const stakeMaxLuna = Math.max(0, Number(nimBalance) || 0)
+  // Slider ceiling: the basic account balance PLUS HTLC in-transit funds.
+  // Nimiq Pay's wallet decides how to fund a stake request — it may redeem
+  // a swap contract (its own key, timelock-only contracts). The 100 NIM
+  // stake on 09-08 was funded from a brief basic window, but whether Pay
+  // can fund from contracts directly is untested — this ceiling lets the
+  // user attempt it. If the wallet rejects, the error explains the lock.
+  const stakeMaxLuna = Math.max(0, (Number(nimBalance) || 0) + htlcLuna)
   const stakeMaxNim = stakeMaxLuna / 100000
 
   const openStake = () => {
@@ -3143,9 +3144,7 @@ export default function App() {
                     <p className="hint small">
                       {hasStaker
                         ? `Your ${formatLuna(String(retireableLuna), lang)} NIM is already staked. Staked NIM can't be re-staked. To stake more, send NIM to this address first:`
-                        : lockedLuna > 0 && stakeMaxLuna === 0
-                          ? 'Your NIM is in transit through a swap contract right now. Once it settles back to this wallet, it becomes available to stake. Send NIM to this address to stake sooner:'
-                          : 'No spendable NIM in this wallet to stake. Send NIM to this address first:'}
+                        : 'No spendable NIM in this wallet to stake. Send NIM to this address first:'}
                     </p>
                     <p className="mono stake-empty-addr">{account?.nimiqAddress}</p>
                     <button
