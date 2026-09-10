@@ -2998,7 +2998,18 @@ export default function App() {
       )}
 
       {stakeOpen && (
-        <div className="modal-overlay" onClick={() => setStakeOpen(false)}>
+        <div
+          className="modal-overlay"
+          onClick={() => {
+            // Closing mid-celebration must not leave a stale timer or confetti
+            // behind: a reopen within the 3s window would otherwise show the
+            // old burst and auto-close a fresh panel.
+            if (stakeCelebrateTimer.current) window.clearTimeout(stakeCelebrateTimer.current)
+            stakeCelebrateTimer.current = null
+            setStakeCelebrate(null)
+            setStakeOpen(false)
+          }}
+        >
           <div
             className="modal"
             role="dialog"
