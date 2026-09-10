@@ -196,6 +196,7 @@ const STAKING_ACTION_LABEL: Record<StakingActionKind, string> = {
   deactivate: 'deactivated',
   retire: 'retired',
   withdraw: 'withdrawn',
+  stake: 'staked',
 }
 
 // Nimiq's minimum stake is 10,000,000 Luna (getPolicyConstants). A first stake
@@ -987,7 +988,16 @@ export default function App() {
   // Watch a submitted stake tx until it shows up on chain. Fire-and-forget:
   // the panel stays usable while it runs, and a tx that never lands turns into
   // an error instead of a hash the user keeps waiting on.
-  const verifyStakeTx = (hash: string) => {
+  const verifyStakeTx = (hash: string, amountNim?: number) => {
+    const addr = account?.nimiqAddress
+    if (addr && amountNim) {
+      // The public index doesn't return staking txs for the sender, so the
+      // stake is recorded here at submit time — same pattern as the unstake
+      // legs — and History renders it from the local log.
+      const entry: StakingAction = { kind: 'stake', amountNim, hash, at: Date.now(), confirmed: false }
+      appendStakingAction(addr, entry)
+      setStakingLog((prev) => [entry, ...prev.filter((a) => a.hash !== hash)])
+    }
     stakeVerifyRef.current = hash
     setStakeVerify('checking')
     void (async () => {
@@ -995,11 +1005,25 @@ export default function App() {
         intervalMs: TX_VERIFY_INTERVAL_MS,
         timeoutMs: TX_VERIFY_TIMEOUT_MS,
       })
+      // The log row is keyed by hash, so it resolves even when a newer submit
+      // has taken over the panel's verification state.
+      if (addr && amountNim) {
+        if (result === 'confirmed') markStakingActionConfirmed(addr, hash)
+        setStakingLog((prev) =>
+          prev.map((a) => (a.hash === hash ? { ...a, confirmed: result === 'confirmed' } : a))
+        )
+      }
       if (stakeVerifyRef.current !== hash) return // superseded by a newer submit
       setStakeVerify(result)
       if (result === 'confirmed') {
         // Celebration beat: confetti burst, then the panel closes itself.
         setStakeCelebrate(hash)
+        setToast('Stake confirmed on-chain! 🎉')
+        // The submit-time refresh ran before the tx mined; now that it's on
+        // chain, drop the cache and pull fresh balances/staker/history so the
+        // home screen reflects the stake the moment the panel closes.
+        clearTxCache()
+        if (account) void refresh(account)
         if (stakeCelebrateTimer.current) window.clearTimeout(stakeCelebrateTimer.current)
         stakeCelebrateTimer.current = window.setTimeout(() => {
           setStakeOpen(false)
@@ -1017,6 +1041,12 @@ export default function App() {
   }
 
   const submitStake = async () => {
+    if (staking) return // double-tap / Enter guard — one signing request at a time
+    // A second submit must never inherit a pending auto-close from the
+    // previous confirmation: cancel the celebration timer up front.
+    if (stakeCelebrateTimer.current) window.clearTimeout(stakeCelebrateTimer.current)
+    stakeCelebrateTimer.current = null
+    setStakeCelebrate(null)
     // No staker record yet → this transaction creates one, and that is the
     // only moment the validator can be chosen (and the only one with a
     // minimum amount).
@@ -1053,8 +1083,12 @@ export default function App() {
         return
       }
       setStakeHash(result.hash)
-      verifyStakeTx(result.hash)
-      setStakeAmount('')
+      verifyStakeTx(result.hash, stakeAmountNim)
+      // Reset to a value the slider can actually hold: for a first stake the
+      // floor is MIN_STAKE_NIM, so a bare '' would leave the thumb clamped at
+      // 100 while the label reads 0 — a UI lockup if the user taps to keep
+      // the panel open.
+      setStakeAmount(hasStaker ? '' : String(MIN_STAKE_NIM))
       clearTxCache() // the stake tx must show up on the next History load
       if (account) await refresh(account)
     } finally {

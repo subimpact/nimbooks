@@ -924,8 +924,10 @@ export type TxKind = 'payment' | 'stake' | 'unstake' | 'reward' | 'fee' | 'unkno
 // returns them (see lib/stakingLog.ts). Accounting-wise they are all one kind —
 // stake on its way out — so `classifyTx` collapses them to 'unstake'; only the
 // History chip distinguishes the leg.
-export type StakingActionKind = 'deactivate' | 'retire' | 'withdraw'
+export type StakingActionKind = 'deactivate' | 'retire' | 'withdraw' | 'stake'
 
+// Kinds that read as an *unstake* in the UI. `stake` is deliberately not here:
+// a synthetic stake row must classify as 'stake', not 'unstake'.
 const STAKING_ACTION_KINDS: readonly string[] = ['deactivate', 'retire', 'withdraw']
 
 export function classifyTx(tx: NimiqTx, ownAddress: string): TxKind {
@@ -976,8 +978,10 @@ export function decodeMemo(data?: string): string {
   try {
     const bytes = new Uint8Array(hex.match(/.{2}/g)!.map((h) => parseInt(h, 16)))
     const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
-    // Only accept printable text — reject binary garbage
-    if (!/^[\x20-\x7E\xA0-\xFF]*$/.test(text)) return data
+    // Only accept printable text — reject binary garbage, but keep emojis and
+    // non-Latin scripts (a memo like "Coffee ☕" is legit and must not fall
+    // back to raw hex). Control chars are the signal of binary payloads.
+    if (/[\x00-\x08\x0E-\x1F\x7F]/.test(text)) return data
     // Older NimBooks builds pre-encoded the memo before handing it to Nimiq
     // Pay, which hex-encodes again — so some live payments carry hex-of-hex.
     // When the first decode is itself valid hex, decode once more — but only
