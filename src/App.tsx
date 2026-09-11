@@ -265,13 +265,56 @@ function isTransientChainError(e: unknown): boolean {
   )
 }
 
-// "submitted" only ever means "handed to the network" — don't claim more than
-// the verification poll has actually established.
-function txVerifyLabel(state: TxVerify | null): string {
-  if (state === 'confirmed') return 'confirmed on chain ✓'
-  if (state === 'unknown') return 'submitted: could not confirm, check History'
-  return 'submitted, confirming…'
+// Unstaking leaves in three legs, and each one is worded exactly once here: the
+// confirming step, the completed card, the banner modal's head and the toast all
+// read from this table, so the same transaction can never be called two
+// different things in two places.
+type UnstakeLegKind = Exclude<StakingActionKind, 'stake'>
+interface UnstakeLegCopy {
+  // Head of the window the leg finishes in — it echoes the button that started
+  // it, so the banner modal reads as the same action the user tapped.
+  window: string
+  // Completed card headline, confirmed on chain and merely submitted.
+  done: string
+  pending: string
+  // Row label in the amount block.
+  row: string
+  // What happens next, once the chain has confirmed the leg.
+  next: string
+  // Shown only when the leg's window was closed before the poll answered.
+  toast: string
 }
+const UNSTAKE_LEG: Record<UnstakeLegKind, UnstakeLegCopy> = {
+  deactivate: {
+    window: 'Unstake',
+    done: 'Stake deactivated',
+    pending: 'Deactivation submitted',
+    row: 'Deactivated',
+    next: 'It takes effect at the next election block, then a reporting window before it is withdrawable. The balance banner guides you through the rest.',
+    toast: 'Unstake confirmed: your stake is cooling down ✓',
+  },
+  retire: {
+    window: 'Complete unstake',
+    done: 'Stake retired',
+    pending: 'Retire submitted',
+    row: 'Retired',
+    next: 'It is withdrawable after the reporting window, and the balance banner carries the Withdraw button once it is.',
+    toast: 'Retired. Withdrawable after the reporting window ✓',
+  },
+  withdraw: {
+    window: 'Withdraw',
+    done: 'Withdrawn',
+    pending: 'Withdrawal submitted',
+    row: 'Withdrawn',
+    next: 'It is back in your balance, and the transaction is in your History.',
+    toast: 'Withdrawn: the NIM is back in your balance ✓',
+  },
+}
+// remove_stake takes the whole retired balance or nothing, so asking to unstake
+// less than all of it still moves all of it. The card says so rather than a
+// toast, which the panel's own overlay would cover.
+const FULL_WITHDRAW_NOTE =
+  "Partial withdrawals aren't allowed on Nimiq, so this takes your full retired balance."
 
 export default function App() {
   // A Hub login on a mobile browser returns as a full-page redirect, and
@@ -389,8 +432,23 @@ export default function App() {
   const [unstakeAmount, setUnstakeAmount] = useState('')
   const [unstaking, setUnstaking] = useState(false)
   const [unstakeError, setUnstakeError] = useState<string | null>(null)
-  const [unstakeHash, setUnstakeHash] = useState<string | null>(null)
   const [unstakeVerify, setUnstakeVerify] = useState<TxVerify | null>(null)
+  // What the unstake actually sent, captured at submit time — the confirming
+  // step and the completed card render from this, not from the form or the
+  // staker record (both move the moment the transaction goes out). One submit
+  // can send two legs (withdraw then deactivate); the verification tracks the
+  // last one, which is also the card's headline.
+  const [unstakeSubmitted, setUnstakeSubmitted] = useState<{
+    legs: { kind: UnstakeLegKind; amountNim: number; hash: string }[]
+    // Which window owns the beats: the stake panel for an unstake started
+    // there, a modal of its own for the balance banner's two finishing steps.
+    source: 'panel' | 'banner'
+    // Submit-time asides that used to be toasts — they belong on the card,
+    // because the sheet's overlay sits above where the toast renders.
+    notes: string[]
+  } | null>(null)
+  // The banner's legs have no panel to live in, so they get one.
+  const [unstakeModalOpen, setUnstakeModalOpen] = useState(false)
   // The hash the verification poll is allowed to report on — a second submit
   // supersedes the first, and a stale poll must not overwrite its result.
   const unstakeVerifyRef = useRef<string | null>(null)
@@ -1211,6 +1269,43 @@ export default function App() {
     stakeOpenRef.current = stakeOpen
   }, [stakeOpen])
 
+  // The unstake finishes on the same two beats as the stake, wherever it was
+  // started from. 'expired' goes back to the form (the panel) or takes the
+  // window away entirely (the banner modal, which has no form): either way the
+  // error and the toast carry it. A submit whose verification hasn't started
+  // yet already counts as confirming, so the form can never flash back in
+  // between the two.
+  const unstakeFlow: 'form' | 'confirming' | 'done' = !unstakeSubmitted
+    ? 'form'
+    : unstakeVerify === 'confirmed' || unstakeVerify === 'unknown'
+      ? 'done'
+      : unstakeVerify === 'expired'
+        ? 'form'
+        : 'confirming'
+  // One truth for "the banner's window is on screen", read by the render, the
+  // Escape handler and the toast gate alike. The open flag alone would not do:
+  // an expired leg leaves it set with nothing left to show, and Escape would
+  // then peel a window that isn't there instead of the panel that is.
+  const unstakeModalShown =
+    unstakeModalOpen && unstakeSubmitted?.source === 'banner' && unstakeFlow !== 'form'
+
+  // Same ref trick as the panel's, for whichever of the two windows this
+  // unstake belongs to: the stake panel for a leg started there, the banner's
+  // modal for the other two.
+  const unstakeWindowOpenRef = useRef(false)
+  useEffect(() => {
+    unstakeWindowOpenRef.current =
+      unstakeSubmitted?.source === 'banner' ? unstakeModalOpen : stakeOpen
+  }, [unstakeSubmitted?.source, unstakeModalOpen, stakeOpen])
+
+  // Drops the unstake submit flow's display. Same rule as the stake one: only
+  // ever called for a flow that has finished, never for a poll still running.
+  const resetUnstakeFlow = useCallback(() => {
+    setUnstakeVerify(null)
+    setUnstakeSubmitted(null)
+    setUnstakeError(null)
+  }, [])
+
   // Done, ✕, Escape and the overlay all land here. Closing never cancels a
   // verification in flight: the poll keeps running, so the stake still lands in
   // History and the toast still fires. Only the submit-flow display resets, and
@@ -1223,8 +1318,33 @@ export default function App() {
       setStakeSubmitted(null)
       setStakeError(null)
     }
+    // An unstake started from this panel finishes in it, so it closes with it,
+    // under the same rule.
+    if (unstakeSubmitted?.source === 'panel' && unstakeVerify !== 'checking') {
+      resetUnstakeFlow()
+    }
     setStakeOpen(false)
-  }, [clearStakeCelebration, stakeVerify])
+  }, [clearStakeCelebration, stakeVerify, unstakeSubmitted?.source, unstakeVerify, resetUnstakeFlow])
+
+  // Done is the one close that also moves: a finished stake or unstake hands the
+  // user back to Overview, where the balance and the banner report what just
+  // happened. ✕, Escape and the overlay only close.
+  const finishStake = useCallback(() => {
+    closeStake()
+    setView('dashboard')
+  }, [closeStake])
+
+  // The banner modal's twin of closeStake — same "a poll in flight keeps its
+  // card" rule, so closing mid-check and tapping the banner again resumes.
+  const closeUnstakeModal = useCallback(() => {
+    if (unstakeVerify !== 'checking') resetUnstakeFlow()
+    setUnstakeModalOpen(false)
+  }, [unstakeVerify, resetUnstakeFlow])
+
+  const finishUnstakeModal = useCallback(() => {
+    closeUnstakeModal()
+    setView('dashboard')
+  }, [closeUnstakeModal])
 
   // The validator list is a 1.4 MB payload — 13× the whole gzipped bundle —
   // so it is fetched only when something actually renders from it, never just
@@ -1268,6 +1388,7 @@ export default function App() {
       confirmUnstakeOpen ||
       sendOpen ||
       receiveOpen ||
+      unstakeModalShown ||
       !!downloadLink ||
       !!backupMode
     if (!anyOpen) return
@@ -1275,6 +1396,12 @@ export default function App() {
       if (e.key !== 'Escape') return
       if (confirmUnstakeOpen) {
         setConfirmUnstakeOpen(false)
+        return
+      }
+      // The banner modal stands alone over Overview, so it peels on its own —
+      // and closeUnstakeModal keeps a verification still running.
+      if (unstakeModalShown) {
+        closeUnstakeModal()
         return
       }
       // The send sheet peels on its own (it is never stacked under another),
@@ -1307,6 +1434,8 @@ export default function App() {
     sendOpen,
     closeSend,
     receiveOpen,
+    unstakeModalShown,
+    closeUnstakeModal,
     downloadLink,
     backupMode,
   ])
@@ -1344,6 +1473,9 @@ export default function App() {
       : stakeVerify === 'confirmed' || stakeVerify === 'unknown'
         ? 'done'
         : 'form'
+  // The panel only shows the beats of an unstake started in it; the banner's
+  // legs have their own window and must not take over the panel behind it.
+  const panelUnstakeFlow = unstakeSubmitted?.source === 'panel' ? unstakeFlow : 'form'
   const stakeAmountNim = Number(stakeAmount)
   // A first stake creates the staker record, and the protocol refuses to create
   // one below the 100 NIM minimum — the tx is rejected and never mines. Adding
@@ -1372,6 +1504,11 @@ export default function App() {
       setStakeVerify(null)
       setStakeSubmitted(null)
       clearStakeCelebration()
+    }
+    // Same for an unstake that finished in this panel: its card is spent, and
+    // the panel opens on a form. One still checking keeps its card.
+    if (unstakeSubmitted?.source === 'panel' && unstakeVerify !== 'checking') {
+      resetUnstakeFlow()
     }
     // A first stake can't be smaller than the minimum, and the slider floor is
     // set there — so open on that value rather than on a 0 the panel would
@@ -1585,7 +1722,7 @@ export default function App() {
   // reached the chain takes its row with it.
   const verifyUnstakeTx = (
     hash: string,
-    action?: { kind: StakingActionKind; amountNim: number }
+    action?: { kind: UnstakeLegKind; amountNim: number }
   ) => {
     const addr = account?.nimiqAddress
     if (action && addr) {
@@ -1617,6 +1754,18 @@ export default function App() {
       }
       if (unstakeVerifyRef.current !== hash) return // superseded by a newer submit
       setUnstakeVerify(result)
+      if (result === 'confirmed') {
+        // The window on screen is the announcement: it flips to the completed
+        // card and waits for Done. A window the user closed mid-check gets the
+        // toast instead, so a confirmation is never silent and never doubled.
+        if (!unstakeWindowOpenRef.current && action) setToast(UNSTAKE_LEG[action.kind].toast)
+        // The submit-time refresh ran before the tx mined. Now that it is on
+        // chain, pull fresh balances and staker record so Overview is already
+        // right behind the card.
+        clearTxCache()
+        if (account) void refresh(account)
+        return
+      }
       if (result !== 'expired') return
       setPendingUnstake(null)
       try {
@@ -1645,10 +1794,16 @@ export default function App() {
     }
     setUnstaking(true)
     setUnstakeError(null)
-    setUnstakeHash(null)
+    setUnstakeSubmitted(null)
     setUnstakeVerify(null)
+    setUnstakeModalOpen(false) // this one finishes in the panel, not the modal
     try {
       let remainingNim = amountNim
+      // What actually went out, built as it goes: a submit can send a withdraw
+      // and a deactivate, and the completed card summarises both. Kept as a
+      // local so each leg can hand the card a fresh array.
+      const legs: { kind: UnstakeLegKind; amountNim: number; hash: string }[] = []
+      const notes: string[] = []
       // 1. Withdraw anything already fully cooled (retired → basic balance).
       //    `remove_stake` takes no amount: the protocol withdraws the whole
       //    retired balance or nothing (protocol.md — "Remove ALL retired
@@ -1661,13 +1816,10 @@ export default function App() {
           setUnstakeError(remove.error)
           return
         }
-        setUnstakeHash(remove.hash)
+        if (removeNim > remainingNim) notes.push(FULL_WITHDRAW_NOTE)
+        legs.push({ kind: 'withdraw', amountNim: removeNim, hash: remove.hash })
+        setUnstakeSubmitted({ legs: [...legs], source: 'panel', notes: [...notes] })
         verifyUnstakeTx(remove.hash, { kind: 'withdraw', amountNim: removeNim })
-        if (removeNim > remainingNim) {
-          setToast(
-            "Withdrew your full retired balance (partial withdrawals aren't allowed on Nimiq)."
-          )
-        }
         // Clamped: withdrawing the whole retired balance can cover more than
         // was asked for, and the steps below only run on what's still owed.
         remainingNim = Math.max(0, remainingNim - removeNim)
@@ -1695,7 +1847,7 @@ export default function App() {
             )
             return
           }
-          setToast(
+          notes.push(
             `${MIN_REMAINDER_COPY}. Deactivating ${formatLuna(String(deactivateLuna), lang)} NIM instead.`
           )
         }
@@ -1705,7 +1857,8 @@ export default function App() {
           setUnstakeError(deactivate.error)
           return
         }
-        setUnstakeHash(deactivate.hash)
+        legs.push({ kind: 'deactivate', amountNim: deactivateNim, hash: deactivate.hash })
+        setUnstakeSubmitted({ legs: [...legs], source: 'panel', notes: [...notes] })
         // The deactivation only takes effect at the next election block (~12h)
         // — persist a pending marker so Overview/History can show it until the
         // staker record flips to inactive.
@@ -1753,18 +1906,25 @@ export default function App() {
     if (retireValidAt > 0 && currentBlock < retireValidAt) return
     setUnstaking(true)
     setUnstakeError(null)
-    setUnstakeHash(null)
+    setUnstakeSubmitted(null)
     setUnstakeVerify(null)
     try {
-      const retire = await unstakeRetire(inactiveLuna / 100000)
+      const retireNim = inactiveLuna / 100000
+      const retire = await unstakeRetire(retireNim)
       if (!retire.ok) {
         setUnstakeError(retire.error)
         setToast(retire.error)
         return
       }
-      setUnstakeHash(retire.hash)
-      verifyUnstakeTx(retire.hash, { kind: 'retire', amountNim: inactiveLuna / 100000 })
-      setToast('Retired. Withdrawable after the reporting window ✓')
+      // No panel here, so the two beats open a window of their own. The news
+      // is the card, not a toast: it waits for Done like every other finish.
+      setUnstakeSubmitted({
+        legs: [{ kind: 'retire', amountNim: retireNim, hash: retire.hash }],
+        source: 'banner',
+        notes: [],
+      })
+      setUnstakeModalOpen(true)
+      verifyUnstakeTx(retire.hash, { kind: 'retire', amountNim: retireNim })
       clearTxCache()
       if (account) await refresh(account)
     } finally {
@@ -1777,23 +1937,40 @@ export default function App() {
     if (retiredLuna <= 0) return
     setUnstaking(true)
     setUnstakeError(null)
-    setUnstakeHash(null)
+    setUnstakeSubmitted(null)
     setUnstakeVerify(null)
     try {
-      const remove = await unstakeRemove(retiredLuna / 100000)
+      const removeNim = retiredLuna / 100000
+      const remove = await unstakeRemove(removeNim)
       if (!remove.ok) {
         setUnstakeError(remove.error)
         setToast(remove.error)
         return
       }
-      setUnstakeHash(remove.hash)
-      verifyUnstakeTx(remove.hash, { kind: 'withdraw', amountNim: retiredLuna / 100000 })
-      setToast('Withdrawal submitted ✓')
+      setUnstakeSubmitted({
+        legs: [{ kind: 'withdraw', amountNim: removeNim, hash: remove.hash }],
+        source: 'banner',
+        notes: [],
+      })
+      setUnstakeModalOpen(true)
+      verifyUnstakeTx(remove.hash, { kind: 'withdraw', amountNim: removeNim })
       clearTxCache()
       if (account) await refresh(account)
     } finally {
       setUnstaking(false)
     }
+  }
+
+  // The banner's buttons double as the way back into the flow they started:
+  // while a leg of theirs is confirming or waiting for Done, tapping again
+  // reopens its window instead of signing the same transaction twice. Leg-aware
+  // on purpose — once the chain has moved on, the *next* step's button on the
+  // same banner must still submit.
+  const reopenBannerUnstake = (kind: UnstakeLegKind): boolean => {
+    if (unstakeFlow === 'form' || unstakeSubmitted?.source !== 'banner') return false
+    if (unstakeSubmitted.legs[unstakeSubmitted.legs.length - 1]?.kind !== kind) return false
+    setUnstakeModalOpen(true)
+    return true
   }
 
   const [countdown, setCountdown] = useState(10)
@@ -2059,7 +2236,8 @@ export default function App() {
     setStakeVerify(null)
     stakeVerifyRef.current = null
     setStakeSubmitted(null)
-    setUnstakeHash(null)
+    setUnstakeSubmitted(null)
+    setUnstakeModalOpen(false)
     setUnstakeError(null)
     setUnstakeVerify(null)
     unstakeVerifyRef.current = null
@@ -2289,6 +2467,103 @@ export default function App() {
           {toast && !error && <p className="hint small">{toast}</p>}
         </main>
         {changelogModal}
+      </div>
+    )
+  }
+
+  // The unstake's two beats, built once. The stake panel and the balance
+  // banner's modal are two windows onto the same finish, and a card that lived
+  // in only one of them would drift from the other within a release. `onDone`
+  // is the only difference: each window closes itself, then lands on Overview.
+  const unstakeBeats = (onDone: () => void) => {
+    if (!unstakeSubmitted || unstakeFlow === 'form') return null
+    const { legs, notes } = unstakeSubmitted
+    // The verification follows the last leg that went out, so that is the leg
+    // the card is headlined by — a withdraw+deactivate submit leads with the
+    // deactivate and reports the withdrawal as a row under it.
+    const primary = legs[legs.length - 1]
+    const copy = UNSTAKE_LEG[primary.kind]
+    // Rows and transaction lines are labelled by leg only when there are two to
+    // tell apart: on a single leg the headline already names the action, and
+    // "Amount" is what the stake and send cards call it.
+    const amounts = (
+      <div className="invoice-confirm">
+        {legs.map((leg) => (
+          <div className="row" key={leg.hash}>
+            <span>{legs.length > 1 ? UNSTAKE_LEG[leg.kind].row : 'Amount'}</span>
+            <span>{leg.amountNim.toLocaleString(lang)} NIM</span>
+          </div>
+        ))}
+      </div>
+    )
+    const hashes = legs.map((leg) => (
+      <p className="hint small" key={leg.hash}>
+        {legs.length > 1 ? `${UNSTAKE_LEG[leg.kind].row} transaction` : 'Transaction'}{' '}
+        <a
+          className="tx-hash-link"
+          href={explorerTxUrl(leg.hash)}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          {leg.hash.slice(0, 16)}…
+        </a>
+      </p>
+    ))
+    const asides = notes.map((note) => (
+      <p className="hint small" key={note}>
+        {note}
+      </p>
+    ))
+    if (unstakeFlow === 'confirming') {
+      return (
+        <div className="stake-progress unstake-progress" role="status" aria-live="polite">
+          <p className="stake-progress-head">
+            <span className="stake-spinner" aria-hidden="true" />
+            Confirming on chain…
+          </p>
+          {amounts}
+          {hashes}
+          {asides}
+          <p className="hint small">
+            Nimiq mines in about a second, so this is usually over before you read it. You can close
+            this: the transaction is already on its way and it lands in your History either way.
+          </p>
+          {/* A submit can report something the form is no longer there to show:
+              a second leg the wallet refused, or a remainder that is already
+              cooling down. It rides on the card instead. */}
+          {unstakeError && <p className="hint small warn">{unstakeError}</p>}
+        </div>
+      )
+    }
+    // Confirmed is a plain statement of fact, not a celebration: nothing has
+    // arrived yet on a deactivate or a retire, and even a withdrawal is money
+    // coming back rather than a win. No confetti here on purpose.
+    const confirmed = unstakeVerify === 'confirmed'
+    return (
+      <div
+        role="status"
+        aria-live="polite"
+        className={
+          confirmed ? 'invoice-sent stake-done unstake-done' : 'stake-done unstake-done unconfirmed'
+        }
+      >
+        {confirmed ? (
+          <p className="ok">✓ {copy.done}</p>
+        ) : (
+          <p className="stake-done-title">{copy.pending}</p>
+        )}
+        {amounts}
+        {hashes}
+        {asides}
+        <p className="hint small">
+          {confirmed
+            ? copy.next
+            : 'It was submitted, but we could not confirm it on chain. Check History in a moment.'}
+        </p>
+        {unstakeError && <p className="hint small warn">{unstakeError}</p>}
+        <button className="btn-primary stake-submit" onClick={onDone}>
+          Done
+        </button>
       </div>
     )
   }
@@ -2579,7 +2854,9 @@ export default function App() {
                     <button
                       type="button"
                       className="btn-small"
-                      onClick={() => void completeUnstake()}
+                      onClick={() => {
+                        if (!reopenBannerUnstake('retire')) void completeUnstake()
+                      }}
                       disabled={!canStake() || staking || unstaking}
                     >
                       {unstaking ? 'Submitting…' : 'Complete unstake'}
@@ -2600,7 +2877,9 @@ export default function App() {
                   <button
                     type="button"
                     className="btn-small"
-                    onClick={() => void withdrawRetired()}
+                    onClick={() => {
+                      if (!reopenBannerUnstake('withdraw')) void withdrawRetired()
+                    }}
                     disabled={!canStake() || staking || unstaking}
                   >
                     {unstaking ? 'Submitting…' : 'Withdraw'}
@@ -3700,10 +3979,16 @@ export default function App() {
                     ? '· it is in your History, and your stake above updates as the node reports it.'
                     : '· it was submitted, but we could not confirm it on chain. Check History in a moment.'}
                 </p>
-                <button className="btn-primary stake-submit" onClick={closeStake}>
+                {/* Done is also the way back: the balance and the banner on
+                    Overview are where the rest of this story is told. */}
+                <button className="btn-primary stake-submit" onClick={finishStake}>
                   Done
                 </button>
               </div>
+            ) : panelUnstakeFlow !== 'form' ? (
+              // The unstake started in this panel finishes in it, on the same
+              // two beats and in place of the same form.
+              unstakeBeats(finishStake)
             ) : (
               <>
                 <span className="label stake-section">Validator</span>
@@ -3889,13 +4174,11 @@ export default function App() {
                           {retiredLuna > 0 &&
                             ` ${formatLuna(String(retiredLuna), lang)} NIM already withdrawable.`}
                         </span>
+                        {/* A submitted unstake is no longer reported here: it
+                            takes over the panel with a confirming step and then
+                            a summary card, the way a stake and a payment
+                            finish. The box only ever sees a failure. */}
                         {unstakeError && <p className="hint small warn">{unstakeError}</p>}
-                        {unstakeHash && unstakeVerify !== 'expired' && (
-                          <p className="hint small ok">
-                            Unstake {txVerifyLabel(unstakeVerify)}{' '}
-                            <span className="mono">{unstakeHash.slice(0, 20)}…</span>
-                          </p>
-                        )}
                         <button
                           className="btn-primary stake-submit"
                           onClick={() => setConfirmUnstakeOpen(true)}
@@ -3957,6 +4240,32 @@ export default function App() {
                 </p>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* The balance banner's two finishing steps are sent straight from
+          Overview, with no panel to report back into — so they get a window of
+          their own, carrying exactly the beats the stake panel shows. It stands
+          only as long as there is something to show: an expired transaction
+          drops the flow back to 'form', which takes the modal with it and
+          leaves the error to the toast. */}
+      {unstakeModalShown && unstakeSubmitted && (
+        <div className="modal-overlay" onClick={closeUnstakeModal}>
+          <div
+            className="modal small"
+            role="dialog"
+            aria-modal="true"
+            aria-label={UNSTAKE_LEG[unstakeSubmitted.legs[0].kind].window}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-head">
+              <h2>{UNSTAKE_LEG[unstakeSubmitted.legs[0].kind].window}</h2>
+              <button className="btn-ghost" onClick={closeUnstakeModal} aria-label="Close">
+                ✕
+              </button>
+            </div>
+            {unstakeBeats(finishUnstakeModal)}
           </div>
         </div>
       )}
