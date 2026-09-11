@@ -850,11 +850,30 @@ interface ValidatorCacheEntry {
 }
 
 /**
+ * Pinned validator: ImpactZero stake, the operator's own validator.
+ * Pinned first in the picker by request.
+ */
+export const PINNED_VALIDATOR_ADDRESS = 'NQ08 ACT8 T0FE PTG8 P5RL H2S3 QGXH V15R NVXY'
+
+export function isPinnedValidator(address: string): boolean {
+  return cleanAddress(address).toUpperCase() === cleanAddress(PINNED_VALIDATOR_ADDRESS).toUpperCase()
+}
+
+/**
  * Best home for a stake first: reliability descending, non-producing pools
  * (null score) last, ties broken by name so the order is stable between loads.
+ *
+ * ImpactZero (the operator's own validator) is pinned first by request,
+ * unconditionally (scored or not).
  */
 export function sortValidators(list: ValidatorInfo[]): ValidatorInfo[] {
+  const pinnedClean = cleanAddress(PINNED_VALIDATOR_ADDRESS).toUpperCase()
   return [...list].sort((a, b) => {
+    const aPinned = cleanAddress(a.address).toUpperCase() === pinnedClean
+    const bPinned = cleanAddress(b.address).toUpperCase() === pinnedClean
+    if (aPinned && !bPinned) return -1
+    if (bPinned && !aPinned) return 1
+
     const ar = a.reliability
     const br = b.reliability
     if (ar === null && br !== null) return 1
