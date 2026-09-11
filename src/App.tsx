@@ -1062,40 +1062,18 @@ export default function App() {
     setSendOpen(false)
   }, [sendState, clearSendCelebration])
 
-  // The confetti gate. A hash is not a mined transaction: Nimiq Hub hands one
-  // back the moment it signs, and a transaction that never makes it into a
-  // block is dropped when its validity window passes with nothing on chain to
-  // show for it. So the Hub path waits for the chain to answer before anything
-  // celebrates, exactly as the stake panel does. The Nimiq Pay path has already
-  // been read off the chain — findSentTx matched it in the sender's public
-  // history — so its burst fires straight away.
-  //
-  // Fire-and-forget: the sheet stays usable while this runs, and a payment that
-  // never lands simply never celebrates. The success screen already says where
-  // to look for it, so there is no second error path to render here.
-  const celebrateSend = (hash: string, ticket: number, minedAlready: boolean) => {
-    // Belt and braces: demo mode is read-only and never reaches a real send,
-    // so it never gets a celebration either.
+  // Confetti on the success screen, no gating: the wallet signed and the
+  // payment is out — the "Payment sent" dialog IS the trigger. (The hash can
+  // trail on the indexer for a few seconds; the celebration doesn't wait.)
+  const celebrateSend = (ticket: number) => {
     if (isDemoMode()) return
-    void (async () => {
-      if (!minedAlready) {
-        const result = await waitForTxMined(hash, {
-          intervalMs: TX_VERIFY_INTERVAL_MS,
-          timeoutMs: TX_VERIFY_TIMEOUT_MS,
-        })
-        if (result !== 'confirmed') return
-      }
-      // The sheet was dismissed (or another send took the ticket) while the
-      // chain was answering — a burst now would land on a sheet nobody asked
-      // for, and on a form the user may already be retyping.
-      if (sendTicketRef.current !== ticket) return
-      setSendCelebrate(hash)
-      if (sendCelebrateTimer.current) window.clearTimeout(sendCelebrateTimer.current)
-      sendCelebrateTimer.current = window.setTimeout(() => {
-        sendCelebrateTimer.current = null
-        setSendCelebrate(null)
-      }, CONFETTI_MS)
-    })()
+    if (sendTicketRef.current !== ticket) return
+    setSendCelebrate(`sent-${ticket}`)
+    if (sendCelebrateTimer.current) window.clearTimeout(sendCelebrateTimer.current)
+    sendCelebrateTimer.current = window.setTimeout(() => {
+      sendCelebrateTimer.current = null
+      setSendCelebrate(null)
+    }, CONFETTI_MS)
   }
 
   const submitSend = async () => {
@@ -1130,9 +1108,6 @@ export default function App() {
     setSendState('sending')
     const ticket = ++sendTicketRef.current
     let hash: string | null = null
-    // True only for a hash recovered from the sender's history, which means the
-    // chain has it already — a hash the wallet returned has not been checked.
-    let hashFromChain = false
     try {
       // Plain UTF-8 memo: the adapter hands it to Pay as text (Pay hex-encodes
       // the data itself) and encodes it for the Hub — see wallet.sendNim.
@@ -1150,7 +1125,6 @@ export default function App() {
         if (sendTicketRef.current === ticket) setSendState('locating')
         const found = await findSentTx(from, sendToClean, luna, memo ? encodeMemo(memo) : undefined)
         hash = found?.hash ?? null
-        hashFromChain = !!hash
       }
     } catch (e) {
       // A dismissed sheet has nowhere to put this — the wallet showed its own
@@ -1164,10 +1138,9 @@ export default function App() {
     if (sendTicketRef.current === ticket) {
       setSendHash(hash)
       setSendState('sent')
-      // No hash means nothing has been seen on chain yet (Nimiq Pay's lookup
-      // timed out): the success screen says as much, and nothing celebrates a
-      // payment we cannot point at.
-      if (hash) celebrateSend(hash, ticket, hashFromChain)
+      // The success screen IS the trigger — the wallet signed, the payment is
+      // out, and the burst goes with the dialog, no waiting on the indexer.
+      celebrateSend(ticket)
     }
     // Outside the try above on purpose: the payment is already out, and
     // `refresh` reports its own failures (toast/banner) — a busy node must
