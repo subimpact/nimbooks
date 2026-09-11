@@ -474,9 +474,18 @@ export async function broadcastRawTransaction(serializedTx: string): Promise<str
 }
 
 /**
- * Locate a just-sent transaction in the sender's history. Nimiq Pay returns a
- * serialized transaction rather than a hash, so the hash is recovered by
- * matching recipient + value + data against fresh (uncached) history pages.
+ * Locate a just-sent transaction. Nimiq Pay returns a serialized transaction
+ * rather than a hash, so the hash is recovered by matching recipient + value +
+ * data against fresh (uncached) history pages.
+ *
+ * The sender's history is checked first — most sends index there. But when
+ * Nimiq Pay funds the payment from the wallet's HTLC remote account (the
+ * relay-routed case that makes the basic balance read 0), the on-chain shape
+ * is contract → recipient and the sender's own address never appears in the
+ * transfer's `from`. The receiving side is always indexed though, so the
+ * recipient's history is scanned as the fallback that catches those sends.
+ * The match must be the *incoming* direction: the recipient's history lists
+ * this transfer as a credit, never as a debit.
  */
 export async function findSentTx(
   from: string,
@@ -488,17 +497,31 @@ export async function findSentTx(
 ): Promise<NimiqTx | null> {
   const wantRecipient = cleanAddress(recipient).toUpperCase()
   const wantData = (dataHex ?? '').toLowerCase()
+  const matchTx = (t: NimiqTx): boolean => {
+    if (cleanAddress(t.recipient).toUpperCase() !== wantRecipient) return false
+    if (String(t.value) !== String(valueLuna)) return false
+    if (wantData && (t.data ?? '').toLowerCase() !== wantData) return false
+    return true
+  }
   for (let i = 0; i < attempts; i++) {
     if (i > 0) await new Promise((r) => setTimeout(r, delayMs))
     try {
-      const txs = await getNimiqTransactions(from, 20, null)
-      const match = txs.find(
+      // Sender-side history: a normal send indexes with the sender as `from`.
+      // The sender is left unconstrained here on purpose — an HTLC-funded
+      // send may read back with a contract address as `from`.
+      const fromTxs = await getNimiqTransactions(from, 20, null)
+      const fromMatch = fromTxs.find(matchTx)
+      if (fromMatch) return fromMatch
+      // HTLC-funded sends don't index on the sender (see docblock); the
+      // recipient's history is the reliable place the hash shows up. Only a
+      // *credit* counts there — an outgoing payment from the recipient with
+      // identical value/data must not be mistaken for this send.
+      const toTxs = await getNimiqTransactions(recipient, 20, null)
+      const toMatch = toTxs.find(
         (t) =>
-          cleanAddress(t.recipient).toUpperCase() === wantRecipient &&
-          String(t.value) === String(valueLuna) &&
-          (!wantData || (t.data ?? '').toLowerCase() === wantData)
+          matchTx(t) && cleanAddress(t.sender).toUpperCase() !== wantRecipient
       )
-      if (match) return match
+      if (toMatch) return toMatch
     } catch (e) {
       console.warn('findSentTx poll failed:', e)
     }
