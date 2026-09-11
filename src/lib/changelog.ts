@@ -21,6 +21,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     date: '2026-09-11',
     items: [
       'Quick actions on Overview: send NIM or receive it with a QR code without leaving the dashboard, using the same Pay/Hub wallet adapter as invoices, with demo mode safely read-only',
+      'Coming back from a transaction link keeps you signed in: tapping a tx hash and pressing back no longer drops you at the connect screen inside Nimiq Pay, and you land back on the tab you were on',
       'Sends celebrate: the confetti fires the instant your payment leaves the wallet, and the success sheet stays open until you tap Done',
       'Full wallet history: transactions that flow through your Nimiq Pay HTLC relay address now appear in History too, every send, receive, swap and contract hop shown and classified (swap / HTLC / payment), so nothing your wallet does is hidden',
       'Staking now finishes the way sending does: a clear "confirming on chain" step while the transaction settles, then a "Stake confirmed" card with your amount, your validator and the explorer link, confetti included',
