@@ -883,7 +883,7 @@ export function sortValidators(list: ValidatorInfo[]): ValidatorInfo[] {
   })
 }
 
-export async function getValidators(): Promise<ValidatorInfo[]> {
+export async function getValidators(opts?: { force?: boolean }): Promise<ValidatorInfo[]> {
   // A stale list still beats an empty picker if the API is down.
   let stale: ValidatorInfo[] | null = null
   try {
@@ -891,7 +891,7 @@ export async function getValidators(): Promise<ValidatorInfo[]> {
     if (raw) {
       const entry = JSON.parse(raw) as ValidatorCacheEntry
       if (Array.isArray(entry.validators) && entry.validators.length > 0) {
-        if (Date.now() - entry.at < VALIDATORS_TTL) return sortValidators(entry.validators)
+        if (!opts?.force && Date.now() - entry.at < VALIDATORS_TTL) return sortValidators(entry.validators)
         stale = entry.validators
       }
     }
