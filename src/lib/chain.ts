@@ -1049,7 +1049,7 @@ export function decodeMemo(data?: string): string {
   }
 }
 
-// Inverse of decodeMemo: UTF-8 text → hex, the form Nimiq tx data takes.
+/** Inverse of decodeMemo: UTF-8 text → hex, the form Nimiq tx data takes. */
 export function encodeMemo(text: string): string {
   return Array.from(new TextEncoder().encode(text))
     .map((b) => b.toString(16).padStart(2, '0'))
