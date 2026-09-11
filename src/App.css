@@ -598,6 +598,44 @@ a:focus-visible {
   font-weight: 700;
   color: var(--text);
 }
+/* Quick actions (Overview): Send + Receive side by side, each a full-height
+   thumb target. Two equal columns rather than flex so the labels can't make
+   one button wider than the other, and min-width:0 keeps a long label from
+   widening the grid and scrolling the page sideways. */
+.quick-actions-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.quick-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+  /* Narrower than the stock button padding: two of these share 390px. */
+  padding: 14px 12px;
+  /* .btn-secondary ships a 10px top margin for stacked buttons — inside the
+     grid the gap does that job. */
+  margin-top: 0;
+}
+.quick-action svg {
+  flex: none;
+}
+.quick-actions .hint.small {
+  display: block;
+  margin-top: 10px;
+}
+/* Two labelled buttons in one row is the tightest thing on the Overview —
+   below 340px they give up padding and a point of type rather than wrap. */
+@media (max-width: 339px) {
+  .quick-action {
+    padding: 13px 8px;
+    font-size: 13px;
+    gap: 6px;
+  }
+}
+
 /* Validator the stake is delegated to — a footnote to the "Staked" label */
 .delegate-to {
   font-family: 'SF Mono', 'Roboto Mono', ui-monospace, monospace;
@@ -1668,6 +1706,38 @@ a.btn-ghost.btn-link {
 .btn-primary.stake-submit {
   margin-top: 14px;
 }
+/* Send sheet: labelled fields stacked like the request form, with the
+   confirmation rows and the submit below. The confirmation block carries the
+   sheet's own surface colour, so it reads as a group inside it (the same way
+   .unstake-box does) rather than melting into the background. */
+.modal .invoice-confirm {
+  background: var(--card);
+}
+.send-form .label {
+  margin-top: 14px;
+}
+.send-form .label:first-child {
+  margin-top: 0;
+}
+.btn-primary.send-submit {
+  margin-top: 16px;
+}
+/* Receive sheet: the address is the point of the screen, so it gets its own
+   selectable block rather than sitting in a hint line. */
+.receive-addr {
+  margin: 12px 0 2px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  font-size: 12px;
+  text-align: center;
+  word-break: break-all;
+  /* One tap selects the whole address for a manual copy — the prefixed
+     property is what older iOS Safari honours. */
+  -webkit-user-select: all;
+  user-select: all;
+}
 .unstake-toggle {
   margin-top: 10px;
   width: 100%;
@@ -1925,7 +1995,9 @@ a.btn-ghost.btn-link {
   .version-badge,
   .error-banner,
   .toast,
-  .modal-overlay {
+  .modal-overlay,
+  /* Nothing but buttons — an empty card on a printed statement */
+  .quick-actions {
     display: none !important;
   }
   .app,
