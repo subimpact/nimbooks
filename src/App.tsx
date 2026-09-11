@@ -9,6 +9,10 @@ import {
   disconnectWallet,
   getConnectedAccount,
   getHubRedirectError,
+  getSavedSessionView,
+  hasRestorableSession,
+  restoreWalletSession,
+  saveSessionView,
   isDemoMode,
   canSend,
   canStake,
@@ -107,6 +111,12 @@ import {
 } from './lib/statement'
 
 type View = 'dashboard' | 'history' | 'receipts' | 'request' | 'export'
+
+const VIEWS: View[] = ['dashboard', 'history', 'receipts', 'request', 'export']
+
+function isView(value: string | null): value is View {
+  return !!value && (VIEWS as string[]).includes(value)
+}
 
 const RATES_KEY = 'nimbooks:rates'
 // The Nimiq Pay host's device identifier, cached so the prompt is asked once.
@@ -322,6 +332,14 @@ export default function App() {
   // main.tsx has already picked the answer off the URL — so the session can
   // exist before this component's first render.
   const [account, setAccount] = useState<WalletAccount | null>(getConnectedAccount)
+  // Inside Nimiq Pay, tapping a transaction hash loads the block explorer in
+  // the same WebView, so pressing back re-boots NimBooks with its in-memory
+  // connection gone. A session saved at connect time (lib/wallet.ts) is brought
+  // back silently here; until it answers the app shows a reconnecting line
+  // rather than the connect screen the user did nothing to deserve.
+  const [restoring, setRestoring] = useState(
+    () => !getConnectedAccount() && hasRestorableSession()
+  )
   // Nimiq Pay's sync state at connect time. `null` = not asked / not applicable
   // (Hub, demo, browser). Never gates the UI — see the note it renders.
   const [payConsensus, setPayConsensus] = useState<boolean | null>(null)
@@ -990,11 +1008,55 @@ export default function App() {
   // The redirect login above hands back an account, not a connect click, so
   // nothing has loaded the books for it yet. Mount-only: every other path into
   // an account already calls refresh itself.
+  //
+  // The same pass picks up a session the WebView threw away (see `restoring`).
+  // It runs once, and a failed restore clears the saved record, so there is
+  // nothing here that can retry itself into a loop.
   useEffect(() => {
-    const restored = getConnectedAccount()
-    if (restored) void refresh(restored)
+    const redirected = getConnectedAccount()
+    if (redirected) {
+      void refresh(redirected)
+      return
+    }
+    if (!restoring) return
+    void (async () => {
+      let acc: WalletAccount | null = null
+      try {
+        acc = await restoreWalletSession()
+      } catch (e) {
+        console.warn('Session restore failed:', e)
+      }
+      if (!acc) {
+        // Nothing (or nothing usable) to come back to: the connect screen, as
+        // before. wallet.restoreWalletSession has already dropped the record.
+        setRestoring(false)
+        return
+      }
+      // Demo story data goes in before the account lands, exactly as on the
+      // connect path — the receipts/invoices effects read it the moment the
+      // account is set. seedDemoData is an idempotent upsert, so a restore
+      // never duplicates what is already there.
+      if (acc.provider === 'demo' && acc.nimiqAddress) seedDemoData(acc.nimiqAddress)
+      const savedView = getSavedSessionView()
+      // One batch, so the connect screen never flashes between the two:
+      // `restoring` only goes false with an account in hand.
+      if (isView(savedView)) setView(savedView)
+      setPayConsensus(acc.consensus ?? null)
+      setAccount(acc)
+      setRestoring(false)
+      // From here it is an ordinary connect: same refresh, same books.
+      await refresh(acc)
+    })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Keep the saved session pointing at the tab the user is on, so back from the
+  // explorer lands on History rather than the dashboard. No-ops when nothing is
+  // saved (Hub, or a browser outside Nimiq Pay).
+  useEffect(() => {
+    if (!account) return
+    saveSessionView(view)
+  }, [view, account])
 
   // One ledger for everything that counts as a transaction: indexed txs, the
   // wallet's remote HTLC relay txs, plus the synthesized reward rows, newest
@@ -2433,6 +2495,31 @@ export default function App() {
       {APP_VERSION_LABEL}
     </button>
   )
+
+  // Coming back from a link Nimiq Pay opened in this same WebView: the session
+  // is being restored, so hold the hero and say so. Deliberately nothing to
+  // press — the connect screen would invite a second connect for a wallet that
+  // is already on its way back.
+  if (!account && restoring) {
+    return (
+      <div className="app">
+        <HeroBackground />
+        <header className="hero">
+          <div className="logo">📒</div>
+          <h1>NimBooks</h1>
+          <p className="tagline">The books for your Nimiq wallet — and the world's first in-Pay staking.</p>
+        </header>
+        <main className="connect-panel">
+          <div className="stake-progress" role="status" aria-live="polite">
+            <p className="stake-progress-head">
+              <span className="stake-spinner" aria-hidden="true" />
+              Reconnecting to your wallet…
+            </p>
+          </div>
+        </main>
+      </div>
+    )
+  }
 
   if (!account) {
     // One path per device — see lib/device.ts for the detection rules.
