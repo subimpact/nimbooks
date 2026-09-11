@@ -82,7 +82,6 @@ export default function HeroBackground() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const cursorRef = useRef<Cursor>({ x: -1, y: -1, active: false })
   const rippleRef = useRef<Ripple[]>([])
-  const frameRef = useRef(0)
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -147,6 +146,18 @@ export default function HeroBackground() {
       const ripple = { x: e.clientX - r.left, y: e.clientY - r.top, t0: performance.now() }
       rippleRef.current.push(ripple)
       if (rippleRef.current.length > 4) rippleRef.current.shift()
+    }
+
+    // Battery guard: a hidden tab paints nothing, so stop the loop while the
+    // page is in the background (the mini app can stay mounted in the Pay
+    // WebView for hours) and resume the moment it is visible again.
+    const onVisibility = () => {
+      if (document.hidden) {
+        cancelAnimationFrame(raf)
+        raf = 0
+      } else if (!raf) {
+        raf = requestAnimationFrame(draw)
+      }
     }
 
     const draw = (now: number) => {
@@ -272,18 +283,18 @@ export default function HeroBackground() {
       window.addEventListener('pointerleave', onLeave)
       window.addEventListener('pointerdown', onDown, { passive: true })
       window.addEventListener('resize', layout)
+      document.addEventListener('visibilitychange', onVisibility)
       raf = requestAnimationFrame(draw)
     }
 
-    frameRef.current = raf
-
     return () => {
       running = false
-      cancelAnimationFrame(frameRef.current)
+      cancelAnimationFrame(raf)
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerleave', onLeave)
       window.removeEventListener('pointerdown', onDown)
       window.removeEventListener('resize', layout)
+      document.removeEventListener('visibilitychange', onVisibility)
     }
   }, [])
 

@@ -111,6 +111,11 @@ a:focus-visible {
   margin: 0 auto;
   padding: 16px;
   padding-bottom: 104px; /* clears the floating dock */
+  /* Stacking context for the fixed .hero-bg canvas (z-index -1): it must
+     paint behind ALL app content (landing and connected screens both render
+     it) while still sitting above the page background. */
+  position: relative;
+  z-index: 1;
 }
 
 /* Hero (connect screen) */
@@ -119,12 +124,12 @@ a:focus-visible {
   padding: 56px 0 28px;
   position: relative;
 }
-/* Full-viewport animated hexagon field behind the landing content (see
-   HeroBackground.tsx). Fixed so it escapes the 480px app column.
-   z-index -1 keeps it UNDER all content: a z-index 0 fixed canvas paints
-   above static elements (the connect panel), which is how the hexagons
-   ended up over the fonts. The .landing stacking context (z-index 1) is
-   what makes a negative child work at all. */
+/* Full-viewport animated hexagon field behind the app content (see
+   HeroBackground.tsx). Rendered on the landing and the connected screens
+   alike. Fixed so it escapes the 480px app column; z-index -1 keeps it
+   UNDER all content (a z-index 0 fixed canvas paints above static elements,
+   which is how the hexagons ended up over the fonts). The .app stacking
+   context (z-index 1) is what makes a negative child work at all. */
 .hero-bg {
   position: fixed;
   inset: 0;
@@ -132,10 +137,6 @@ a:focus-visible {
   height: 100%;
   z-index: -1;
   pointer-events: none;
-}
-.landing {
-  position: relative;
-  z-index: 1;
 }
 .hero-actions {
   position: absolute;
