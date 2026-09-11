@@ -437,11 +437,20 @@ export default function App() {
   const [stakeAmount, setStakeAmount] = useState('')
   const [staking, setStaking] = useState(false)
   const [stakeError, setStakeError] = useState<string | null>(null)
-  const [stakeHash, setStakeHash] = useState<string | null>(null)
   const [stakeVerify, setStakeVerify] = useState<TxVerify | null>(null)
   const stakeVerifyRef = useRef<string | null>(null)
-  // Confetti burst on a confirmed stake: fires once per hash, then the panel
-  // closes itself after a short celebration beat.
+  // What was actually signed, captured at submit time: the confirming and
+  // confirmed cards render from this rather than from the form. The amount
+  // field resets the moment the tx goes out, and a first stake has no staker
+  // record to look its validator up in yet — neither survives long enough.
+  const [stakeSubmitted, setStakeSubmitted] = useState<{
+    hash: string
+    amountNim: number
+    validator: string
+  } | null>(null)
+  // Confetti burst on a confirmed stake: fires once per hash and ends with the
+  // burst. The panel never closes itself — the confirmed card waits for Done,
+  // exactly like the send sheet.
   const [stakeCelebrate, setStakeCelebrate] = useState<string | null>(null)
   const stakeCelebrateTimer = useRef<number | null>(null)
 
@@ -1186,6 +1195,37 @@ export default function App() {
 
   // --- Staking (Nimiq Pay) ---
 
+  // One place to end the burst — the twin of clearSendCelebration, so no path
+  // can leave confetti on screen or a timeout pointing at a panel that is gone.
+  const clearStakeCelebration = useCallback(() => {
+    if (stakeCelebrateTimer.current) window.clearTimeout(stakeCelebrateTimer.current)
+    stakeCelebrateTimer.current = null
+    setStakeCelebrate(null)
+  }, [])
+
+  // The verification poll outlives the panel — a closed panel still refreshes
+  // balances and still owes the user a toast — so it reads whether the panel is
+  // on screen off a ref rather than off the render it was started in.
+  const stakeOpenRef = useRef(false)
+  useEffect(() => {
+    stakeOpenRef.current = stakeOpen
+  }, [stakeOpen])
+
+  // Done, ✕, Escape and the overlay all land here. Closing never cancels a
+  // verification in flight: the poll keeps running, so the stake still lands in
+  // History and the toast still fires. Only the submit-flow display resets, and
+  // only once that flow is over — reopening mid-check resumes the confirming
+  // card instead of a form that looks like nothing ever happened.
+  const closeStake = useCallback(() => {
+    clearStakeCelebration()
+    if (stakeVerify !== 'checking') {
+      setStakeVerify(null)
+      setStakeSubmitted(null)
+      setStakeError(null)
+    }
+    setStakeOpen(false)
+  }, [clearStakeCelebration, stakeVerify])
+
   // The validator list is a 1.4 MB payload — 13× the whole gzipped bundle —
   // so it is fetched only when something actually renders from it, never just
   // because a wallet connected:
@@ -1248,11 +1288,9 @@ export default function App() {
         setReceiveOpen(false)
         return
       }
-      // Escape mid-celebration must not leave a stale timer behind either.
-      if (stakeCelebrateTimer.current) window.clearTimeout(stakeCelebrateTimer.current)
-      stakeCelebrateTimer.current = null
-      setStakeCelebrate(null)
-      setStakeOpen(false)
+      // Escape mid-celebration must not leave a stale timer behind either —
+      // closeStake owns that, along with resetting a finished submit flow.
+      closeStake()
       setCurrencyOpen(false)
       setChangelogOpen(false)
       setDownloadLink(null)
@@ -1262,6 +1300,7 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [
     stakeOpen,
+    closeStake,
     currencyOpen,
     changelogOpen,
     confirmUnstakeOpen,
@@ -1272,8 +1311,8 @@ export default function App() {
     backupMode,
   ])
 
-  // Clean up the celebration timers on unmount so a pending auto-close (stake)
-  // or confetti teardown (send) can't fire into a dead tree.
+  // Clean up the confetti timers on unmount so a pending burst teardown
+  // (stake or send) can't fire into a dead tree.
   useEffect(() => {
     return () => {
       if (stakeCelebrateTimer.current) window.clearTimeout(stakeCelebrateTimer.current)
@@ -1292,6 +1331,19 @@ export default function App() {
     () => validators.find((v) => cleanAddr(v.address) === lockedDelegation) ?? null,
     [validators, lockedDelegation]
   )
+  // The panel finishes in the same two beats as the send sheet: a confirming
+  // step while the tx settles on chain, then a card that waits for Done. Both
+  // replace the form — mixing a live slider into "confirming on chain" is what
+  // made the old inline hint easy to miss. 'expired' drops back to the form,
+  // where the error explains why, and 'unknown' reaches the card subdued: the
+  // tx may well have landed, so it can be shown but not claimed.
+  const stakeFlow: 'form' | 'confirming' | 'done' = !stakeSubmitted
+    ? 'form'
+    : stakeVerify === 'checking'
+      ? 'confirming'
+      : stakeVerify === 'confirmed' || stakeVerify === 'unknown'
+        ? 'done'
+        : 'form'
   const stakeAmountNim = Number(stakeAmount)
   // A first stake creates the staker record, and the protocol refuses to create
   // one below the 100 NIM minimum — the tx is rejected and never mines. Adding
@@ -1311,14 +1363,16 @@ export default function App() {
   const stakeMaxNim = stakeMaxLuna / 100000
 
   const openStake = () => {
-    setStakeError(null)
-    setStakeHash(null)
-    setStakeVerify(null)
-    // A reopen must never inherit a celebration from a previous session:
-    // clear the timer and burst so a fresh panel can't auto-close on its own.
-    if (stakeCelebrateTimer.current) window.clearTimeout(stakeCelebrateTimer.current)
-    stakeCelebrateTimer.current = null
-    setStakeCelebrate(null)
+    // A verification still in flight keeps its card — reopening mid-check
+    // resumes the confirming step rather than resetting to a form. Anything
+    // finished (or never started) opens clean, and a reopen never inherits a
+    // celebration from the previous stake.
+    if (stakeVerify !== 'checking') {
+      setStakeError(null)
+      setStakeVerify(null)
+      setStakeSubmitted(null)
+      clearStakeCelebration()
+    }
     // A first stake can't be smaller than the minimum, and the slider floor is
     // set there — so open on that value rather than on a 0 the panel would
     // only reject (and which would leave a tap on the floor doing nothing).
@@ -1359,19 +1413,25 @@ export default function App() {
       if (stakeVerifyRef.current !== hash) return // superseded by a newer submit
       setStakeVerify(result)
       if (result === 'confirmed') {
-        // Celebration beat: confetti burst, then the panel closes itself.
-        setStakeCelebrate(hash)
-        setToast('Stake confirmed on-chain! 🎉')
+        // An open panel celebrates on the spot: the confirmed card is the
+        // signal, with a confetti burst over it, and it waits for Done. A panel
+        // the user closed mid-check gets the toast instead, so a confirmation
+        // is never silent — and never announced twice.
+        if (stakeOpenRef.current) {
+          setStakeCelebrate(hash)
+          if (stakeCelebrateTimer.current) window.clearTimeout(stakeCelebrateTimer.current)
+          stakeCelebrateTimer.current = window.setTimeout(() => {
+            stakeCelebrateTimer.current = null
+            setStakeCelebrate(null)
+          }, CONFETTI_MS)
+        } else {
+          setToast('Stake confirmed on-chain! 🎉')
+        }
         // The submit-time refresh ran before the tx mined; now that it's on
         // chain, drop the cache and pull fresh balances/staker/history so the
-        // home screen reflects the stake the moment the panel closes.
+        // home screen is already right behind the card.
         clearTxCache()
         if (account) void refresh(account)
-        if (stakeCelebrateTimer.current) window.clearTimeout(stakeCelebrateTimer.current)
-        stakeCelebrateTimer.current = window.setTimeout(() => {
-          setStakeOpen(false)
-          setStakeCelebrate(null)
-        }, 3000)
         return
       }
       if (result !== 'expired') return
@@ -1385,11 +1445,9 @@ export default function App() {
 
   const submitStake = async () => {
     if (staking) return // double-tap / Enter guard — one signing request at a time
-    // A second submit must never inherit a pending auto-close from the
-    // previous confirmation: cancel the celebration timer up front.
-    if (stakeCelebrateTimer.current) window.clearTimeout(stakeCelebrateTimer.current)
-    stakeCelebrateTimer.current = null
-    setStakeCelebrate(null)
+    // A second submit starts its own two-beat: the previous confirmation's
+    // burst must never carry over into it.
+    clearStakeCelebration()
     // No staker record yet → this transaction creates one, and that is the
     // only moment the validator can be chosen (and the only one with a
     // minimum amount).
@@ -1417,15 +1475,23 @@ export default function App() {
     }
     setStaking(true)
     setStakeError(null)
-    setStakeHash(null)
     setStakeVerify(null)
+    setStakeSubmitted(null)
     try {
       const result = await stakeNim(firstStake ? selectedValidator : null, stakeAmountNim)
       if (!result.ok) {
         setStakeError(result.error)
         return
       }
-      setStakeHash(result.hash)
+      // Resolved here, not at render time: a first stake's validator is only
+      // knowable from the picker (there is no staker record yet), and an added
+      // stake's name comes from the delegation the record already carries.
+      const validatorName = firstStake
+        ? (validators.find((v) => cleanAddr(v.address) === selectedValidator)?.name ??
+          `${(selectedValidator ?? '').slice(0, 12)}…`)
+        : (currentValidator?.name ??
+          (lockedDelegation ? `${lockedDelegation.slice(0, 12)}…` : 'your validator'))
+      setStakeSubmitted({ hash: result.hash, amountNim: stakeAmountNim, validator: validatorName })
       verifyStakeTx(result.hash, stakeAmountNim)
       // Reset to a value the slider can actually hold: for a first stake the
       // floor is MIN_STAKE_NIM, so a bare '' would leave the thumb clamped at
@@ -1989,10 +2055,10 @@ export default function App() {
     setSelectedValidator(null)
     setStakeAmount('')
     setStakeError(null)
-    setStakeHash(null)
     // Drop any in-flight verification: its result belongs to the old account.
     setStakeVerify(null)
     stakeVerifyRef.current = null
+    setStakeSubmitted(null)
     setUnstakeHash(null)
     setUnstakeError(null)
     setUnstakeVerify(null)
@@ -2739,7 +2805,10 @@ export default function App() {
                     <strong>Stake 100 NIM to start earning.</strong> Delegate to a validator and
                     the rewards show up as income.
                     {canStake() ? (
-                      <button className="btn-secondary" onClick={() => setStakeOpen(true)}>
+                      // openStake, not a bare setStakeOpen: the panel now holds
+                      // a submit flow between opens, and only openStake knows
+                      // when it may be cleared (never mid-verification).
+                      <button className="btn-secondary" onClick={openStake}>
                         Stake NIM
                       </button>
                     ) : (
@@ -3496,50 +3565,25 @@ export default function App() {
       )}
 
       {stakeOpen && (
-        <div
-          className="modal-overlay"
-          onClick={() => {
-            // Closing mid-celebration must not leave a stale timer or confetti
-            // behind: a reopen within the 3s window would otherwise show the
-            // old burst and auto-close a fresh panel.
-            if (stakeCelebrateTimer.current) window.clearTimeout(stakeCelebrateTimer.current)
-            stakeCelebrateTimer.current = null
-            setStakeCelebrate(null)
-            setStakeOpen(false)
-          }}
-        >
+        <div className="modal-overlay" onClick={closeStake}>
           <div
             className="modal"
             role="dialog"
             aria-modal="true"
             aria-label="Stake NIM"
-            onClick={(e) => {
-              e.stopPropagation()
-              // Tap during the celebration keeps the panel open: cancel the
-              // auto-close and end the confetti burst.
-              if (stakeCelebrate) {
-                if (stakeCelebrateTimer.current) window.clearTimeout(stakeCelebrateTimer.current)
-                stakeCelebrateTimer.current = null
-                setStakeCelebrate(null)
-              }
-            }}
-            onScroll={() => {
-              // Scrolling the panel (e.g. to read the validator list) is also
-              // interaction — don't let the panel vanish under the finger.
-              if (stakeCelebrate) {
-                if (stakeCelebrateTimer.current) window.clearTimeout(stakeCelebrateTimer.current)
-                stakeCelebrateTimer.current = null
-                setStakeCelebrate(null)
-              }
-            }}
+            onClick={(e) => e.stopPropagation()}
           >
-            {stakeCelebrate && <Confetti />}
+            {/* Only ever set for a stake confirmed on chain, and only while the
+                panel is on screen to receive it. Keyed by hash so each stake
+                gets its own pieces. Pointer-events: none, so Done stays
+                tappable through it. */}
+            {stakeCelebrate && <Confetti key={stakeCelebrate} />}
             <div className="modal-head">
               <h2>
                 Stake NIM
                 <InfoIcon text="Unstaking takes 3 transactions: deactivate, retire, then withdraw. The official wallet schedules the last two automatically with a watchtower; NimBooks has no watchtower, so you confirm each step yourself in Nimiq Pay. The balance banner guides you through." />
               </h2>
-              <button className="btn-ghost" onClick={() => setStakeOpen(false)} aria-label="Close">
+              <button className="btn-ghost" onClick={closeStake} aria-label="Close">
                 ✕
               </button>
             </div>
@@ -3580,6 +3624,86 @@ export default function App() {
                   Open in Nimiq Pay →
                 </a>
               </>
+            ) : stakeFlow === 'confirming' && stakeSubmitted ? (
+              // Beat one. The form is gone on purpose: nothing here is editable
+              // while a signed transaction settles, and the wait deserves a
+              // state of its own rather than a line under a live slider.
+              <div className="stake-progress" role="status" aria-live="polite">
+                <p className="stake-progress-head">
+                  <span className="stake-spinner" aria-hidden="true" />
+                  Confirming on chain…
+                </p>
+                <div className="invoice-confirm">
+                  <div className="row">
+                    <span>Amount</span>
+                    <span>{stakeSubmitted.amountNim.toLocaleString(lang)} NIM</span>
+                  </div>
+                  <div className="row">
+                    <span>Validator</span>
+                    <span>{stakeSubmitted.validator}</span>
+                  </div>
+                </div>
+                <p className="hint small">
+                  Transaction{' '}
+                  <a
+                    className="tx-hash-link"
+                    href={explorerTxUrl(stakeSubmitted.hash)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {stakeSubmitted.hash.slice(0, 16)}…
+                  </a>
+                </p>
+                <p className="hint small">
+                  Nimiq mines in about a second, so this is usually over before you read it. You can
+                  close the panel: the stake is already on its way and it lands in your History
+                  either way.
+                </p>
+              </div>
+            ) : stakeFlow === 'done' && stakeSubmitted ? (
+              // Beat two. Confirmed reads as a win; 'unknown' means the node
+              // never answered, so the same card stays subdued and says so
+              // rather than claiming a stake that may not exist.
+              <div
+                role="status"
+                aria-live="polite"
+                className={
+                  stakeVerify === 'confirmed' ? 'invoice-sent stake-done' : 'stake-done unconfirmed'
+                }
+              >
+                {stakeVerify === 'confirmed' ? (
+                  <p className="ok">✓ Stake confirmed</p>
+                ) : (
+                  <p className="stake-done-title">Stake submitted</p>
+                )}
+                <div className="invoice-confirm">
+                  <div className="row">
+                    <span>Amount</span>
+                    <span>{stakeSubmitted.amountNim.toLocaleString(lang)} NIM</span>
+                  </div>
+                  <div className="row">
+                    <span>Validator</span>
+                    <span>{stakeSubmitted.validator}</span>
+                  </div>
+                </div>
+                <p className="hint small">
+                  Transaction{' '}
+                  <a
+                    className="tx-hash-link"
+                    href={explorerTxUrl(stakeSubmitted.hash)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {stakeSubmitted.hash.slice(0, 16)}…
+                  </a>{' '}
+                  {stakeVerify === 'confirmed'
+                    ? '· it is in your History, and your stake above updates as the node reports it.'
+                    : '· it was submitted, but we could not confirm it on chain. Check History in a moment.'}
+                </p>
+                <button className="btn-primary stake-submit" onClick={closeStake}>
+                  Done
+                </button>
+              </div>
             ) : (
               <>
                 <span className="label stake-section">Validator</span>
@@ -3711,21 +3835,18 @@ export default function App() {
                   </div>
                 )}
 
+                {/* A submitted stake is no longer reported here: it takes over
+                    the panel with a confirming step and then a confirmed card,
+                    the way the send sheet finishes. The form only ever sees a
+                    failure — an error it can explain and let the user retry. */}
                 {stakeError && <p className="hint small warn">{stakeError}</p>}
-                {stakeHash && stakeVerify !== 'expired' && (
-                  <p className="hint small ok">
-                    Stake {txVerifyLabel(stakeVerify)}{' '}
-                    <span className="mono">{stakeHash.slice(0, 20)}…</span>
-                    {stakeCelebrate && ' · tap to keep open'}
-                  </p>
-                )}
 
                 <button
                   className="btn-primary stake-submit"
                   onClick={submitStake}
                   disabled={!canStake() || staking || !stakeAmountValid || !validatorChosen}
                 >
-                  {staking ? 'Submitting…' : hasStaker ? 'Add to stake' : 'Stake'}
+                  {staking ? 'Confirm in your wallet…' : hasStaker ? 'Add to stake' : 'Stake'}
                 </button>
                 {hasStaker && (
                   <>

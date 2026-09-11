@@ -1767,6 +1767,46 @@ a.btn-ghost.btn-link {
 .btn-primary.stake-submit {
   margin-top: 14px;
 }
+/* Stake panel finish — the two beats the send sheet ends on: a confirming step
+   while the transaction settles, then a completion card that waits for Done.
+   Both replace the form, so each owns its own box inside the sheet. The
+   confirmed card borrows .invoice-sent (green frame) from the send flow; the
+   unconfirmed one stays in the neutral frame, because nothing is proven yet. */
+.stake-progress,
+.stake-done.unconfirmed {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  margin-top: 12px;
+}
+.stake-progress-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  font-weight: 600;
+}
+/* Rides on the same @keyframes the refresh icon spins on. */
+.stake-spinner {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  animation: spin 0.8s linear infinite;
+}
+.stake-progress .hint.small,
+.stake-done .hint.small {
+  margin-top: 6px;
+}
+/* The unconfirmed headline sits where the green "✓ Stake confirmed" does, and
+   matches its weight — only the colour says the chain hasn't answered yet. */
+.stake-done-title {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
 /* Send sheet: labelled fields stacked like the request form, with the
    confirmation rows and the submit below. The confirmation block carries the
    sheet's own surface colour, so it reads as a group inside it (the same way
