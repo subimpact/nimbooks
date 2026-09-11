@@ -120,14 +120,17 @@ a:focus-visible {
   position: relative;
 }
 /* Full-viewport animated hexagon field behind the landing content (see
-   HeroBackground.tsx). Fixed so it escapes the 480px app column, z-index 0
-   under the content, and pointer-events none so taps reach the buttons. */
+   HeroBackground.tsx). Fixed so it escapes the 480px app column.
+   z-index -1 keeps it UNDER all content: a z-index 0 fixed canvas paints
+   above static elements (the connect panel), which is how the hexagons
+   ended up over the fonts. The .landing stacking context (z-index 1) is
+   what makes a negative child work at all. */
 .hero-bg {
   position: fixed;
   inset: 0;
   width: 100%;
   height: 100%;
-  z-index: 0;
+  z-index: -1;
   pointer-events: none;
 }
 .landing {
