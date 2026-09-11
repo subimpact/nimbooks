@@ -7,7 +7,7 @@
 // Badge text. Spelled out rather than built from a version constant so the exact
 // label ships as one string in the bundle (JSX would emit "v" as a separate node).
 // package.json carries the machine-readable version.
-export const APP_VERSION_LABEL = 'v1.13.1'
+export const APP_VERSION_LABEL = 'v1.14.0'
 
 export interface ChangelogEntry {
   version: string
@@ -16,6 +16,13 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '1.14.0',
+    date: '2026-09-12',
+    items: [
+      'Stake and unstake amounts take typed round numbers: the slider now pairs with a field, so setting exactly 100 or 1,000 NIM is a quick type instead of a careful drag (thanks to Bjorn van der Schaaf for the suggestion)',
+    ],
+  },
   {
     version: '1.13.1',
     date: '2026-09-11',

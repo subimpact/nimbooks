@@ -1905,6 +1905,31 @@ a.btn-ghost.btn-link {
   color: var(--muted);
   font-weight: 500;
 }
+/* The figure beside the slider, editable. Sized to the number rather than the
+   row: 7 digits of tabular-nums plus its own padding, so it reads as part of
+   the value line instead of as a form field parked next to it. */
+.stake-amount-input {
+  width: calc(7ch + 14px);
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.stake-amount-input::placeholder {
+  color: var(--muted);
+  font-weight: 500;
+}
+.stake-amount-input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--ring);
+}
 .stake-history-note {
   margin: 0 0 10px;
   padding: 8px 10px;
