@@ -2142,7 +2142,7 @@ export default function App() {
     const inNimiqPay = isInNimiqPay()
     const isMobile = isMobileDevice()
     return (
-      <div className="app landing">
+      <div className="app">
         <HeroBackground />
         <header className="hero">
           <div className="hero-actions">

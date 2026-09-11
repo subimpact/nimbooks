@@ -31,6 +31,26 @@ interface Cursor {
 
 const TAU = Math.PI * 2
 const SQRT3 = Math.sqrt(3)
+// ~30 fps: the wave is slow, 60 fps only costs battery. The 2 ms of slack
+// matters: at a strict 33.3 ms a 60 Hz display misses the gate on every
+// second frame and the field aliases down to 20 fps.
+const FRAME_MS = 1000 / 30 - 2
+
+/**
+ * Deterministic per-cell noise in [0, 1), hashed from the cell's (row, col)
+ * and a salt. Math.random() would reshuffle every hexagon's size, phase and
+ * seed each time the grid is rebuilt, so the whole field visibly jumps when
+ * the mobile URL bar slides away; the hash keeps a rebuilt cell identical.
+ */
+function cellNoise(row: number, col: number, salt: number): number {
+  let h = Math.imul(row + 0x9e3779b1, 0x85ebca6b)
+  h = Math.imul(h ^ (col + 0x165667b1), 0xc2b2ae35)
+  h = Math.imul(h ^ salt, 0x27d4eb2f)
+  h ^= h >>> 15
+  h = Math.imul(h, 0x85ebca6b)
+  h ^= h >>> 13
+  return (h >>> 0) / 4294967296
+}
 
 function hexPath(
   ctx: CanvasRenderingContext2D,
@@ -75,8 +95,14 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
  *
  * Performance rules:
  *  - devicePixelRatio capped at 2 (the wave costs fill calls, not pixels).
- *  - Cells rebuilt on resize; the animation loop only draws, never allocates.
- *  - prefers-reduced-motion: one static frame, no rAF, no pointer handlers.
+ *  - Cells rebuilt on resize, debounced, from a (row, col) hash so a rebuild
+ *    reproduces the same field instead of reshuffling it.
+ *  - The loop paints at most ~30 fps. Per frame it still allocates the edge
+ *    and veil gradients, the stroke/fill color strings and (while ripples
+ *    live) a filtered ripple array. The hot part, the cell array, is built
+ *    once per layout.
+ *  - prefers-reduced-motion: one static frame, no rAF, no pointer handlers;
+ *    it is repainted on theme change and after a resize.
  */
 export default function HeroBackground() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -97,6 +123,8 @@ export default function HeroBackground() {
     let h = 0
     let running = true
     let raf = 0
+    let lastPaint = -Infinity // first frame paints without waiting on the cap
+    let resizeTimer = 0
 
     const layout = () => {
       w = canvas.clientWidth
@@ -107,7 +135,11 @@ export default function HeroBackground() {
 
       // Hex size scales with the viewport: 24 on phones, 34 on desktop.
       const size = w < 640 ? 24 : w < 1280 ? 30 : 34
-      const xStep = size * 1.5 // flat-top honeycomb: neighbours share slanted edges
+      // Column pitch of 1.5 * size against a full SQRT3 row pitch: closer
+      // than a tiling honeycomb, so neighbours overlap and the field reads as
+      // an interleaved star lattice rather than a seamless comb. Odd rows sit
+      // half a column to the right, which is what braids the two grids.
+      const xStep = size * 1.5
       const yStep = size * SQRT3
 
       cells = []
@@ -124,11 +156,11 @@ export default function HeroBackground() {
           cells.push({
             x: cx,
             y: cy,
-            size: size * (0.92 + Math.random() * 0.16),
+            size: size * (0.92 + cellNoise(row, col, 1) * 0.16),
             row,
             col,
-            phase: Math.random() * TAU,
-            seed: Math.random(),
+            phase: cellNoise(row, col, 2) * TAU,
+            seed: cellNoise(row, col, 3),
           })
         }
       }
@@ -142,6 +174,10 @@ export default function HeroBackground() {
       cursorRef.current.active = false
     }
     const onDown = (e: PointerEvent) => {
+      // A modal or confirm sheet covers the field: its taps belong to it, and
+      // a ripple nobody can see is pure work.
+      const target = e.target instanceof Element ? e.target : null
+      if (target?.closest('.modal-overlay, .confirm-overlay')) return
       const r = canvas.getBoundingClientRect()
       const ripple = { x: e.clientX - r.left, y: e.clientY - r.top, t0: performance.now() }
       rippleRef.current.push(ripple)
@@ -160,10 +196,9 @@ export default function HeroBackground() {
       }
     }
 
-    const draw = (now: number) => {
-      if (!running) return
-      raf = requestAnimationFrame(draw)
-
+    // paint() renders exactly one frame and schedules nothing, so the static
+    // (reduced-motion) path can call it without any risk of starting a loop.
+    const paint = (now: number) => {
       const bg = hexToRgb(cssVar('--bg', '#0f1117')) ?? { r: 15, g: 17, b: 23 }
       const light = (bg.r + bg.g + bg.b) / 3 > 128
       // Nimiq cyan strokes; teal fills only where the wave crests.
@@ -271,18 +306,46 @@ export default function HeroBackground() {
       }
     }
 
+    // The rAF chain stays at display rate; painting is throttled to FRAME_MS.
+    // Every wave term reads absolute `now`, so a skipped frame changes how
+    // often the field is redrawn, never how fast it moves.
+    const draw = (now: number) => {
+      if (!running) return
+      raf = requestAnimationFrame(draw)
+      if (now - lastPaint < FRAME_MS) return
+      lastPaint = now
+      paint(now)
+    }
+
+    // Resizes arrive in bursts (a drag, the mobile URL bar). Rebuild once the
+    // dust settles instead of once per event.
+    const onResize = () => {
+      clearTimeout(resizeTimer)
+      resizeTimer = window.setTimeout(() => {
+        layout()
+        if (reduce) paint(0)
+      }, 150)
+    }
+
+    // Reduced motion means no loop, so nothing would ever repaint the static
+    // frame in the new palette when the theme toggle flips `data-theme`.
+    const themeObserver = reduce ? new MutationObserver(() => paint(0)) : null
+
     layout()
 
     if (reduce) {
       // One static frame at t = 0: base + seed only (waves are frozen).
-      draw(0)
+      paint(0)
       running = false
-      cancelAnimationFrame(raf)
+      window.addEventListener('resize', onResize)
+      themeObserver?.observe(document.documentElement, {
+        attributeFilter: ['data-theme'],
+      })
     } else {
       window.addEventListener('pointermove', onMove, { passive: true })
       window.addEventListener('pointerleave', onLeave)
       window.addEventListener('pointerdown', onDown, { passive: true })
-      window.addEventListener('resize', layout)
+      window.addEventListener('resize', onResize)
       document.addEventListener('visibilitychange', onVisibility)
       raf = requestAnimationFrame(draw)
     }
@@ -290,10 +353,12 @@ export default function HeroBackground() {
     return () => {
       running = false
       cancelAnimationFrame(raf)
+      clearTimeout(resizeTimer)
+      themeObserver?.disconnect()
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerleave', onLeave)
       window.removeEventListener('pointerdown', onDown)
-      window.removeEventListener('resize', layout)
+      window.removeEventListener('resize', onResize)
       document.removeEventListener('visibilitychange', onVisibility)
     }
   }, [])
