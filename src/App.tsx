@@ -48,6 +48,7 @@ import {
   formatValidatorFee,
   formatValidatorReward,
   formatValidatorReliability,
+  isPinnedValidator,
   isLabelledTxKind,
   txLabel,
   decodeMemo,
@@ -4266,18 +4267,20 @@ export default function App() {
                       const fee = formatValidatorFee(v.fee)
                       const reliability = formatValidatorReliability(v.reliability)
                       const reward = formatValidatorReward(v.annualReward)
+                      const isPinned = isPinnedValidator(v.address)
+                      const isInactive = v.reliability === null && !isPinned
                       return (
                         <button
                           key={addr}
                           type="button"
                           role="radio"
                           aria-checked={activeSelection === addr}
-                          disabled={hasStaker || v.reliability === null}
+                          disabled={hasStaker || isInactive}
                           onClick={() => setSelectedValidator(addr)}
                           className={[
                             'option-row',
                             activeSelection === addr ? 'selected' : '',
-                            v.reliability === null ? 'inactive' : '',
+                            isInactive ? 'inactive' : '',
                           ]
                             .filter(Boolean)
                             .join(' ')}
@@ -4306,7 +4309,7 @@ export default function App() {
                             </span>
                             {v.reliability === null && (
                               <span className="badge inactive">
-                                inactive: not producing rewards
+                                {isPinned ? 'new pool · score pending' : 'inactive: not producing rewards'}
                               </span>
                             )}
                           </span>
