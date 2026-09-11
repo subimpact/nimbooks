@@ -3,7 +3,7 @@
 // Badge text. Spelled out rather than built from a version constant so the exact
 // label ships as one string in the bundle (JSX would emit "v" as a separate node).
 // package.json carries the machine-readable version.
-export const APP_VERSION_LABEL = 'v1.9.0'
+export const APP_VERSION_LABEL = 'v1.10.0'
 
 export interface ChangelogEntry {
   version: string
@@ -12,6 +12,14 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '1.10.0',
+    date: '2026-09-11',
+    items: [
+      'Full wallet history: transactions that flow through your Nimiq Pay HTLC relay address now appear in History too — every send, receive, swap and contract hop is shown and classified (swap / HTLC / payment), so nothing your wallet does is hidden',
+      'Send celebration fires the instant your payment leaves the wallet — the confetti goes with the success dialog, no waiting for the chain',
+    ],
+  },
   {
     version: '1.9.0',
     date: '2026-09-11',
