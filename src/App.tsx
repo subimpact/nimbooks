@@ -89,6 +89,7 @@ import {
 import { seedDemoData } from './lib/demoData'
 import { getRestakeRewardTxs, restakeWindow } from './lib/stakingEvents'
 import { isInNimiqPay, isMobileDevice, NIMIQ_PAY_APP_URL, siteLink } from './lib/device'
+import { dialogFocus } from './lib/dialogFocus'
 import { shortenUrl } from './lib/shorten'
 import { buildDownloadLink } from './lib/downloadLink'
 import { exportBackup, importBackup, validateBackup } from './lib/backup'
@@ -1001,7 +1002,13 @@ export default function App() {
   // disagree about income.
   // (The balance trajectory in Analytics is the exception — see below.)
   const allTxs = useMemo(() => {
-    const base = [...nimTxs, ...remoteTxs]
+    // Deduped by hash: a transfer between the wallet's basic address and its
+    // own relay — the funding hop the whole Pay model runs on — is returned by
+    // *both* address indexes. Merged raw it becomes two History rows sharing a
+    // React key, a duplicate CSV line, and double-counted sent/fees in the tax
+    // statement. The basic-address row wins; the relay copy is the same tx.
+    const seen = new Set(nimTxs.map((t) => t.hash))
+    const base = [...nimTxs, ...remoteTxs.filter((t) => !seen.has(t.hash))]
     if (rewardTxs.length === 0) return base
     return [...base, ...rewardTxs].sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
   }, [nimTxs, remoteTxs, rewardTxs])
@@ -1542,10 +1549,19 @@ export default function App() {
       // The log row is keyed by hash, so it resolves even when a newer submit
       // has taken over the panel's verification state.
       if (addr && amountNim) {
-        if (result === 'confirmed') markStakingActionConfirmed(addr, hash)
-        setStakingLog((prev) =>
-          prev.map((a) => (a.hash === hash ? { ...a, confirmed: result === 'confirmed' } : a))
-        )
+        if (result === 'confirmed') {
+          markStakingActionConfirmed(addr, hash)
+          setStakingLog((prev) =>
+            prev.map((a) => (a.hash === hash ? { ...a, confirmed: true } : a))
+          )
+        } else if (result === 'expired') {
+          // A stake that never reached the chain takes its row with it — the
+          // same rule the unstake legs follow, and the invariant lib/stakingLog
+          // states: the row must not linger claiming an action that never
+          // happened. 'unknown' leaves it as submitted-not-confirmed.
+          removeStakingAction(addr, hash)
+          setStakingLog((prev) => prev.filter((a) => a.hash !== hash))
+        }
       }
       if (stakeVerifyRef.current !== hash) return // superseded by a newer submit
       setStakeVerify(result)
@@ -1722,7 +1738,11 @@ export default function App() {
   // reached the chain takes its row with it.
   const verifyUnstakeTx = (
     hash: string,
-    action?: { kind: UnstakeLegKind; amountNim: number }
+    action?: { kind: UnstakeLegKind; amountNim: number },
+    // Which window this leg reports into. Passed in rather than read off state:
+    // the poll outlives the render it was started in, and an expired leg has to
+    // know whether there is still a form on screen to show its error.
+    source: 'panel' | 'banner' = 'panel'
   ) => {
     const addr = account?.nimiqAddress
     if (action && addr) {
@@ -1767,15 +1787,38 @@ export default function App() {
         return
       }
       if (result !== 'expired') return
-      setPendingUnstake(null)
-      try {
-        if (pendingUnstakeKey) localStorage.removeItem(pendingUnstakeKey)
-      } catch {
-        /* ignore */
+      // Only the deactivation that owns the marker may clear it. A withdraw or
+      // a retire is a different step of a different leg, and wiping the marker
+      // for one of those would drop a live deactivation's banner for the ~12h
+      // until the staker record flips. Both the state and the persisted copy
+      // are matched on the hash, so a newer deactivation's marker survives too.
+      if (action?.kind === 'deactivate') {
+        setPendingUnstake((prev) => (prev?.hash === hash ? null : prev))
+        try {
+          if (pendingUnstakeKey) {
+            const stored = localStorage.getItem(pendingUnstakeKey)
+            if (stored && (JSON.parse(stored) as { hash?: string }).hash === hash) {
+              localStorage.removeItem(pendingUnstakeKey)
+            }
+          }
+        } catch {
+          /* ignore */
+        }
       }
-      setUnstakeError(
-        'Unstake transaction was not mined: it never reached the chain. Please try again.'
-      )
+      // A banner leg has no form to fall back to: its window unmounts with the
+      // flow, so the toast below is the whole message. Left in state, the error
+      // would strand and resurface later under the *panel's* unstake form,
+      // where it belongs to nothing. A panel leg keeps its error — the form it
+      // failed in is still on screen to explain it.
+      if (source === 'banner') {
+        setUnstakeSubmitted(null)
+        setUnstakeError(null)
+        setUnstakeModalOpen(false)
+      } else {
+        setUnstakeError(
+          'Unstake transaction was not mined: it never reached the chain. Please try again.'
+        )
+      }
       setToast('Unstake transaction was not mined ✗')
     })()
   }
@@ -1924,7 +1967,7 @@ export default function App() {
         notes: [],
       })
       setUnstakeModalOpen(true)
-      verifyUnstakeTx(retire.hash, { kind: 'retire', amountNim: retireNim })
+      verifyUnstakeTx(retire.hash, { kind: 'retire', amountNim: retireNim }, 'banner')
       clearTxCache()
       if (account) await refresh(account)
     } finally {
@@ -1953,7 +1996,7 @@ export default function App() {
         notes: [],
       })
       setUnstakeModalOpen(true)
-      verifyUnstakeTx(remove.hash, { kind: 'withdraw', amountNim: removeNim })
+      verifyUnstakeTx(remove.hash, { kind: 'withdraw', amountNim: removeNim }, 'banner')
       clearTxCache()
       if (account) await refresh(account)
     } finally {
@@ -2076,11 +2119,12 @@ export default function App() {
         .filter((t) => t.executionResult !== false)
         .map((t) => {
           const isOut = t.sender.replace(/\s+/g, '').toUpperCase() === own
+          const kind = txLabel(t, own)
           return [
             new Date(t.timestamp ?? Date.now()).toISOString(),
             t.hash,
             isOut ? 'sent' : 'received',
-            txLabel(t, own),
+            kind,
             t.sender,
             t.recipient,
             (Number(t.value) / 100000).toFixed(5), // raw decimals — no locale separators (accounting-safe)
@@ -2089,7 +2133,10 @@ export default function App() {
             // USD value is unknown, and an unknown value is blank — a column
             // of 0.000000 reads as "these transactions were worthless".
             rates.nim > 0 ? ((Number(t.value) / 100000) * rates.nim).toFixed(6) : '',
-            decodeMemo(t.data) ?? '',
+            // A staking transaction's data field is a signalling payload, not
+            // a note: the kind column already says what it is, and the raw hex
+            // has no place in an accountant's memo column.
+            kind === 'stake' || kind === 'unstake' ? '' : (decodeMemo(t.data) ?? ''),
           ]
         }),
     ]
@@ -2209,6 +2256,10 @@ export default function App() {
     contractSweepRef.current = null
     setNimBalance(null)
     setNimTxs([])
+    // The relay history goes with the rest of the ledger: connect() sets the
+    // new account before its refresh resolves, so a leftover list would render
+    // the previous wallet's rows in History (and export them) mid-fetch.
+    setRemoteTxs([])
     setRewardTxs([])
     setHtlcHoldings([])
     setHtlcInTransit(0)
@@ -2346,6 +2397,8 @@ export default function App() {
         role="dialog"
         aria-modal="true"
         aria-label="Changelog"
+        ref={dialogFocus}
+        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="modal-head">
@@ -2589,8 +2642,7 @@ export default function App() {
         <button
           className="btn-ghost"
           onClick={openStake}
-          disabled={demoMode}
-          title={demoMode ? 'Demo mode is read-only' : 'Stake'}
+          title={demoMode ? 'Stake (read-only in demo mode)' : 'Stake'}
           aria-label="Stake"
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -3083,10 +3135,11 @@ export default function App() {
                   <li>
                     <strong>Stake 100 NIM to start earning.</strong> Delegate to a validator and
                     the rewards show up as income.
-                    {canStake() ? (
+                    {canStake() || demoMode ? (
                       // openStake, not a bare setStakeOpen: the panel now holds
                       // a submit flow between opens, and only openStake knows
                       // when it may be cleared (never mid-verification).
+                      // Demo opens it read-only, like the send sheet.
                       <button className="btn-secondary" onClick={openStake}>
                         Stake NIM
                       </button>
@@ -3198,9 +3251,9 @@ export default function App() {
             )}
             {stakingHolding && (Number(stakingHolding.active) > 0 || Number(stakingHolding.inactive) > 0 || Number(stakingHolding.retired) > 0) && (
               <p className="hint small stake-history-note">
-                Stake and unstake transactions are not exposed by the public chain index, so
-                only the unstake actions you sent from this device appear below (reward payouts
-                do too, one row per day). Your staker record is live:{' '}
+                Unstake transactions (deactivate, retire, withdraw) are not exposed by the public
+                chain index, so only the ones you sent from this device appear below (reward
+                payouts do too, one row per day). Your staker record is live:{' '}
                 <strong>
                   {formatLuna(stakingHolding.active, lang)} NIM active
                   {Number(stakingHolding.inactive) > 0 &&
@@ -3282,7 +3335,10 @@ export default function App() {
                     )}
                     {tx.executionResult === false && <span className="tx-failed"> · failed</span>}
                   </div>
-                  {memo && (
+                  {/* A staking transaction's data field is a signalling
+                      payload, not a note anyone wrote: rendering that hex blob
+                      as "memo:" is noise on screen and in the export. */}
+                  {memo && label !== 'stake' && label !== 'unstake' && (
                     <div className="tx-memo">
                       memo:{' '}
                       {(() => {
@@ -3298,7 +3354,11 @@ export default function App() {
                       })()}
                     </div>
                   )}
-                  {!tx.synthetic && !tx.remote && (
+                  {/* A deposit into the staking contract (toType 3) is not a
+                      receipt candidate either — see lib/chain: the wallet
+                      can't prove a payment it didn't make to a counterparty,
+                      so the signature would verify and prove nothing. */}
+                  {!tx.synthetic && !tx.remote && tx.toType !== 3 && (
                     <button
                       className="btn-small"
                       onClick={() => makeReceipt(tx)}
@@ -3666,6 +3726,8 @@ export default function App() {
             role="dialog"
             aria-modal="true"
             aria-label="CSV download link"
+            ref={dialogFocus}
+            tabIndex={-1}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="modal-head">
@@ -3728,6 +3790,8 @@ export default function App() {
             role="dialog"
             aria-modal="true"
             aria-label={backupMode === 'backup' ? 'Back up your data' : 'Restore from backup'}
+            ref={dialogFocus}
+            tabIndex={-1}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="modal-head">
@@ -3802,6 +3866,8 @@ export default function App() {
             role="dialog"
             aria-modal="true"
             aria-label="Display currency"
+            ref={dialogFocus}
+            tabIndex={-1}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="modal-head">
@@ -3850,6 +3916,8 @@ export default function App() {
             role="dialog"
             aria-modal="true"
             aria-label="Stake NIM"
+            ref={dialogFocus}
+            tabIndex={-1}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Only ever set for a stake confirmed on chain, and only while the
@@ -3888,7 +3956,12 @@ export default function App() {
               )}
             </div>
 
-            {!inNimiqPay ? (
+            {/* Demo mode is the exception to the "not in Pay, nothing to show
+                here" rule: the panel is the flagship feature, and a sample
+                wallet can show all of it — the real validator list, the real
+                yields, the real numbers — with every button that signs left
+                disabled. Same read-only treatment the send sheet gets. */}
+            {!inNimiqPay && !demoMode ? (
               <>
                 <p className="hint">
                   Staking is signed by your wallet, so it runs in the Nimiq Pay app. Open NimBooks
@@ -4133,6 +4206,16 @@ export default function App() {
                 >
                   {staking ? 'Confirm in your wallet…' : hasStaker ? 'Add to stake' : 'Stake'}
                 </button>
+                {demoMode && (
+                  // Read-only, and nothing here is faked: the validators, the
+                  // yields and the balances are live. wallet.stakeNim refuses
+                  // demo mode outright, so the button above stays disabled.
+                  <p className="hint small">
+                    Demo mode is read-only: this is the real validator list and the sample
+                    wallet's real numbers, but nothing here can sign. Open NimBooks in Nimiq Pay
+                    with your own wallet to stake.
+                  </p>
+                )}
                 {hasStaker && (
                   <>
                     <button
@@ -4193,6 +4276,8 @@ export default function App() {
                               role="dialog"
                               aria-modal="true"
                               aria-label="Confirm unstake"
+                              ref={dialogFocus}
+                              tabIndex={-1}
                               onClick={(e) => e.stopPropagation()}
                             >
                               <h3 className="confirm-title">Confirm unstake</h3>
@@ -4257,6 +4342,8 @@ export default function App() {
             role="dialog"
             aria-modal="true"
             aria-label={UNSTAKE_LEG[unstakeSubmitted.legs[0].kind].window}
+            ref={dialogFocus}
+            tabIndex={-1}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="modal-head">
@@ -4279,6 +4366,8 @@ export default function App() {
             role="dialog"
             aria-modal="true"
             aria-label="Send NIM"
+            ref={dialogFocus}
+            tabIndex={-1}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Only ever set for a payment confirmed on chain, and never in
@@ -4491,6 +4580,8 @@ export default function App() {
             role="dialog"
             aria-modal="true"
             aria-label="Receive NIM"
+            ref={dialogFocus}
+            tabIndex={-1}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="modal-head">

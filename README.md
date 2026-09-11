@@ -50,15 +50,31 @@ src/
 │   ├── receipt.ts       # Receipt encode/decode + Ed25519 verify + signer binding + on-chain cross-check
 │   ├── invoice.ts       # Payment requests — exact Luna maths, link encoding, per-account storage
 │   ├── qr.ts            # Dependency-free QR encoder (byte mode, ECC L/M, versions 1–40)
+│   ├── shorten.ts       # Client half of the share-link shortener — never throws, falls back to the long URL
+│   ├── stakingLog.ts    # Local log of staking actions the public tx index doesn't return
+│   ├── backup.ts        # Export/restore of everything the app keeps in localStorage
+│   ├── demoData.ts      # Demo-mode story: a real signed receipt and a chain-paid invoice
+│   ├── changelog.ts     # Release notes + the version label shown in the badge
 │   ├── device.ts        # One-path-per-device detection (Nimiq Pay on mobile, Hub on desktop)
+│   ├── dialogFocus.ts   # Focus into and back out of every aria-modal dialog
 │   ├── theme.ts         # Light/dark preference
-│   └── global.d.ts      # window.ethereum / window.nimiqPay types
+│   └── global.d.ts      # window.ethereum types (Nimiq Pay's own provider comes typed with the SDK)
 ├── App.tsx              # Main mini app (Overview / History / Receipts / Request / Export)
+├── Analytics.tsx        # Dependency-free SVG charts — daily net flow + balance trajectory, with drilldowns
+├── HeroBackground.tsx   # The living hexagon field behind the app
+├── DetailSheet.tsx      # Shared bottom-sheet shell for the Analytics drilldowns
+├── Confetti.tsx         # Celebration burst for a confirmed send or stake
+├── QrCode.tsx           # SVG renderer for lib/qr.ts
+├── InfoIcon.tsx         # Tap-to-explain icon used across the Overview cards
 ├── InvoicePage.tsx      # Public payment-request page (#/invoice/<request>)
 └── VerifyPage.tsx       # Public receipt verification page (#/verify/<receipt>)
 
 functions/
+├── api/shorten.ts       # Pages Function — short.io share links (the API key stays server-side)
 └── export/[[file]].ts   # Pages Function — decodes an export link and serves the CSV as a download
+
+public/
+└── _headers             # Content-Security-Policy (frame-ancestors left open for Pay's WebView)
 ```
 
 The wallet layer is behind an adapter interface — swapping Nimiq Pay for Telegram Mini Apps later means replacing one file.

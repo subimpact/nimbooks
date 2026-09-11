@@ -149,6 +149,8 @@ a:focus-visible {
 /* Mini glass pills for the version badge and theme toggle: over the hex
    field, a raw ghost button disappears; the frosted pill keeps it legible. */
 .hero-actions > * {
+  /* Solid fill fallback — color-mix() unsupported → the pill stays a pill. */
+  background: var(--bg-elev);
   background: color-mix(in srgb, var(--bg-elev) 62%, transparent);
   -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
@@ -165,7 +167,11 @@ a:focus-visible {
   font-size: 34px;
   font-weight: 800;
   letter-spacing: -0.02em;
-  /* Gradient + shadow keep the wordmark readable over the hex field. */
+  /* Gradient + shadow keep the wordmark readable over the hex field.
+     Flat fill first: -webkit-text-fill-color below is unconditional, so a
+     WebView without color-mix() would drop the gradient and paint the
+     wordmark in transparent ink. */
+  background: var(--text);
   background: linear-gradient(
     180deg,
     var(--text) 0%,
@@ -191,6 +197,9 @@ a:focus-visible {
   margin: 8px 0 24px;
   padding: 24px 20px;
   border-radius: 24px;
+  /* Solid fill fallback — without it a WebView lacking color-mix() leaves the
+     card with no background at all, over a moving hexagon field. */
+  background: var(--bg-elev);
   background: color-mix(in srgb, var(--bg-elev) 72%, transparent);
   -webkit-backdrop-filter: blur(18px) saturate(1.25);
   backdrop-filter: blur(18px) saturate(1.25);
@@ -205,6 +214,9 @@ a:focus-visible {
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .connect-panel,
   .hero-actions > * {
+    /* The escape hatch needs its own escape hatch: a WebView old enough to
+       lack backdrop-filter may lack color-mix() too. */
+    background: var(--bg-elev);
     background: color-mix(in srgb, var(--bg-elev) 94%, transparent);
   }
 }

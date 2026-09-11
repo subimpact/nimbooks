@@ -7,6 +7,7 @@
 // overlay still covers the viewport from here.
 
 import { useEffect, type ReactNode } from 'react'
+import { dialogFocus } from './lib/dialogFocus'
 
 export default function DetailSheet({
   title,
@@ -34,6 +35,8 @@ export default function DetailSheet({
         role="dialog"
         aria-modal="true"
         aria-label={title}
+        ref={dialogFocus}
+        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="modal-head">

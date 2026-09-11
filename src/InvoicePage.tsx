@@ -37,6 +37,15 @@ import { encodeReceipt, type SignedReceipt } from './lib/receipt'
 
 type PayState = 'idle' | 'confirm' | 'sending' | 'locating' | 'sent'
 
+// Addresses travel through the share link stripped of their spaces, so the
+// page regroups them for reading — the same four-character grouping the verify
+// page and the dashboard show. A 36-character run is unreadable and unusable
+// for checking who you are about to pay.
+function spacedAddr(addr: string): string {
+  const clean = addr.replace(/\s+/g, '').toUpperCase()
+  return clean.match(/.{1,4}/g)?.join(' ') ?? addr
+}
+
 // A lookup that answers "what does the chain say", where an RPC hiccup and a
 // tx the index hasn't picked up yet are the same answer: not yet.
 async function fetchTx(hash: string) {
@@ -343,7 +352,7 @@ export default function InvoicePage() {
         <div className="verify-grid">
           <div>
             <span className="label">Pay to</span>
-            <span className="value mono">{invoice.payee}</span>
+            <span className="value mono">{spacedAddr(invoice.payee)}</span>
           </div>
           {invoice.memo && (
             <div>
