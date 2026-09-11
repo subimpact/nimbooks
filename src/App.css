@@ -145,6 +145,15 @@ a:focus-visible {
   align-items: center;
   gap: 8px;
 }
+/* Mini glass pills for the version badge and theme toggle: over the hex
+   field, a raw ghost button disappears; the frosted pill keeps it legible. */
+.hero-actions > * {
+  background: color-mix(in srgb, var(--bg-elev) 62%, transparent);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: 999px;
+}
 .hero .logo {
   font-size: 60px;
   margin-bottom: 12px;
@@ -155,16 +164,48 @@ a:focus-visible {
   font-size: 34px;
   font-weight: 800;
   letter-spacing: -0.02em;
+  /* Gradient + shadow keep the wordmark readable over the hex field. */
+  background: linear-gradient(
+    180deg,
+    var(--text) 0%,
+    color-mix(in srgb, var(--text) 72%, var(--accent)) 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 2px 14px rgba(0, 0, 0, 0.45));
 }
 .tagline {
   color: var(--muted);
   margin-top: 8px;
   font-size: 15px;
+  text-shadow: 0 1px 12px rgba(0, 0, 0, 0.5);
 }
 
+/* The connect panel as a floating glass card: translucent frosted pane that
+   rests on the hexagon field. Backdrop blur is progressive enhancement; the
+   translucent fill alone keeps the copy readable in WebViews without it. */
 .connect-panel {
   text-align: center;
-  padding: 24px 0;
+  margin: 8px 0 24px;
+  padding: 24px 20px;
+  border-radius: 24px;
+  background: color-mix(in srgb, var(--bg-elev) 72%, transparent);
+  -webkit-backdrop-filter: blur(18px) saturate(1.25);
+  backdrop-filter: blur(18px) saturate(1.25);
+  border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.2),
+    0 12px 40px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+/* WebView without backdrop-filter: the pane goes nearly opaque instead of
+   showing hexagons through unblurred glass (which fights the text). */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .connect-panel,
+  .hero-actions > * {
+    background: color-mix(in srgb, var(--bg-elev) 94%, transparent);
+  }
 }
 .feature-list {
   list-style: none;
