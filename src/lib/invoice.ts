@@ -130,7 +130,12 @@ export function isValidInvoice(x: unknown): x is InvoicePayload {
   if (!x || typeof x !== 'object') return false
   const i = x as Record<string, unknown>
   if (i.app !== 'nimbooks' || i.v !== 1) return false
-  if (typeof i.id !== 'string' || !i.id) return false
+  // The id is not just a label: it becomes the on-chain memo the payer signs
+  // (`invoiceMemo`), so a crafted link must not be able to write arbitrary text
+  // into someone else's transaction data, blow Nimiq's 64-byte cap, or produce
+  // a reference that INVOICE_MEMO_RE can never reconcile. Same alphabet the
+  // generator uses, same length it produces.
+  if (typeof i.id !== 'string' || !/^[0-9a-z-]{1,24}$/i.test(i.id)) return false
   // Accept both address spellings — "NQ43 6G6H …" and the flat form.
   if (typeof i.payee !== 'string' || !/^NQ[0-9A-Z]{34}$/i.test(i.payee.replace(/\s+/g, ''))) return false
   if (i.payer !== undefined && (typeof i.payer !== 'string' || !/^NQ[0-9A-Z]{34}$/i.test(i.payer.replace(/\s+/g, ''))))

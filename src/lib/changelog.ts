@@ -3,7 +3,7 @@
 // Badge text. Spelled out rather than built from a version constant so the exact
 // label ships as one string in the bundle (JSX would emit "v" as a separate node).
 // package.json carries the machine-readable version.
-export const APP_VERSION_LABEL = 'v1.13.0'
+export const APP_VERSION_LABEL = 'v1.13.1'
 
 export interface ChangelogEntry {
   version: string
@@ -12,6 +12,17 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '1.13.1',
+    date: '2026-09-11',
+    items: [
+      'History no longer double-counts payments that hop through your wallet’s relay address',
+      'A stake that never reaches the chain no longer leaves a phantom entry in your books',
+      'Demo mode now shows the staking panel in full, read-only: the validator picker, yields and the finish flow are all visible without a wallet',
+      'Dialogs now manage focus for screen readers, and a content security policy guards the app',
+      'Polish: readable payee addresses, safer invoice links, relay history cleared on disconnect, unstake errors can no longer resurface',
+    ],
+  },
   {
     version: '1.13.0',
     date: '2026-09-11',
@@ -76,6 +87,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     items: [
       'Quick actions on Overview: send NIM or receive it with a QR code without leaving the dashboard',
       'Send uses the same Pay/Hub wallet adapter as invoices, with demo mode safely read-only',
+      'Inside Nimiq Pay, your in-transit NIM is now read straight from the wallet’s own account list, so the figure lands in one call instead of a history scan (the scan stays as the fallback everywhere else)',
     ],
   },
   {
@@ -84,6 +96,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     items: [
       'Receipts show their memo: signed receipts now display the payment note right on the card, matching what the verify page proves',
       'History speaks human: a payment that settled a request shows the request name (e.g. “Acme Corp - Invoice #12”) alongside its on-chain reference',
+      'Demo mode tells a whole story on any device: the sample wallet now comes with a genuinely signed receipt and a request that was really paid on chain, so Receipts and Requests are never empty',
     ],
   },
   {
