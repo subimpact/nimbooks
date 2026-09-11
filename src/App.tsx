@@ -216,6 +216,10 @@ type TxVerify = 'checking' | 'confirmed' | 'expired' | 'unknown'
 // interval matches the auto-refresh cadence — nimiqwatch 429s on faster polls.
 const TX_VERIFY_TIMEOUT_MS = 90_000
 const TX_VERIFY_INTERVAL_MS = 10_000
+// Longest a confetti piece can be on screen (0.15s delay + 1.6s fall, see
+// Confetti.tsx) plus a beat, after which the burst unmounts itself and leaves
+// the success screen clean. It does not close anything.
+const CONFETTI_MS = 2_600
 
 // Nimiq PoS: one epoch is 43,200 blocks at ~1 block/second (~12h). A retire is
 // only valid a full reporting epoch after the deactivation took effect, which
@@ -364,6 +368,11 @@ export default function App() {
   const [sendState, setSendState] = useState<'idle' | 'sending' | 'locating' | 'sent'>('idle')
   const [sendError, setSendError] = useState<string | null>(null)
   const [sendHash, setSendHash] = useState<string | null>(null)
+  // Confetti for a payment that actually landed — held as the hash it belongs
+  // to, so a burst is always traceable to one transaction (see celebrateSend).
+  // The sheet never closes itself: this only draws, Done still does the rest.
+  const [sendCelebrate, setSendCelebrate] = useState<string | null>(null)
+  const sendCelebrateTimer = useRef<number | null>(null)
   const [receiveOpen, setReceiveOpen] = useState(false)
   // The global toast sits in the page flow, under the modal overlay — so a copy
   // from inside the Receive sheet confirms on the button itself as well.
@@ -1011,10 +1020,21 @@ export default function App() {
   // a sheet the user has dismissed (same idea as stakeVerifyRef below).
   const sendTicketRef = useRef(0)
 
+  // One place to end the burst: the timer and the hash go together, so no path
+  // can leave confetti on screen or a timeout pointing at a sheet that is gone.
+  const clearSendCelebration = useCallback(() => {
+    if (sendCelebrateTimer.current) window.clearTimeout(sendCelebrateTimer.current)
+    sendCelebrateTimer.current = null
+    setSendCelebrate(null)
+  }, [])
+
   const openSend = () => {
     sendTicketRef.current++
     setSendError(null)
     setSendHash(null)
+    // A reopen starts clean: the previous payment's burst must never decorate
+    // a fresh, empty form.
+    clearSendCelebration()
     setSendState('idle')
     setSendOpen(true)
   }
@@ -1034,9 +1054,49 @@ export default function App() {
       setSendAmount('')
       setSendMemo('')
     }
+    // Closing mid-celebration (Done, Escape, overlay tap) takes the confetti
+    // and its timer with it — the bumped ticket above stops a verification
+    // still in flight from starting a new one.
+    clearSendCelebration()
     setSendState('idle')
     setSendOpen(false)
-  }, [sendState])
+  }, [sendState, clearSendCelebration])
+
+  // The confetti gate. A hash is not a mined transaction: Nimiq Hub hands one
+  // back the moment it signs, and a transaction that never makes it into a
+  // block is dropped when its validity window passes with nothing on chain to
+  // show for it. So the Hub path waits for the chain to answer before anything
+  // celebrates, exactly as the stake panel does. The Nimiq Pay path has already
+  // been read off the chain — findSentTx matched it in the sender's public
+  // history — so its burst fires straight away.
+  //
+  // Fire-and-forget: the sheet stays usable while this runs, and a payment that
+  // never lands simply never celebrates. The success screen already says where
+  // to look for it, so there is no second error path to render here.
+  const celebrateSend = (hash: string, ticket: number, minedAlready: boolean) => {
+    // Belt and braces: demo mode is read-only and never reaches a real send,
+    // so it never gets a celebration either.
+    if (isDemoMode()) return
+    void (async () => {
+      if (!minedAlready) {
+        const result = await waitForTxMined(hash, {
+          intervalMs: TX_VERIFY_INTERVAL_MS,
+          timeoutMs: TX_VERIFY_TIMEOUT_MS,
+        })
+        if (result !== 'confirmed') return
+      }
+      // The sheet was dismissed (or another send took the ticket) while the
+      // chain was answering — a burst now would land on a sheet nobody asked
+      // for, and on a form the user may already be retyping.
+      if (sendTicketRef.current !== ticket) return
+      setSendCelebrate(hash)
+      if (sendCelebrateTimer.current) window.clearTimeout(sendCelebrateTimer.current)
+      sendCelebrateTimer.current = window.setTimeout(() => {
+        sendCelebrateTimer.current = null
+        setSendCelebrate(null)
+      }, CONFETTI_MS)
+    })()
+  }
 
   const submitSend = async () => {
     const from = account?.nimiqAddress
@@ -1044,6 +1104,8 @@ export default function App() {
     // Double-submit guard: a second tap while the wallet is signing would ask
     // for a second signature on the same payment.
     if (sendBusy) return
+    // A new attempt never inherits the previous payment's burst.
+    clearSendCelebration()
     if (!sendToValid) {
       setSendError("That doesn't look like a Nimiq address. Check every character — a send can't be undone.")
       return
@@ -1068,6 +1130,9 @@ export default function App() {
     setSendState('sending')
     const ticket = ++sendTicketRef.current
     let hash: string | null = null
+    // True only for a hash recovered from the sender's history, which means the
+    // chain has it already — a hash the wallet returned has not been checked.
+    let hashFromChain = false
     try {
       // Plain UTF-8 memo: the adapter hands it to Pay as text (Pay hex-encodes
       // the data itself) and encodes it for the Hub — see wallet.sendNim.
@@ -1085,6 +1150,7 @@ export default function App() {
         if (sendTicketRef.current === ticket) setSendState('locating')
         const found = await findSentTx(from, sendToClean, luna, memo ? encodeMemo(memo) : undefined)
         hash = found?.hash ?? null
+        hashFromChain = !!hash
       }
     } catch (e) {
       // A dismissed sheet has nowhere to put this — the wallet showed its own
@@ -1098,6 +1164,10 @@ export default function App() {
     if (sendTicketRef.current === ticket) {
       setSendHash(hash)
       setSendState('sent')
+      // No hash means nothing has been seen on chain yet (Nimiq Pay's lookup
+      // timed out): the success screen says as much, and nothing celebrates a
+      // payment we cannot point at.
+      if (hash) celebrateSend(hash, ticket, hashFromChain)
     }
     // Outside the try above on purpose: the payment is already out, and
     // `refresh` reports its own failures (toast/banner) — a busy node must
@@ -1193,11 +1263,12 @@ export default function App() {
     backupMode,
   ])
 
-  // Clean up the celebration timer on unmount so a pending auto-close can't
-  // fire into a dead tree.
+  // Clean up the celebration timers on unmount so a pending auto-close (stake)
+  // or confetti teardown (send) can't fire into a dead tree.
   useEffect(() => {
     return () => {
       if (stakeCelebrateTimer.current) window.clearTimeout(stakeCelebrateTimer.current)
+      if (sendCelebrateTimer.current) window.clearTimeout(sendCelebrateTimer.current)
     }
   }, [])
 
@@ -3761,6 +3832,11 @@ export default function App() {
             aria-label="Send NIM"
             onClick={(e) => e.stopPropagation()}
           >
+            {/* Only ever set for a payment confirmed on chain, and never in
+                demo mode — which cannot sign in the first place. Keyed by hash
+                so each payment gets its own pieces. Pointer-events: none, so
+                Done stays tappable through it. */}
+            {sendCelebrate && !demoMode && <Confetti key={sendCelebrate} />}
             <div className="modal-head">
               <h2>Send NIM</h2>
               {/* Closeable except while the wallet is asking for a signature —
