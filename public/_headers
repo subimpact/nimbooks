@@ -7,6 +7,11 @@
 #   script-src 'self'      the build emits one external module, no inline
 #                          script, no eval, no WebAssembly (verified against
 #                          dist/ before shipping)
+#              cloudflareinsights  Cloudflare injects its Web Analytics beacon
+#                          into every HTML response at the edge, so the policy
+#                          has to admit it (script origin) and its RUM endpoint
+#                          (connect origin), or every page load logs a blocked
+#                          script and the project loses its analytics
 #   style-src  'unsafe-inline'  React style attributes (validator accent
 #                          colours, chart geometry) are inline styles
 #   connect-src            every origin the app actually calls:
@@ -22,4 +27,4 @@
 # Deliberately NO frame-ancestors: Nimiq Pay's WebView frames this app, and
 # restricting ancestors would break the mini app it ships as.
 /*
-  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://rpc.nimiqwatch.com https://v2.nimiqwatch.com https://api.coingecko.com https://validators-api-main.je-cf9.workers.dev https://polygon.drpc.org https://mainnet.base.org https://arb1.arbitrum.io https://mainnet.optimism.io https://ethereum.reth.rs; frame-src https://hub.nimiq.com; object-src 'none'; base-uri 'self'
+  Content-Security-Policy: default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://cloudflareinsights.com https://rpc.nimiqwatch.com https://v2.nimiqwatch.com https://api.coingecko.com https://validators-api-main.je-cf9.workers.dev https://polygon.drpc.org https://mainnet.base.org https://arb1.arbitrum.io https://mainnet.optimism.io https://ethereum.reth.rs; frame-src https://hub.nimiq.com; object-src 'none'; base-uri 'self'
