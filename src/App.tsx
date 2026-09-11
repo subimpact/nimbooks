@@ -1119,12 +1119,27 @@ export default function App() {
       })
       clearTxCache() // the new payment must show up on the next History load
       hash = result.hash
+      if (sendTicketRef.current === ticket) {
+        // The success dialog (and its confetti) appears the INSTANT the
+        // wallet signs — nothing waits on the chain or the indexer.
+        setSendHash(hash)
+        setSendState('sent')
+        celebrateSend(ticket)
+      }
+      // Nimiq Pay returns a serialized transaction, not a hash. Recover it in
+      // the background — it only upgrades the explorer link on the success
+      // card when the indexer catches up; the celebration already fired.
       if (!hash) {
-        // Nimiq Pay hands back a serialized transaction — recover the hash from
-        // the sender's history so the explorer link works.
-        if (sendTicketRef.current === ticket) setSendState('locating')
-        const found = await findSentTx(from, sendToClean, luna, memo ? encodeMemo(memo) : undefined)
-        hash = found?.hash ?? null
+        void (async () => {
+          try {
+            const found = await findSentTx(from, sendToClean, luna, memo ? encodeMemo(memo) : undefined)
+            if (found?.hash && sendTicketRef.current === ticket) {
+              setSendHash(found.hash)
+            }
+          } catch {
+            /* indexer hiccup — the card keeps its generic copy */
+          }
+        })()
       }
     } catch (e) {
       // A dismissed sheet has nowhere to put this — the wallet showed its own
@@ -1134,13 +1149,6 @@ export default function App() {
         setSendError('Send failed: ' + (e instanceof Error ? e.message : String(e)))
       }
       return
-    }
-    if (sendTicketRef.current === ticket) {
-      setSendHash(hash)
-      setSendState('sent')
-      // The success screen IS the trigger — the wallet signed, the payment is
-      // out, and the burst goes with the dialog, no waiting on the indexer.
-      celebrateSend(ticket)
     }
     // Outside the try above on purpose: the payment is already out, and
     // `refresh` reports its own failures (toast/banner) — a busy node must
