@@ -327,6 +327,104 @@ const UNSTAKE_LEG: Record<UnstakeLegKind, UnstakeLegCopy> = {
 const FULL_WITHDRAW_NOTE =
   "Partial withdrawals aren't allowed on Nimiq, so this takes your full retired balance."
 
+/**
+ * Fold a typed amount back into the value an amount slider is holding.
+ *
+ * The parser is `parseNimToLuna` — the one the send sheet and the invoice form
+ * already use — so a typed stake is held to exactly the rules a sent amount is:
+ * positive, at most 5 decimals, inside the supply cap. Anything it rejects
+ * leaves the committed amount where it was, which is what keeps NaN, negatives
+ * and finer-than-a-Luna figures off the slider and away from submit. What it
+ * accepts is clamped to the ceiling, so a number larger than the wallet can
+ * fund lands on the maximum instead of arming a submit the chain would refuse.
+ *
+ * @param maxLuna the slider's ceiling, in Luna (integer) — clamping in Luna
+ *   rather than NIM keeps the float division out of the committed value.
+ * @param current the amount to keep when the input isn't a number yet.
+ */
+function commitTypedAmount(raw: string, maxLuna: number, current: string): string {
+  // Empty and a typed zero are the same state — no amount — and the panel's
+  // existing hints already speak for it.
+  if (/^0*\.?0*$/.test(raw.trim())) return ''
+  const luna = parseNimToLuna(raw)
+  if (!luna) return current
+  const ceiling = Math.max(0, Math.floor(maxLuna))
+  return formatLunaExact(String(Number(luna) > ceiling ? ceiling : luna))
+}
+
+/**
+ * The figure beside an amount slider, typed rather than dragged.
+ *
+ * Landing on exactly 100 or 1,000 NIM by dragging a slider whose range is the
+ * whole wallet is a careful, fiddly thing; typing it is one gesture. The slider
+ * stays the control — it keeps its label and its own aria-label — and this is
+ * the same value made editable: both read the panel's state, so a drag writes
+ * the field and a keystroke moves the thumb.
+ *
+ * While the field has focus it shows the user's literal keystrokes.
+ * Reformatting between them would fight the caret — type the fourth digit of
+ * 1000 and a separator appears under your cursor — so locale formatting waits
+ * until blur, when the edit is over.
+ */
+function SliderAmountField({
+  id,
+  ariaLabel,
+  value,
+  lang,
+  onCommit,
+}: {
+  id: string
+  ariaLabel: string
+  value: string
+  lang: string
+  onCommit: (raw: string) => void
+}) {
+  const [draft, setDraft] = useState<string | null>(null)
+  const shown = draft !== null ? draft : value === '' ? '' : Number(value).toLocaleString(lang)
+  return (
+    <input
+      id={id}
+      className="stake-amount-input"
+      type="text"
+      inputMode="decimal"
+      autoComplete="off"
+      spellCheck={false}
+      placeholder="0"
+      aria-label={ariaLabel}
+      value={shown}
+      onFocus={(e) => {
+        // Edit the number, not its formatting: the separators step aside for
+        // the duration, and the whole figure starts selected so a round number
+        // replaces it in one go.
+        const el = e.currentTarget
+        setDraft(value)
+        requestAnimationFrame(() => el.select())
+      }}
+      onChange={(e) => {
+        // Digits and a single decimal point survive; anything else is dropped
+        // rather than parsed. That gets a grouping separator out of the way —
+        // typing "1,000" arrives as 1000, which is the whole point of the
+        // field — without having to guess whether a comma meant thousands or a
+        // fraction in the user's locale.
+        const cleaned = e.target.value.replace(/[^\d.]/g, '')
+        const [whole, ...rest] = cleaned.split('.')
+        const next = rest.length > 0 ? `${whole}.${rest.join('')}` : whole
+        setDraft(next)
+        onCommit(next)
+      }}
+      onBlur={() => setDraft(null)}
+      onKeyDown={(e) => {
+        // Enter ends the edit and normalises; it does not submit. Staking is a
+        // deliberate second act, and the confirm dialog is where it happens.
+        if (e.key === 'Enter') {
+          e.preventDefault()
+          e.currentTarget.blur()
+        }
+      }}
+    />
+  )
+}
+
 export default function App() {
   // A Hub login on a mobile browser returns as a full-page redirect, and
   // main.tsx has already picked the answer off the URL — so the session can
@@ -4240,7 +4338,16 @@ export default function App() {
                         aria-label="Stake amount"
                       />
                       <span className="stake-slider-value">
-                        {stakeAmountValid ? stakeAmountNim.toLocaleString(lang) : '0'} NIM
+                        <SliderAmountField
+                          id="stakeAmountValue"
+                          ariaLabel="Stake amount, type to edit"
+                          value={stakeAmount}
+                          lang={lang}
+                          onCommit={(raw) =>
+                            setStakeAmount(commitTypedAmount(raw, stakeMaxLuna, stakeAmount))
+                          }
+                        />{' '}
+                        NIM
                         {stakeMaxNim > 0 && (
                           <span className="stake-pct">
                             {' '}
@@ -4256,7 +4363,14 @@ export default function App() {
                           ).toLocaleString(lang)} Luna`
                         : !hasStaker && stakeMaxNim < MIN_STAKE_NIM
                           ? `${MIN_STAKE_COPY} This wallet holds ${formatLuna(String(stakeMaxLuna), lang)} NIM.`
-                          : `Available to stake: ${formatLuna(String(stakeMaxLuna), lang)} NIM`}
+                          : // A typed amount can land under the first-stake
+                            // minimum, which the slider's floor made
+                            // unreachable. Say why the button is dark rather
+                            // than leaving it dark without a reason — the same
+                            // sentence submitStake would have given.
+                            !hasStaker && stakeAmountNim > 0 && stakeAmountNim < MIN_STAKE_NIM
+                            ? MIN_STAKE_COPY
+                            : `Available to stake: ${formatLuna(String(stakeMaxLuna), lang)} NIM`}
                     </span>
                   </>
                 ) : (
@@ -4328,7 +4442,18 @@ export default function App() {
                             aria-label="Unstake amount"
                           />
                           <span className="stake-slider-value">
-                            {unstakeAmount ? Number(unstakeAmount).toLocaleString(lang) : '0'} NIM
+                            <SliderAmountField
+                              id="unstakeAmountValue"
+                              ariaLabel="Unstake amount, type to edit"
+                              value={unstakeAmount}
+                              lang={lang}
+                              onCommit={(raw) =>
+                                setUnstakeAmount(
+                                  commitTypedAmount(raw, maxUnstakeableLuna, unstakeAmount)
+                                )
+                              }
+                            />{' '}
+                            NIM
                             {unstakeMaxNim > 0 && (
                               <span className="stake-pct">
                                 {' '}
