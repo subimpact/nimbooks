@@ -1655,6 +1655,19 @@ a.btn-ghost.btn-link {
   padding: 3px;
   background: var(--card-2);
 }
+.validator-logo-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  text-transform: uppercase;
+  color: #ffffff;
+  text-shadow: 0 0 2px rgba(0, 0, 0, 0.8), 0 1px 2px rgba(0, 0, 0, 0.9);
+  user-select: none;
+}
 .validator-list .badge.inactive {
   align-self: flex-start;
   margin-top: 2px;

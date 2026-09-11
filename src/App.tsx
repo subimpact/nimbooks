@@ -609,6 +609,7 @@ export default function App() {
   const [validators, setValidators] = useState<ValidatorInfo[]>([])
   const [validatorsLoading, setValidatorsLoading] = useState(false)
   const [validatorsError, setValidatorsError] = useState<string | null>(null)
+  const validatorLogosRefreshedRef = useRef(false)
   const [selectedValidator, setSelectedValidator] = useState<string | null>(null)
   const [stakeAmount, setStakeAmount] = useState('')
   const [staking, setStaking] = useState(false)
@@ -1543,6 +1544,28 @@ export default function App() {
       cancelled = true
     }
   }, [account?.nimiqAddress, stakeOpen, validators.length, stakingHolding?.delegation])
+
+  // When the stake panel is open and the in-memory list has validators but is
+  // missing logos (i.e. served from cache), trigger ONE forced refresh in the
+  // background so logos fill in. Fallback avatars render until it lands.
+  // Guarded so at most one attempt runs per page session; failures are swallowed
+  // and the existing list is never cleared.
+  useEffect(() => {
+    if (!stakeOpen || validators.length === 0) return
+    if (validatorLogosRefreshedRef.current) return
+    const hasLogos = validators.some((v) => Boolean(v.logo))
+    if (hasLogos) return
+
+    validatorLogosRefreshedRef.current = true
+    ;(async () => {
+      try {
+        const fresh = await getValidators({ force: true })
+        if (fresh && fresh.length > 0) setValidators(fresh)
+      } catch (e) {
+        console.warn('Validator logos refresh failed:', e)
+      }
+    })()
+  }, [stakeOpen, validators])
 
   // Escape closes whichever overlay is open — one handler for all of them, so
   // a new modal never ships without the key. (DetailSheet brings its own.)
@@ -4287,8 +4310,9 @@ export default function App() {
                         >
                           <span className="option-dot" aria-hidden="true" />
                           {/* Logos ride along on the payload we already paid
-                              for. Decorative: the name below is the label. */}
-                          {v.logo && (
+                              for. When missing (cache-served before background
+                              refresh or offline), fall back to a monogram chip. */}
+                          {v.logo ? (
                             <img
                               className="validator-logo"
                               src={v.logo}
@@ -4299,6 +4323,14 @@ export default function App() {
                               loading="lazy"
                               style={v.accentColor ? { background: v.accentColor } : undefined}
                             />
+                          ) : (
+                            <span
+                              className="validator-logo validator-logo-fallback"
+                              aria-hidden="true"
+                              style={{ background: v.accentColor || 'var(--card-2)' }}
+                            >
+                              {(v.name.trim()[0] || 'V').toUpperCase()}
+                            </span>
                           )}
                           <span className="option-main">
                             <strong>{v.name}</strong>
