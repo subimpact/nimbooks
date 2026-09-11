@@ -238,6 +238,22 @@ export default function HeroBackground() {
       ctx.fillRect(0, 0, fade, h)
       ctx.fillRect(w - fade, 0, fade, h)
 
+      // Content veil: a soft center-weighted dim so the hexagons stay lively
+      // around the edges but never fight the connect-panel text. Uses the
+      // page background color, so it works in both themes.
+      const veil = ctx.createRadialGradient(
+        w / 2,
+        h * 0.4,
+        Math.min(w, h) * 0.15,
+        w / 2,
+        h * 0.4,
+        Math.max(w, h) * 0.75
+      )
+      veil.addColorStop(0, `rgba(${bg.r},${bg.g},${bg.b},0.5)`)
+      veil.addColorStop(1, `rgba(${bg.r},${bg.g},${bg.b},0)`)
+      ctx.fillStyle = veil
+      ctx.fillRect(0, 0, w, h)
+
       // Drop old ripples.
       if (ripples.length) {
         rippleRef.current = ripples.filter((r) => (now - r.t0) / 1000 <= 1.4)
