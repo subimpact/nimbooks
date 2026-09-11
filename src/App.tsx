@@ -286,6 +286,11 @@ export default function App() {
   const [analyticsPeriod, setAnalyticsPeriod] = useState<AnalyticsPeriod>(30)
   const [nimBalance, setNimBalance] = useState<string | null>(null)
   const [nimTxs, setNimTxs] = useState<NimiqTx[]>([])
+  // History of the wallet's *remote* HTLC relay address (Nimiq Pay's
+  // accounts[1]). The relay hops are the user's real transactions but never
+  // appear on the basic address list, so they are merged into History and
+  // classified (see txLabel `remote` handling) instead of being hidden.
+  const [remoteTxs, setRemoteTxs] = useState<NimiqTx[]>([])
   // Staking rewards, synthesized as History rows (one per UTC day per
   // validator) from the v2 events API — the tx index doesn't carry them.
   const [rewardTxs, setRewardTxs] = useState<NimiqTx[]>([])
@@ -777,6 +782,26 @@ export default function App() {
         // cap silently truncated "accountant-ready" statements.
         const txs = await getNimiqTransactionHistory(addr, 1000)
         setNimTxs(txs)
+        // The wallet's remote HTLC relay history. Nimiq Pay keeps funds in a
+        // separate contract address (accounts[1]); the relay hops are the
+        // user's real transactions but never show on the basic address list.
+        // Fetched in parallel with the rest — nothing downstream depends on
+        // it, and History merges the two lists tagged `remote` so the full
+        // wallet picture is visible and classified.
+        if (acc.remoteAddress) {
+          getNimiqTransactionHistory(acc.remoteAddress, 1000)
+            .then((remote) =>
+              setRemoteTxs(
+                remote.map((t) => ({ ...t, remote: true }))
+              )
+            )
+            .catch((e) => {
+              console.warn('Remote relay history lookup failed:', e)
+              setRemoteTxs([])
+            })
+        } else {
+          setRemoteTxs([])
+        }
         // Staker record and chain head come before the contract sweeps below:
         // the unstake banner is gated on both, and the sweeps are up to 20
         // paced RPC calls that would leave it waiting for nothing it needs.
@@ -902,14 +927,16 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // One ledger for everything that counts as a transaction: indexed txs plus
-  // the synthesized reward rows, newest first. History, the CSV and the
-  // statement all read this, so they can never disagree about income.
+  // One ledger for everything that counts as a transaction: indexed txs, the
+  // wallet's remote HTLC relay txs, plus the synthesized reward rows, newest
+  // first. History, the CSV and the statement all read this, so they can never
+  // disagree about income.
   // (The balance trajectory in Analytics is the exception — see below.)
   const allTxs = useMemo(() => {
-    if (rewardTxs.length === 0) return nimTxs
-    return [...nimTxs, ...rewardTxs].sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
-  }, [nimTxs, rewardTxs])
+    const base = [...nimTxs, ...remoteTxs]
+    if (rewardTxs.length === 0) return base
+    return [...base, ...rewardTxs].sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
+  }, [nimTxs, remoteTxs, rewardTxs])
 
   // History adds one more source on top: the staking actions this wallet sent.
   // They are real mined transactions, but no address list returns them (see
@@ -2837,7 +2864,15 @@ export default function App() {
               <p className="empty">No transactions found for this address.</p>
             )}
             {historyTxs.slice(0, visibleTxCount).map((tx) => {
-              const isOut = tx.sender.replace(/\s+/g, '').toUpperCase() === account.nimiqAddress?.replace(/\s+/g, '').toUpperCase()
+              const ownClean = account.nimiqAddress?.replace(/\s+/g, '').toUpperCase()
+              const senderClean = tx.sender.replace(/\s+/g, '').toUpperCase()
+              // Outgoing if it left either of the wallet's addresses — the
+              // basic account *or* the remote HTLC relay (remote rows carry
+              // `remote: true` and their sender is the relay address).
+              const isOut =
+                senderClean === ownClean ||
+                (tx.remote &&
+                  senderClean === account.remoteAddress?.replace(/\s+/g, '').toUpperCase())
               const label = txLabel(tx, account.nimiqAddress ?? '')
               const memo = decodeMemo(tx.data)
               const demo = isDemoMode()
@@ -2912,7 +2947,7 @@ export default function App() {
                       })()}
                     </div>
                   )}
-                  {!tx.synthetic && (
+                  {!tx.synthetic && !tx.remote && (
                     <button
                       className="btn-small"
                       onClick={() => makeReceipt(tx)}

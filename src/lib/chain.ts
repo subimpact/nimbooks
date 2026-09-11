@@ -26,6 +26,12 @@ export interface NimiqTx {
   // Either way the row is not a receipt candidate: the wallet can't prove a
   // payment it didn't make to a counterparty.
   synthetic?: TxKind | StakingActionKind
+  // True for rows fetched from the wallet's *remote* address — the HTLC
+  // contract Nimiq Pay stores funds in (see wallet.ts). The relay hops that
+  // happen there are real transactions of the user's wallet but never appear
+  // on the basic address list, so they are merged into History and classified
+  // as HTLC flows instead of being hidden.
+  remote?: boolean
 }
 
 async function rpcCall(method: string, params: unknown[], timeoutMs = 10000): Promise<any> {
@@ -314,7 +320,7 @@ export async function getNimiqTransactions(
 // exhausted (cap at maxTotal to bound the request). Returns oldest→newest.
 // A small delay between pages keeps us under the RPC rate limiter (bursts of
 // 20 rapid calls trip 429s).
-const TX_CACHE_KEY = 'nimbooks:txs'
+const TX_CACHE_PREFIX = 'nimbooks:txs'
 const TX_CACHE_TTL = 2 * 60 * 1000 // 2 min — balances move, but not every second
 
 interface TxCacheEntry {
@@ -323,9 +329,15 @@ interface TxCacheEntry {
   txs: NimiqTx[]
 }
 
+// One cache slot per address: the wallet's basic address and its remote HTLC
+// relay are fetched independently and must never overwrite each other.
+function txCacheKey(address: string): string {
+  return `${TX_CACHE_PREFIX}:${cleanAddress(address)}`
+}
+
 function readTxCache(address: string): NimiqTx[] | null {
   try {
-    const raw = localStorage.getItem(TX_CACHE_KEY)
+    const raw = localStorage.getItem(txCacheKey(address))
     if (!raw) return null
     const entry = JSON.parse(raw) as TxCacheEntry
     if (entry.address !== address || Date.now() - entry.at > TX_CACHE_TTL) return null
@@ -340,17 +352,29 @@ function readTxCache(address: string): NimiqTx[] | null {
 
 function writeTxCache(address: string, txs: NimiqTx[]) {
   try {
-    localStorage.setItem(TX_CACHE_KEY, JSON.stringify({ address, at: Date.now(), txs }))
+    localStorage.setItem(txCacheKey(address), JSON.stringify({ address, at: Date.now(), txs }))
   } catch {
     /* storage full — skip */
   }
 }
 
 // Drop the cached history — called after sending a transaction so the next
-// refresh shows it instead of serving a 2-minute-old list.
-export function clearTxCache() {
+// refresh shows it instead of serving a 2-minute-old list. With no address it
+// clears every slot (basic + remote), which is what a send needs: the new tx
+// can land on either list.
+export function clearTxCache(address?: string) {
   try {
-    localStorage.removeItem(TX_CACHE_KEY)
+    if (address) {
+      localStorage.removeItem(txCacheKey(address))
+      return
+    }
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i)
+      if (key?.startsWith(TX_CACHE_PREFIX)) {
+        localStorage.removeItem(key)
+        i-- // removal shifts indices
+      }
+    }
   } catch {
     /* storage unavailable */
   }
@@ -996,7 +1020,7 @@ export function classifyTx(tx: NimiqTx, ownAddress: string): TxKind {
 
 // `classifyTx` only sees addresses, so a contract-funding tx reads as a plain
 // payment to it. The recipient account type settles those cases.
-export type TxLabel = TxKind | 'swap' | 'vesting'
+export type TxLabel = TxKind | 'swap' | 'vesting' | 'htlc'
 
 /**
  * Human-readable transaction type, shared by the history chips and the CSV
@@ -1006,6 +1030,10 @@ export function txLabel(tx: NimiqTx, ownAddress: string): TxLabel {
   // Staking: `toType` marks the deposit leg; the withdrawal leg is an ordinary
   // tx *from* the staking contract, which classifyTx recognises by sender.
   if (tx.toType === 3) return classifyTx(tx, ownAddress) === 'unstake' ? 'unstake' : 'stake'
+  // Remote rows are the HTLC relay hops of a Nimiq Pay wallet: contract
+  // funding reads as `swap`, everything else involving the relay address is
+  // still HTLC machinery and gets its own chip rather than a plain payment.
+  if (tx.remote) return tx.toType === 2 ? 'swap' : 'htlc'
   if (tx.toType === 2) return 'swap'
   if (tx.toType === 1) return 'vesting'
   return classifyTx(tx, ownAddress)

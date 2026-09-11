@@ -1179,7 +1179,8 @@ a.btn-ghost.btn-link {
   color: var(--green);
 }
 .tx-kind.swap,
-.tx-kind.vesting {
+.tx-kind.vesting,
+.tx-kind.htlc {
   color: var(--muted);
 }
 .section-head {
