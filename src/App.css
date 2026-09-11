@@ -119,6 +119,21 @@ a:focus-visible {
   padding: 56px 0 28px;
   position: relative;
 }
+/* Full-viewport animated hexagon field behind the landing content (see
+   HeroBackground.tsx). Fixed so it escapes the 480px app column, z-index 0
+   under the content, and pointer-events none so taps reach the buttons. */
+.hero-bg {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  pointer-events: none;
+}
+.landing {
+  position: relative;
+  z-index: 1;
+}
 .hero-actions {
   position: absolute;
   top: 0;
