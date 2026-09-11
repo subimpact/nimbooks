@@ -3,7 +3,7 @@
 // Badge text. Spelled out rather than built from a version constant so the exact
 // label ships as one string in the bundle (JSX would emit "v" as a separate node).
 // package.json carries the machine-readable version.
-export const APP_VERSION_LABEL = 'v1.12.0'
+export const APP_VERSION_LABEL = 'v1.13.0'
 
 export interface ChangelogEntry {
   version: string
@@ -12,6 +12,16 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '1.13.0',
+    date: '2026-09-11',
+    items: [
+      'Unstaking finishes the same way staking does: a "confirming on chain" step, then a clean summary card for deactivate, retire and withdraw, whether you started from the stake panel or the balance banner',
+      'The finishing steps you launch from the balance banner now get a window of their own instead of a toast you could miss, and tapping the banner again while one is in flight reopens it rather than sending a second transaction',
+      'Done closes the window and lands you back on the Overview dashboard, for staking and unstaking alike',
+      'Close mid-confirmation and the unstake keeps going: you still get the toast when it lands, and reopening picks the confirming step back up',
+    ],
+  },
   {
     version: '1.12.0',
     date: '2026-09-11',

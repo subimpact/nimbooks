@@ -1807,6 +1807,14 @@ a.btn-ghost.btn-link {
   font-size: 12px;
   font-weight: 600;
 }
+/* Unstaking finishes on the same two beats, in whichever window it was started
+   from — the stake panel, or the sheet the balance banner's steps open. There
+   the card is the entire content, so it sits straight under the head instead of
+   a form's width away from it. */
+.modal-head + .unstake-progress,
+.modal-head + .unstake-done {
+  margin-top: 4px;
+}
 /* Send sheet: labelled fields stacked like the request form, with the
    confirmation rows and the submit below. The confirmation block carries the
    sheet's own surface colour, so it reads as a group inside it (the same way
