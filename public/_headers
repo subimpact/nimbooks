@@ -1,0 +1,25 @@
+# Cloudflare Pages custom headers.
+#
+# The policy below: the app loads one bundle from its own origin and talks to a
+# short, known list of read-only APIs. Pinning both means a script injected by
+# any means has nowhere to load from and nowhere to send to.
+#
+#   script-src 'self'      the build emits one external module, no inline
+#                          script, no eval, no WebAssembly (verified against
+#                          dist/ before shipping)
+#   style-src  'unsafe-inline'  React style attributes (validator accent
+#                          colours, chart geometry) are inline styles
+#   connect-src            every origin the app actually calls:
+#                            rpc.nimiqwatch.com          balances, history, staker records
+#                            v2.nimiqwatch.com           staking reward events
+#                            api.coingecko.com           fiat rates and daily closes
+#                            validators-api-main…        validator list, fees, reliability
+#                            the five EVM public RPCs viem defaults to
+#                          plus 'self' for /api/shorten and /export
+#   frame-src              the Nimiq Hub opens an iframe for its desktop login
+#   img-src data:          validator logos ride along as data: URIs
+#
+# Deliberately NO frame-ancestors: Nimiq Pay's WebView frames this app, and
+# restricting ancestors would break the mini app it ships as.
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://rpc.nimiqwatch.com https://v2.nimiqwatch.com https://api.coingecko.com https://validators-api-main.je-cf9.workers.dev https://polygon.drpc.org https://mainnet.base.org https://arb1.arbitrum.io https://mainnet.optimism.io https://ethereum.reth.rs; frame-src https://hub.nimiq.com; object-src 'none'; base-uri 'self'
