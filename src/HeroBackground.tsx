@@ -87,11 +87,10 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
 }
 
 /**
- * Hero background for the landing (connect) screen. The concept is lifted
- * from base.org's hero: a full-viewport animated canvas where a grid of
- * cells carries tiers of intensity, a travelling wave sweeps through them,
- * the cursor boosts cells nearby, and clicks drop ripples. base.org draws
- * candlestick bars; NimBooks draws Nimiq hexagons in Nimiq's brand palette.
+ * Hero background for the landing (connect) screen: a full-viewport animated
+ * canvas where a grid of cells carries tiers of intensity, a travelling wave
+ * sweeps through them, the cursor boosts cells nearby, and clicks drop
+ * ripples. The cells are Nimiq hexagons in Nimiq's brand palette.
  *
  * Performance rules:
  *  - devicePixelRatio capped at 2 (the wave costs fill calls, not pixels).
