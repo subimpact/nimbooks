@@ -3,7 +3,7 @@
 // Badge text. Spelled out rather than built from a version constant so the exact
 // label ships as one string in the bundle (JSX would emit "v" as a separate node).
 // package.json carries the machine-readable version.
-export const APP_VERSION_LABEL = 'v1.11.2'
+export const APP_VERSION_LABEL = 'v1.12.0'
 
 export interface ChangelogEntry {
   version: string
@@ -12,6 +12,15 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '1.12.0',
+    date: '2026-09-11',
+    items: [
+      'Staking now finishes the way sending does: a clear "confirming on chain" step while the transaction settles, then a "Stake confirmed" card with your amount, your validator and the explorer link, confetti included',
+      'That card waits for your Done tap instead of vanishing on its own, so nothing disappears while you are still reading it',
+      'Close the panel mid-confirmation and the stake keeps going: you still get the toast when it lands, and reopening picks the confirming step back up',
+    ],
+  },
   {
     version: '1.11.2',
     date: '2026-09-11',
