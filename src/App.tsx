@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
+import HeroBackground from './HeroBackground'
 import { applyTheme, getInitialTheme, type Theme } from './lib/theme'
 import {
   connectWallet,
@@ -2141,7 +2142,8 @@ export default function App() {
     const inNimiqPay = isInNimiqPay()
     const isMobile = isMobileDevice()
     return (
-      <div className="app">
+      <div className="app landing">
+        <HeroBackground />
         <header className="hero">
           <div className="hero-actions">
             {versionBadge}

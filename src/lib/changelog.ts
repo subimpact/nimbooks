@@ -3,7 +3,7 @@
 // Badge text. Spelled out rather than built from a version constant so the exact
 // label ships as one string in the bundle (JSX would emit "v" as a separate node).
 // package.json carries the machine-readable version.
-export const APP_VERSION_LABEL = 'v1.10.0'
+export const APP_VERSION_LABEL = 'v1.11.0'
 
 export interface ChangelogEntry {
   version: string
@@ -12,6 +12,13 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '1.11.0',
+    date: '2026-09-11',
+    items: [
+      'The landing page now opens over a living field of Nimiq hexagons in Nimiq brand colors: a travelling wave sweeps through the honeycomb, hexes swell as it passes, your cursor lifts nearby cells and every tap drops a ripple. Inspired by base.org’s candlestick hero, rebuilt for Nimiq.',
+    ],
+  },
   {
     version: '1.10.0',
     date: '2026-09-11',
