@@ -2232,6 +2232,7 @@ export default function App() {
 
   return (
     <div className="app">
+      <HeroBackground />
       <header className="topbar">
         <div className="logo small">📒</div>
         <h1>NimBooks</h1>
