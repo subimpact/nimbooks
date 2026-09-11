@@ -9,7 +9,9 @@ import {
   getConnectedAccount,
   getHubRedirectError,
   isDemoMode,
+  canSend,
   canStake,
+  sendNim,
   stakeNim,
   unstakeDeactivate,
   unstakeRetire,
@@ -28,6 +30,8 @@ import {
   getStakingHolding,
   getVestingHoldings,
   getNimiqTransactionHistory,
+  findSentTx,
+  encodeMemo,
   waitForTxMined,
   getEvmBalances,
   getAllFiatRates,
@@ -145,6 +149,34 @@ function mergeRates(base: FiatRates, cached?: Partial<FiatRates>): FiatRates {
 
 function cleanAddr(address: string): string {
   return address.replace(/\s+/g, '').toUpperCase()
+}
+
+// A send is irreversible, so a mistyped recipient has to be caught here rather
+// than on chain. Nimiq addresses are IBAN-shaped — NQ + two check digits + 32
+// base32 characters — and those digits are a MOD-97-10 checksum over the rest
+// (the same scheme receipt.ts derives an address with), so a single wrong
+// character fails this test.
+function isValidNimiqAddress(address: string): boolean {
+  const addr = cleanAddr(address)
+  if (!/^NQ[0-9A-Z]{34}$/.test(addr)) return false
+  // IBAN validation: move the first four characters to the end, map letters to
+  // their two-digit values (A=10 … Z=35), and the whole number must be ≡ 1.
+  const raw = addr.slice(4) + addr.slice(0, 4)
+  let remainder = 0
+  for (const ch of raw) {
+    const code = ch.charCodeAt(0)
+    const digits = code >= 48 && code <= 57 ? ch : String(code - 55)
+    for (const d of digits) remainder = (remainder * 10 + Number(d)) % 97
+  }
+  return remainder === 1
+}
+
+// Nimiq caps a basic transaction's data field at 64 bytes, and the memo travels
+// there as UTF-8 — so the limit is bytes, not characters (one emoji is four).
+const MAX_TX_MEMO_BYTES = 64
+
+function memoByteLength(memo: string): number {
+  return new TextEncoder().encode(memo).length
 }
 
 function sanitizeCsvCell(val: unknown): string {
@@ -322,6 +354,20 @@ export default function App() {
   const [memoInput, setMemoInput] = useState('')
   const [expiryIdx, setExpiryIdx] = useState(0)
   const [shownQrId, setShownQrId] = useState<string | null>(null)
+  // Overview quick actions. Send walks the same adapter path as the invoice
+  // page (wallet.sendNim): 'sending' is waiting on the wallet's signature,
+  // 'locating' is recovering the hash from history, which only Nimiq Pay needs.
+  const [sendOpen, setSendOpen] = useState(false)
+  const [sendTo, setSendTo] = useState('')
+  const [sendAmount, setSendAmount] = useState('')
+  const [sendMemo, setSendMemo] = useState('')
+  const [sendState, setSendState] = useState<'idle' | 'sending' | 'locating' | 'sent'>('idle')
+  const [sendError, setSendError] = useState<string | null>(null)
+  const [sendHash, setSendHash] = useState<string | null>(null)
+  const [receiveOpen, setReceiveOpen] = useState(false)
+  // The global toast sits in the page flow, under the modal overlay — so a copy
+  // from inside the Receive sheet confirms on the button itself as well.
+  const [addrCopied, setAddrCopied] = useState(false)
   const [stakeOpen, setStakeOpen] = useState(false)
   const [unstakeOpen, setUnstakeOpen] = useState(false)
   const [confirmUnstakeOpen, setConfirmUnstakeOpen] = useState(false)
@@ -404,6 +450,34 @@ export default function App() {
     setToast(isTransientChainError(e) ? NODE_BUSY_COPY : fallback)
   }, [])
 
+  // Clipboard with the legacy fallback older mobile WebViews still need (the
+  // async API is unavailable there, and in some of them insecure-context
+  // `writeText` rejects).
+  const copyText = useCallback(async (text: string, okMessage: string) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setToast(okMessage)
+      return true
+    } catch {
+      /* no async clipboard — fall through to the textarea path */
+    }
+    try {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
+      setToast(okMessage)
+      return true
+    } catch {
+      setError('Could not copy. Long-press the address instead.')
+      return false
+    }
+  }, [])
+
   const fetchRates = useCallback(async () => {
     try {
       const all = await getAllFiatRates()
@@ -457,6 +531,14 @@ export default function App() {
     const t = setTimeout(() => setToast(null), 4000)
     return () => clearTimeout(t)
   }, [toast])
+
+  // "Copied ✓" on the Receive button reverts on its own — same shape as the
+  // toast above, so it can't leave a timer behind on unmount.
+  useEffect(() => {
+    if (!addrCopied) return
+    const t = setTimeout(() => setAddrCopied(false), 2000)
+    return () => clearTimeout(t)
+  }, [addrCopied])
 
   // Load receipts scoped to the connected account
   useEffect(() => {
@@ -906,6 +988,123 @@ export default function App() {
   // entry so a stale saved code can never blank the chip.
   const cur = CURRENCIES.find((c) => c.code === currency) ?? CURRENCIES[0]
 
+  // --- Send / Receive (Overview quick actions) ---
+
+  // What the wallet can actually put in a transaction: the basic balance plus
+  // anything in flight through an HTLC, since Nimiq Pay's wallet funds a
+  // payment straight out of a swap contract (same ceiling the stake slider
+  // uses). Derived from the same figure the NIM tile shows, so the sheet can
+  // never offer more than the Overview claims the user has.
+  const sendMaxLuna = Math.max(0, effectiveBalanceLuna)
+  const sendLuna = parseNimToLuna(sendAmount)
+  const sendMemoBytes = memoByteLength(sendMemo.trim())
+  const sendToClean = cleanAddr(sendTo)
+  const sendToValid = isValidNimiqAddress(sendTo)
+  const sendToSelf =
+    sendToValid && !!account?.nimiqAddress && sendToClean === cleanAddr(account.nimiqAddress)
+  const sendAmountOverBalance = !!sendLuna && Number(sendLuna) > sendMaxLuna
+  const sendReady =
+    sendToValid && !!sendLuna && !sendAmountOverBalance && sendMemoBytes <= MAX_TX_MEMO_BYTES
+  const sendBusy = sendState === 'sending' || sendState === 'locating'
+  // Every submit takes a ticket; only the current one may write back into the
+  // sheet. Closing bumps it, so a hash lookup still running can never reopen
+  // a sheet the user has dismissed (same idea as stakeVerifyRef below).
+  const sendTicketRef = useRef(0)
+
+  const openSend = () => {
+    sendTicketRef.current++
+    setSendError(null)
+    setSendHash(null)
+    setSendState('idle')
+    setSendOpen(true)
+  }
+
+  // Memoised on `sendState` so the Escape handler below can depend on it and
+  // always hold a current copy — a stale one would think it may close.
+  const closeSend = useCallback(() => {
+    // 'sending' is the one state that stays put: the wallet is asking for a
+    // signature, and its answer has to land somewhere the user can see.
+    if (sendState === 'sending') return
+    sendTicketRef.current++
+    // From 'locating' on, the payment is already broadcast — the form is spent,
+    // and clearing it is what stops the same amount going out a second time.
+    // A sheet closed without sending keeps what was typed.
+    if (sendState === 'locating' || sendState === 'sent') {
+      setSendTo('')
+      setSendAmount('')
+      setSendMemo('')
+    }
+    setSendState('idle')
+    setSendOpen(false)
+  }, [sendState])
+
+  const submitSend = async () => {
+    const from = account?.nimiqAddress
+    if (!from) return
+    // Double-submit guard: a second tap while the wallet is signing would ask
+    // for a second signature on the same payment.
+    if (sendBusy) return
+    if (!sendToValid) {
+      setSendError("That doesn't look like a Nimiq address. Check every character — a send can't be undone.")
+      return
+    }
+    const luna = parseNimToLuna(sendAmount)
+    if (!luna) {
+      setSendError('Enter an amount above 0 with at most 5 decimals (max 2,000,000,000 NIM).')
+      return
+    }
+    // The ceiling can shrink between opening the sheet and submitting (a swap
+    // settles, the 10s refresh lands), so it is re-checked at submit time.
+    if (Number(luna) > sendMaxLuna) {
+      setSendError(`Only ${formatLuna(String(sendMaxLuna), lang)} NIM is available to send right now.`)
+      return
+    }
+    const memo = sendMemo.trim()
+    if (memoByteLength(memo) > MAX_TX_MEMO_BYTES) {
+      setSendError(`The note is too long. Nimiq allows ${MAX_TX_MEMO_BYTES} bytes on a transaction.`)
+      return
+    }
+    setSendError(null)
+    setSendState('sending')
+    const ticket = ++sendTicketRef.current
+    let hash: string | null = null
+    try {
+      // Plain UTF-8 memo: the adapter hands it to Pay as text (Pay hex-encodes
+      // the data itself) and encodes it for the Hub — see wallet.sendNim.
+      const result = await sendNim({
+        recipient: sendToClean,
+        amountLuna: luna,
+        ...(memo ? { memo } : {}),
+        from,
+      })
+      clearTxCache() // the new payment must show up on the next History load
+      hash = result.hash
+      if (!hash) {
+        // Nimiq Pay hands back a serialized transaction — recover the hash from
+        // the sender's history so the explorer link works.
+        if (sendTicketRef.current === ticket) setSendState('locating')
+        const found = await findSentTx(from, sendToClean, luna, memo ? encodeMemo(memo) : undefined)
+        hash = found?.hash ?? null
+      }
+    } catch (e) {
+      // A dismissed sheet has nowhere to put this — the wallet showed its own
+      // rejection, and nothing left this address.
+      if (sendTicketRef.current === ticket) {
+        setSendState('idle')
+        setSendError('Send failed: ' + (e instanceof Error ? e.message : String(e)))
+      }
+      return
+    }
+    if (sendTicketRef.current === ticket) {
+      setSendHash(hash)
+      setSendState('sent')
+    }
+    // Outside the try above on purpose: the payment is already out, and
+    // `refresh` reports its own failures (toast/banner) — a busy node must
+    // never turn a sent payment into "Send failed".
+    if (account) await refresh(account)
+  }
+
   // --- Staking (Nimiq Pay) ---
 
   // The validator list is a 1.4 MB payload — 13× the whole gzipped bundle —
@@ -948,6 +1147,8 @@ export default function App() {
       currencyOpen ||
       changelogOpen ||
       confirmUnstakeOpen ||
+      sendOpen ||
+      receiveOpen ||
       !!downloadLink ||
       !!backupMode
     if (!anyOpen) return
@@ -955,6 +1156,17 @@ export default function App() {
       if (e.key !== 'Escape') return
       if (confirmUnstakeOpen) {
         setConfirmUnstakeOpen(false)
+        return
+      }
+      // The send sheet peels on its own (it is never stacked under another),
+      // and closeSend refuses while a signature is in flight — the result of
+      // that payment must not disappear behind a stray key press.
+      if (sendOpen) {
+        closeSend()
+        return
+      }
+      if (receiveOpen) {
+        setReceiveOpen(false)
         return
       }
       // Escape mid-celebration must not leave a stale timer behind either.
@@ -969,7 +1181,17 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [stakeOpen, currencyOpen, changelogOpen, confirmUnstakeOpen, downloadLink, backupMode])
+  }, [
+    stakeOpen,
+    currencyOpen,
+    changelogOpen,
+    confirmUnstakeOpen,
+    sendOpen,
+    closeSend,
+    receiveOpen,
+    downloadLink,
+    backupMode,
+  ])
 
   // Clean up the celebration timer on unmount so a pending auto-close can't
   // fire into a dead tree.
@@ -2109,6 +2331,76 @@ export default function App() {
             {payConsensus === false && totalNimLuna === 0 && allTxs.length === 0 && (
               <p className="hint small dim">{PAY_SYNCING_COPY}</p>
             )}
+
+            {/* Quick actions: the two things a wallet is for, one thumb-reach
+                below the balance. Actions, not sections — they open sheets and
+                leave the 5-tab dock alone. */}
+            <div className="card quick-actions">
+              <span className="label">Quick actions</span>
+              <div className="quick-actions-row">
+                <button
+                  type="button"
+                  className="btn-primary quick-action"
+                  onClick={openSend}
+                  disabled={!account.nimiqAddress}
+                >
+                  {/* Inline SVG like every other icon here — a Unicode arrow
+                      tofus on some Android builds. */}
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M12 19V5" />
+                    <path d="M5 12l7-7 7 7" />
+                  </svg>
+                  Send NIM
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary quick-action"
+                  onClick={() => setReceiveOpen(true)}
+                >
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M12 5v14" />
+                    <path d="M19 12l-7 7-7-7" />
+                  </svg>
+                  Receive NIM
+                </button>
+              </div>
+              {!account.nimiqAddress ? (
+                <p className="hint small">
+                  This connection has no Nimiq address. Connect a Nimiq wallet to send or receive
+                  NIM.
+                </p>
+              ) : demoMode ? (
+                <p className="hint small">
+                  Demo mode is read-only: receiving works, sending needs your own wallet.
+                </p>
+              ) : (
+                !canSend() && (
+                  <p className="hint small">
+                    This wallet can't sign transactions here. Receiving works either way.
+                  </p>
+                )
+              )}
+            </div>
 
             {unstakeActivity && (
               <div className="pending-unstake-banner" role="status">
@@ -3453,6 +3745,290 @@ export default function App() {
                   switching validator means unstake → stake again. NimBooks does both.
                 </p>
               </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Send sheet — the same adapter path the invoice page pays through, so
+          there is one signing flow in the app, not two. */}
+      {sendOpen && (
+        <div className="modal-overlay" onClick={closeSend}>
+          <div
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Send NIM"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-head">
+              <h2>Send NIM</h2>
+              {/* Closeable except while the wallet is asking for a signature —
+                  see closeSend. */}
+              <button
+                className="btn-ghost"
+                onClick={closeSend}
+                aria-label="Close"
+                disabled={sendState === 'sending'}
+              >
+                ✕
+              </button>
+            </div>
+
+            {sendState === 'sent' ? (
+              <div className="invoice-sent">
+                <p className="ok">✓ Payment sent</p>
+                <div className="invoice-confirm">
+                  <div className="row">
+                    <span>Amount</span>
+                    <span>{sendLuna ? formatLuna(sendLuna, lang) : sendAmount} NIM</span>
+                  </div>
+                  <div className="row">
+                    <span>To</span>
+                    <span className="mono">{sendToClean.slice(0, 14)}…</span>
+                  </div>
+                </div>
+                {sendHash ? (
+                  <p className="hint small">
+                    Transaction{' '}
+                    <a
+                      className="tx-hash-link"
+                      href={explorerTxUrl(sendHash)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      {sendHash.slice(0, 16)}…
+                    </a>{' '}
+                    · it is in your History, where you can sign a receipt for it.
+                  </p>
+                ) : (
+                  <p className="hint small">
+                    The transaction was submitted. It appears in History within a few seconds —
+                    sign a receipt for it from there.
+                  </p>
+                )}
+                <button className="btn-primary send-submit" onClick={closeSend}>
+                  Done
+                </button>
+              </div>
+            ) : (
+              <div className="send-form">
+                <label className="label" htmlFor="sendTo">
+                  Recipient address
+                </label>
+                <input
+                  id="sendTo"
+                  className="input"
+                  type="text"
+                  autoComplete="off"
+                  autoCapitalize="characters"
+                  spellCheck={false}
+                  placeholder="NQ…"
+                  value={sendTo}
+                  onChange={(e) => setSendTo(e.target.value)}
+                />
+                {sendTo.trim() !== '' && !sendToValid && (
+                  <span className="hint small warn">
+                    That isn't a valid Nimiq address. It starts with NQ and has 36 characters —
+                    paste it rather than typing it.
+                  </span>
+                )}
+                {sendToSelf && (
+                  <span className="hint small">
+                    This is your own address: the payment would come straight back.
+                  </span>
+                )}
+
+                <label className="label" htmlFor="sendAmount">
+                  Amount (NIM)
+                </label>
+                <input
+                  id="sendAmount"
+                  className="input"
+                  type="text"
+                  inputMode="decimal"
+                  autoComplete="off"
+                  placeholder="0.00"
+                  value={sendAmount}
+                  onChange={(e) => setSendAmount(e.target.value)}
+                />
+                {sendAmount.trim() !== '' && !sendLuna ? (
+                  <span className="hint small warn">
+                    Enter a positive amount with at most 5 decimals (max 2,000,000,000 NIM).
+                  </span>
+                ) : sendAmountOverBalance ? (
+                  <span className="hint small warn">
+                    More than this wallet can send. Available:{' '}
+                    {formatLuna(String(sendMaxLuna), lang)} NIM.
+                  </span>
+                ) : (
+                  <span className="hint small">
+                    {sendLuna
+                      ? `≈ ${formatFiat((Number(sendLuna) / 100000) * shown.nim, currency)} · available ${formatLuna(String(sendMaxLuna), lang)} NIM`
+                      : `Available to send: ${formatLuna(String(sendMaxLuna), lang)} NIM`}
+                  </span>
+                )}
+
+                <label className="label" htmlFor="sendNote">
+                  Note (optional)
+                </label>
+                <input
+                  id="sendNote"
+                  className="input"
+                  type="text"
+                  autoComplete="off"
+                  placeholder="Invoice #42"
+                  value={sendMemo}
+                  onChange={(e) => setSendMemo(e.target.value)}
+                />
+                <span
+                  className={sendMemoBytes > MAX_TX_MEMO_BYTES ? 'hint small warn' : 'hint small'}
+                >
+                  {sendMemoBytes}/{MAX_TX_MEMO_BYTES} bytes · rides on-chain with the payment, so
+                  it is public and permanent.
+                </span>
+
+                <div className="invoice-confirm">
+                  <div className="row">
+                    <span>From</span>
+                    <span className="mono">
+                      {account.nimiqAddress
+                        ? `${cleanAddr(account.nimiqAddress).slice(0, 14)}…`
+                        : '—'}
+                    </span>
+                  </div>
+                  <div className="row">
+                    <span>Network fee</span>
+                    <span>0 NIM</span>
+                  </div>
+                </div>
+
+                {sendError && <p className="hint small warn">{sendError}</p>}
+
+                {demoMode || !canSend() ? (
+                  <>
+                    {/* Read-only: the button stays on screen so the flow is
+                        visible, but nothing here can sign — and nothing is
+                        faked. wallet.sendNim refuses demo mode outright. */}
+                    <button className="btn-primary send-submit" disabled>
+                      Send NIM
+                    </button>
+                    <p className="hint small">
+                      {demoMode
+                        ? 'Demo mode is read-only. Connect your wallet to send NIM.'
+                        : 'Sending needs a wallet that can sign. Open NimBooks in Nimiq Pay, or sign in with the Nimiq Hub.'}
+                    </p>
+                    {!demoMode && !inNimiqPay && (
+                      <a
+                        className="btn-primary btn-link"
+                        href={NIMIQ_PAY_APP_URL}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        Open in Nimiq Pay →
+                      </a>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <button
+                      className="btn-primary send-submit"
+                      onClick={() => void submitSend()}
+                      disabled={!sendReady || sendBusy}
+                    >
+                      {sendState === 'sending'
+                        ? 'Confirm in your wallet…'
+                        : sendState === 'locating'
+                          ? 'Confirming on-chain…'
+                          : sendLuna
+                            ? `Send ${formatLuna(sendLuna, lang)} NIM`
+                            : 'Send NIM'}
+                    </button>
+                    <p className="hint small">
+                      {sendState === 'locating'
+                        ? 'Sent — looking it up on chain for the explorer link. You can close this; the payment is already on its way.'
+                        : 'Your wallet asks you to confirm before anything leaves this address. Payments are final once they are on-chain.'}
+                    </p>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Receive sheet — address and QR only. Creating a payment request (an
+          amount, a reference, reconciliation) stays in the Request tab. */}
+      {receiveOpen && (
+        <div className="modal-overlay" onClick={() => setReceiveOpen(false)}>
+          <div
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Receive NIM"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-head">
+              <h2>Receive NIM</h2>
+              <button
+                className="btn-ghost"
+                onClick={() => setReceiveOpen(false)}
+                aria-label="Close"
+              >
+                ✕
+              </button>
+            </div>
+
+            {account.nimiqAddress ? (
+              <>
+                <p className="hint small">
+                  Scan the code or share the address. Anything that arrives shows up in your books
+                  automatically — no import step.
+                </p>
+                <div className="invoice-qr">
+                  {/* Plain address, no URI scheme: every wallet scanner reads
+                      it, and a generic camera app shows something readable. */}
+                  <QrCode
+                    value={cleanAddr(account.nimiqAddress)}
+                    size={180}
+                    label="QR code of your Nimiq address"
+                  />
+                </div>
+                <p className="mono receive-addr">{account.nimiqAddress}</p>
+                <button
+                  className="btn-secondary"
+                  onClick={async () => {
+                    const addr = account.nimiqAddress
+                    if (!addr) return
+                    if (await copyText(addr, 'NIM address copied!')) setAddrCopied(true)
+                  }}
+                >
+                  {addrCopied ? 'Address copied ✓' : 'Copy address'}
+                </button>
+                <button
+                  className="btn-secondary"
+                  onClick={() => {
+                    setReceiveOpen(false)
+                    setView('request')
+                  }}
+                >
+                  Ask for a specific amount
+                </button>
+                <p className="hint small">
+                  A payment request adds an amount and a reference, and marks itself paid when the
+                  transaction lands.
+                </p>
+                {demoMode && (
+                  <p className="hint small">
+                    Demo mode: this is the public sample wallet, shown read-only.
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="hint">
+                This connection has no Nimiq address. Open NimBooks inside Nimiq Pay, or sign in
+                with the Nimiq Hub, and your receiving address appears here.
+              </p>
             )}
           </div>
         </div>
