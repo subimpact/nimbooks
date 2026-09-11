@@ -61,17 +61,154 @@ function getHub(): HubApi {
   return hubApi
 }
 
+// --- Session persistence (Nimiq Pay) ---
+//
+// The connection above lives in module memory only, and Nimiq Pay opens an
+// outbound link — a tx on the block explorer, say — inside the SAME WebView.
+// Pressing back re-boots NimBooks from scratch, `currentAccount` is null again,
+// and the user lands on the connect screen having done nothing wrong. So park
+// the little that is needed to reconnect silently on the next load.
+//
+// Only public data is stored: the addresses, which are on chain anyway. Signing
+// still goes through the provider (Nimiq Pay asks the user every time), so this
+// stores no key, no token and no permission — it is a note saying "this device
+// was connected", not a credential.
+const PAY_SESSION_KEY = 'nimbooks:session'
+// Demo mode is per tab: a fresh visit should still meet the landing screen and
+// choose for itself, but a reload (or a trip to the explorer and back) inside
+// the same tab should not throw the sample wallet away.
+const DEMO_SESSION_KEY = 'nimbooks:session:demo'
+
+type SavedProvider = 'pay' | 'demo'
+
+interface SavedSession {
+  provider: SavedProvider
+  nimiqAddress: string
+  remoteAddress?: string
+  /** Which tab the user was on, so back-from-the-explorer lands where it left. */
+  view?: string
+}
+
+function sessionStore(provider: SavedProvider): Storage {
+  return provider === 'demo' ? sessionStorage : localStorage
+}
+
+function sessionKey(provider: SavedProvider): string {
+  return provider === 'demo' ? DEMO_SESSION_KEY : PAY_SESSION_KEY
+}
+
+function clearSession(provider: SavedProvider): void {
+  try {
+    sessionStore(provider).removeItem(sessionKey(provider))
+  } catch {
+    /* no storage — there was nothing to clear */
+  }
+}
+
+/** Forget every saved session on this device (disconnect, or a stale record). */
+export function clearSavedSession(): void {
+  clearSession('pay')
+  clearSession('demo')
+}
+
+function readSavedSession(): SavedSession | null {
+  // Demo first: `sessionStorage` is this tab's own, so a demo record can only
+  // have been written by this tab, and it is therefore the more recent truth
+  // than a `localStorage` record another tab may have left behind.
+  for (const provider of ['demo', 'pay'] as const) {
+    let raw: string | null = null
+    try {
+      raw = sessionStore(provider).getItem(sessionKey(provider))
+    } catch {
+      continue // private mode / storage disabled — nothing to restore
+    }
+    if (!raw) continue
+    try {
+      const parsed = JSON.parse(raw)
+      if (
+        parsed &&
+        typeof parsed === 'object' &&
+        parsed.provider === provider &&
+        typeof parsed.nimiqAddress === 'string' &&
+        parsed.nimiqAddress
+      ) {
+        return parsed as SavedSession
+      }
+    } catch {
+      /* fall through — corrupt record */
+    }
+    clearSession(provider) // corrupt or foreign shape: never retried
+  }
+  return null
+}
+
+function saveSession(account: WalletAccount): void {
+  if (account.provider === 'hub' || !account.nimiqAddress) return
+  const provider: SavedProvider = account.provider
+  // Exactly one record exists at a time, so "which session is current" is never
+  // a question: connecting a wallet drops the demo record, and vice versa.
+  clearSession(provider === 'demo' ? 'pay' : 'demo')
+  const previous = readSavedSession()
+  const record: SavedSession = {
+    provider,
+    nimiqAddress: account.nimiqAddress,
+    ...(account.remoteAddress ? { remoteAddress: account.remoteAddress } : {}),
+    // A restore re-saves the live account; the view it restored to rides along
+    // rather than being reset to the dashboard under the user.
+    ...(previous?.provider === provider && previous.view ? { view: previous.view } : {}),
+  }
+  try {
+    sessionStore(provider).setItem(sessionKey(provider), JSON.stringify(record))
+  } catch {
+    /* private mode or full — the session simply won't survive a reload */
+  }
+}
+
+/** Remember the tab the user is on, alongside the session it belongs to. */
+export function saveSessionView(view: string): void {
+  const saved = readSavedSession()
+  if (!saved || saved.view === view) return
+  try {
+    sessionStore(saved.provider).setItem(
+      sessionKey(saved.provider),
+      JSON.stringify({ ...saved, view })
+    )
+  } catch {
+    /* private mode or full — the view just won't come back */
+  }
+}
+
+/** The tab a restored session was last on, if one was saved. */
+export function getSavedSessionView(): string | null {
+  return readSavedSession()?.view ?? null
+}
+
+/**
+ * Is there a session `restoreWalletSession()` could bring back? Lets the app
+ * render a reconnecting state instead of flashing the connect screen at
+ * someone who never disconnected.
+ *
+ * Nimiq Pay only, deliberately: it is the host that reloads the app under the
+ * user. A desktop browser keeps its Hub login flow exactly as it is.
+ */
+export function hasRestorableSession(): boolean {
+  return isInNimiqPay() && readSavedSession() !== null
+}
+
 function bytesToHex(bytes: Uint8Array): string {
   return Array.from(bytes)
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('')
 }
 
-export async function connectWallet(): Promise<WalletAccount> {
+/**
+ * Ask the Nimiq Pay host who is connected. Shared by the connect button and the
+ * silent restore below, so the two can never read the wallet differently.
+ */
+async function readPayAccount(): Promise<WalletAccount> {
   const account: WalletAccount = { provider: 'pay', consensus: null }
   activeProvider = 'pay'
 
-  // Nimiq side
   try {
     nimiqProvider = await init({ timeout: 10000 })
     // Typed `Promise<string[] | ErrorResponse>` — anything that isn't an array
@@ -108,6 +245,12 @@ export async function connectWallet(): Promise<WalletAccount> {
     console.warn('Nimiq provider unavailable:', e)
   }
 
+  return account
+}
+
+export async function connectWallet(): Promise<WalletAccount> {
+  const account = await readPayAccount()
+
   // EVM side
   try {
     if (window.ethereum) {
@@ -121,6 +264,61 @@ export async function connectWallet(): Promise<WalletAccount> {
   }
 
   currentAccount = account
+  // Survive a reload of the WebView (see the session notes above). Saved only
+  // when the host actually named an account — a failed connect leaves nothing
+  // behind to restore.
+  saveSession(account)
+  return account
+}
+
+/**
+ * Bring back a session the WebView threw away, without asking the user.
+ *
+ * Nimiq Pay loads outbound links (a tx on the block explorer) in the same
+ * WebView, so "back" is a cold boot of the app: without this the user is
+ * returned to the connect screen mid-task. The saved record only says *that*
+ * this device was connected — the account itself is always re-read live from
+ * the provider, so a wallet switched inside Pay restores as the new wallet
+ * rather than a stale address.
+ *
+ * Returns the account on success, `null` when there is nothing to restore or
+ * the provider can no longer name one (the stale record is dropped, so a
+ * failure is never retried in a loop).
+ */
+export async function restoreWalletSession(): Promise<WalletAccount | null> {
+  if (!isInNimiqPay()) return null
+  const saved = readSavedSession()
+  if (!saved) return null
+
+  if (saved.provider === 'demo') {
+    // Nothing to ask a provider for: the demo wallet is a public address the
+    // app reads from the chain. (Its story data is re-seeded by the caller —
+    // seedDemoData is an idempotent upsert.)
+    return connectDemoAccount(saved.nimiqAddress)
+  }
+
+  const account = await readPayAccount()
+  if (!account.nimiqAddress) {
+    clearSavedSession()
+    return null
+  }
+  // EVM side, silently: `eth_accounts` returns what the user has already
+  // authorised, where `eth_requestAccounts` would raise a permission prompt on
+  // a page the user only just pressed back onto.
+  try {
+    if (window.ethereum) {
+      const evmAccounts = await window.ethereum.request({ method: 'eth_accounts' })
+      if (Array.isArray(evmAccounts) && evmAccounts.length > 0) {
+        account.evmAddress = evmAccounts[0]
+      }
+    }
+  } catch (e) {
+    console.warn('EVM provider unavailable on restore:', e)
+  }
+
+  currentAccount = account
+  // Re-save with the live addresses: the restored wallet is the current one.
+  saveSession(account)
   return account
 }
 
@@ -250,6 +448,9 @@ export async function connectHub(): Promise<WalletAccount> {
 export function connectDemoAccount(address: string): WalletAccount {
   activeProvider = 'demo'
   currentAccount = { nimiqAddress: address, provider: 'demo', consensus: null }
+  // Per tab, unlike a real wallet: a reload keeps the sample wallet, a fresh
+  // visit still starts at the landing screen.
+  saveSession(currentAccount)
   return currentAccount
 }
 
@@ -257,6 +458,8 @@ export function connectDemoAccount(address: string): WalletAccount {
 export function disconnectWallet(): void {
   currentAccount = null
   activeProvider = 'pay'
+  // Disconnect means disconnect: nothing is left for the next load to restore.
+  clearSavedSession()
 }
 
 export async function getDeviceId(): Promise<string | null> {
