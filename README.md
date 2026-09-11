@@ -59,6 +59,7 @@ src/
 │   ├── dialogFocus.ts   # Focus into and back out of every aria-modal dialog
 │   ├── theme.ts         # Light/dark preference
 │   └── global.d.ts      # window.ethereum types (Nimiq Pay's own provider comes typed with the SDK)
+├── main.tsx             # Entry point — theme before first paint, hash router, Hub redirect return
 ├── App.tsx              # Main mini app (Overview / History / Receipts / Request / Export)
 ├── Analytics.tsx        # Dependency-free SVG charts — daily net flow + balance trajectory, with drilldowns
 ├── HeroBackground.tsx   # The living hexagon field behind the app
