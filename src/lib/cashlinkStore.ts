@@ -1,21 +1,28 @@
-// Recently created cashlinks, shelved locally so copy/manage affordances
+// Recently created cashlinks, shelved locally so copy/revert affordances
 // survive a reload or a closed sheet. The links themselves live on the Nimiq
-// chain (and in the Hub) — this is a convenience shelf, not a source of truth:
-// a status refreshes whenever the user reopens the link in the Hub's manage
-// screen, and a stale entry is always deletable by clearing browser storage.
+// chain — this is a convenience shelf, not a source of truth: status refreshes
+// from the chain whenever the sheet opens, and reverting closes the link out.
 //
-// Kept per wallet address, so a Hub session that signs in with another account
+// ⚠️ The `secret` field is the link's private key. It is kept ONLY here (and
+// in the shared link); losing it before the link is claimed means losing the
+// funds. Entries from the earlier Hub-managed era (no secret) are dropped —
+// those links could only be managed inside the Hub.
+//
+// Kept per wallet address, so a session that signs in with another account
 // never shows links it did not make.
 
 export interface StoredCashlink {
   address: string
-  link: string | null
+  /** The link secret (key material). Never sent to any server. */
+  secret: string
   valueLuna: number
   message: string
+  /** Local label: 'Funding…', 'Ready to claim', 'Claimed or reverted', … */
   status: string
   /** The wallet address the cashlink was created from. */
   from: string
   createdAt: number
+  fundingTx?: string
 }
 
 const KEY = 'nimbooks.cashlinks.v1'
@@ -26,7 +33,8 @@ function readAll(): StoredCashlink[] {
     const raw = localStorage.getItem(KEY)
     if (!raw) return []
     const list = JSON.parse(raw) as unknown
-    return Array.isArray(list) ? (list as StoredCashlink[]) : []
+    if (!Array.isArray(list)) return []
+    return (list as StoredCashlink[]).filter((c) => c && typeof c.secret === 'string' && c.secret)
   } catch {
     return []
   }
@@ -43,7 +51,7 @@ function writeAll(list: StoredCashlink[]): void {
 /** Newest first, for one wallet address. */
 export function loadCashlinks(from: string): StoredCashlink[] {
   return readAll()
-    .filter((c) => c && c.from === from)
+    .filter((c) => c.from === from)
     .sort((a, b) => b.createdAt - a.createdAt)
 }
 
@@ -53,11 +61,20 @@ export function saveCashlink(entry: StoredCashlink): void {
   writeAll([entry, ...list])
 }
 
-/** Update a shelved cashlink's status after a Hub manage round-trip. */
-export function updateCashlinkStatus(from: string, address: string, status: string): void {
+/** Merge fields into a shelved cashlink (status refreshes, funding hash). */
+export function updateCashlink(
+  from: string,
+  address: string,
+  patch: Partial<Pick<StoredCashlink, 'status' | 'fundingTx'>>
+): void {
   const list = readAll()
   const idx = list.findIndex((c) => c.from === from && c.address === address)
   if (idx === -1) return
-  list[idx] = { ...list[idx], status }
+  list[idx] = { ...list[idx], ...patch }
   writeAll(list)
+}
+
+/** Forget a shelved cashlink (only for entries with nothing left in them). */
+export function removeCashlink(from: string, address: string): void {
+  writeAll(readAll().filter((c) => !(c.from === from && c.address === address)))
 }

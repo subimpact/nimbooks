@@ -20,7 +20,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     version: '1.14.0',
     date: '2026-09-12',
     items: [
-      'Cashlinks arrive: send NIM as a claimable link — no address needed. Create and charge it in the Nimiq Hub, share the link right from the Hub, and reopen any recent cashlink from NimBooks to manage it',
+      'Cashlinks, anywhere: send NIM as a claimable link with the money inside — created and funded right in NimBooks on Nimiq Pay or in a browser, with the link, QR and share sheet in your hands, live status, and one-tap revert if it never gets claimed',
       'Staking opens to the browser: sign in with the Nimiq Hub on desktop and stake, unstake, retire and withdraw from right here — the app builds the transaction, the Hub signs it, and the same confirming cards walk it to the chain',
       'The signing library behind browser staking downloads once, the first time you open a staking surface in a Hub session — Nimiq Pay users never load it',
       'Validator icons now load instantly, even offline: the picker bakes small logo thumbnails into the list it saves, so cached opens show real icons right away and no longer re-download the big logo payload, with the monogram chip kept as a last resort',

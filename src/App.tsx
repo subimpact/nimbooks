@@ -16,8 +16,6 @@ import {
   isDemoMode,
   canSend,
   canStake,
-  createCashlink,
-  manageCashlink,
   prepareHubStaking,
   stopHubStakingPrep,
   sendNim,
@@ -29,15 +27,24 @@ import {
   getDeviceId,
   getLanguage,
   signReceipt,
-  type CreatedCashlink,
   type WalletAccount,
 } from './lib/wallet'
 import {
   loadCashlinks,
+  removeCashlink,
   saveCashlink,
-  updateCashlinkStatus,
+  updateCashlink,
   type StoredCashlink,
 } from './lib/cashlinkStore'
+import {
+  cashlinkCoreReady,
+  cashlinkShareUrl,
+  newCashlink,
+  prepareCashlinkCore,
+  sweepCashlink,
+  FUNDING_DATA,
+  type CashlinkResultView,
+} from './lib/cashlink'
 import {
   getNimiqBalance,
   getHtlcHoldings,
@@ -540,14 +547,25 @@ export default function App() {
   // page (wallet.sendNim): 'sending' is waiting on the wallet's signature,
   // 'locating' is recovering the hash from history, which only Nimiq Pay needs.
   const [sendOpen, setSendOpen] = useState(false)
-  // Cashlink sheet (Hub sessions only): create a claimable link and present it.
+  // Cashlink sheet: create a claimable link and present it (link, QR, share).
   const [cashlinkOpen, setCashlinkOpen] = useState(false)
   const [cashlinkAmount, setCashlinkAmount] = useState('')
   const [cashlinkMessage, setCashlinkMessage] = useState('')
   const [cashlinkBusy, setCashlinkBusy] = useState(false)
   const [cashlinkError, setCashlinkError] = useState<string | null>(null)
-  const [cashlinkResult, setCashlinkResult] = useState<CreatedCashlink | null>(null)
+  const [cashlinkSignerReady, setCashlinkSignerReady] = useState(false)
+  const [cashlinkResult, setCashlinkResult] = useState<CashlinkResultView | null>(null)
   const [cashlinkHistory, setCashlinkHistory] = useState<StoredCashlink[]>([])
+  const [cashlinkRevertTarget, setCashlinkRevertTarget] = useState<{
+    address: string
+    secret: string
+    valueLuna: number
+  } | null>(null)
+  const [cashlinkRevertBusy, setCashlinkRevertBusy] = useState(false)
+  // Hard guards against a double-tap racing the disabled attribute: both
+  // paths move money, so a second entry must bounce before React re-renders.
+  const cashlinkSubmittingRef = useRef(false)
+  const cashlinkRevertBusyRef = useRef(false)
   const [sendTo, setSendTo] = useState('')
   const [sendAmount, setSendAmount] = useState('')
   const [sendMemo, setSendMemo] = useState('')
@@ -1311,8 +1329,27 @@ export default function App() {
     setSendCelebrate(null)
   }, [])
 
-  // --- Cashlink sheet (Hub sessions only): create a claimable link, present
-  // it (QR, copy, share), and shelve it locally so it can be found again. ---
+  // --- Cashlink sheet: create a claimable link, present it (link, QR, share)
+  // and shelve it locally so it can be re-copied or reverted later. ---
+
+  const refreshCashlinkStatuses = async (from: string) => {
+    for (const entry of loadCashlinks(from).slice(0, 5)) {
+      try {
+        const balance = Number(await getNimiqBalance(entry.address))
+        const status =
+          balance > 0
+            ? 'Ready to claim'
+            : entry.status === 'Funding…'
+              ? 'Not funded yet'
+              : 'Claimed or reverted'
+        if (status !== entry.status) updateCashlink(from, entry.address, { status })
+      } catch {
+        /* one unreadable link must not block the rest */
+      }
+      setCashlinkHistory(loadCashlinks(from))
+    }
+    setCashlinkHistory(loadCashlinks(from))
+  }
 
   const openCashlink = () => {
     setCashlinkError(null)
@@ -1320,10 +1357,18 @@ export default function App() {
     setCashlinkBusy(false)
     setCashlinkAmount('')
     setCashlinkMessage('')
-    setCashlinkHistory(account?.nimiqAddress ? loadCashlinks(account.nimiqAddress) : [])
+    const from = account?.nimiqAddress
+    setCashlinkHistory(from ? loadCashlinks(from) : [])
     // The sheet replaces the send sheet — never stacked.
     setSendOpen(false)
     setCashlinkOpen(true)
+    // Warm the signer (key generation) while the amount is being typed.
+    setCashlinkSignerReady(cashlinkCoreReady())
+    if (!cashlinkCoreReady()) {
+      void prepareCashlinkCore().then((ready) => setCashlinkSignerReady(ready))
+    }
+    // Chain status moves while the sheet is closed — refresh the shelf.
+    if (from) void refreshCashlinkStatuses(from)
   }
 
   // Memoised on `cashlinkBusy` for the shared Escape handler (like closeSend):
@@ -1334,44 +1379,153 @@ export default function App() {
   }, [cashlinkBusy])
 
   const submitCashlink = async () => {
-    const amount = cashlinkAmount.trim() === '' ? null : Number(cashlinkAmount)
-    if (amount !== null && (!Number.isFinite(amount) || amount <= 0)) {
-      setCashlinkError('Enter an amount above 0, or leave it blank to set it in the Hub.')
+    if (cashlinkSubmittingRef.current) return
+    const amount = Number(cashlinkAmount)
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setCashlinkError('Enter an amount above 0.')
       return
     }
+    const valueLuna = Math.round(amount * 100000)
+    if (!Number.isSafeInteger(valueLuna) || valueLuna <= 0) {
+      setCashlinkError('Enter a positive amount with at most 5 decimals.')
+      return
+    }
+    const from = account?.nimiqAddress
+    if (!from || !canSend()) {
+      setCashlinkError('Connect a wallet that can send to create a cashlink.')
+      return
+    }
+    // Everything from here to the wallet call is synchronous on purpose: the
+    // Hub popup (or Pay approval) must fire from the click's own task. The
+    // signer was warmed when the sheet opened; keygen below is sync.
+    if (!cashlinkCoreReady()) {
+      setCashlinkError('Still preparing the signer — one moment, then tap again.')
+      return
+    }
+    let fresh: { secret: string; address: string }
+    try {
+      fresh = newCashlink(valueLuna, cashlinkMessage.trim())
+    } catch (e) {
+      setCashlinkError(e instanceof Error ? e.message : 'Could not generate the link.')
+      return
+    }
+    cashlinkSubmittingRef.current = true
     setCashlinkBusy(true)
     setCashlinkError(null)
+    // The key must exist on this device before any NIM moves, so the link can
+    // always be reverted.
+    const entry: StoredCashlink = {
+      address: fresh.address,
+      secret: fresh.secret,
+      valueLuna,
+      message: cashlinkMessage.trim(),
+      status: 'Funding…',
+      from,
+      createdAt: Date.now(),
+    }
+    saveCashlink(entry)
+    setCashlinkHistory(loadCashlinks(from))
     try {
-      const res = await createCashlink(amount, cashlinkMessage)
-      if (!res.ok) {
-        setCashlinkError(res.error)
-        return
+      const res = await sendNim({
+        recipient: fresh.address,
+        amountLuna: String(valueLuna),
+        memo: 'Cashlink',
+        extraData: FUNDING_DATA,
+        from,
+      })
+      setCashlinkResult({
+        address: fresh.address,
+        secret: fresh.secret,
+        valueLuna,
+        message: entry.message,
+        status: 'Funding…',
+      })
+      setCashlinkHistory(loadCashlinks(from))
+      // The hash is bookkeeping only (Nimiq Pay returns bytes, not a hash) —
+      // recover it in the background so the result card appears immediately.
+      void (async () => {
+        let hash = res.hash
+        if (!hash) {
+          try {
+            const found = await findSentTx(
+              from,
+              fresh.address,
+              String(valueLuna),
+              encodeMemo('Cashlink')
+            )
+            hash = found?.hash ?? null
+          } catch {
+            /* the funding is in flight either way; the shelf tracks by balance */
+          }
+        }
+        if (hash) updateCashlink(from, fresh.address, { fundingTx: hash })
+      })()
+      // Flip the label once the funding lands (two timed checks, no polling).
+      const settle = (delays: number[]) => {
+        const [next, ...rest] = delays
+        if (next === undefined) return
+        window.setTimeout(() => {
+          void (async () => {
+            try {
+              const balance = Number(await getNimiqBalance(fresh.address))
+              if (balance > 0) {
+                updateCashlink(from, fresh.address, { status: 'Ready to claim' })
+                setCashlinkHistory(loadCashlinks(from))
+                setCashlinkResult((prev) =>
+                  prev && prev.address === fresh.address ? { ...prev, status: 'Ready to claim' } : prev
+                )
+              } else {
+                settle(rest)
+              }
+            } catch {
+              settle(rest)
+            }
+          })()
+        }, next)
       }
-      setCashlinkResult(res.cashlink)
-      const from = account?.nimiqAddress
-      if (from) {
-        saveCashlink({ ...res.cashlink, from })
+      settle([4000, 8000])
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      if (/cancel|denied|reject|abort/i.test(message)) {
+        // Nothing was sent — the unused key can go.
+        removeCashlink(from, fresh.address)
         setCashlinkHistory(loadCashlinks(from))
+        setCashlinkError('Request cancelled — nothing was sent.')
+      } else {
+        // Keep the key: the send may still be in flight.
+        setCashlinkError(message || 'The cashlink could not be funded.')
       }
     } finally {
+      cashlinkSubmittingRef.current = false
       setCashlinkBusy(false)
     }
   }
 
-  const manageCashlinkClick = async (address: string) => {
-    setCashlinkError(null)
-    const res = await manageCashlink(address)
-    if (!res.ok) {
-      setCashlinkError(res.error)
-      return
-    }
+  const confirmRevertCashlink = async () => {
+    if (cashlinkRevertBusyRef.current) return
+    const target = cashlinkRevertTarget
     const from = account?.nimiqAddress
-    if (from) {
-      updateCashlinkStatus(from, address, res.cashlink.status)
+    if (!target || !from) return
+    cashlinkRevertBusyRef.current = true
+    setCashlinkRevertBusy(true)
+    setCashlinkError(null)
+    try {
+      const res = await sweepCashlink(target.secret, from)
+      if (!res.ok) {
+        setToast(res.error)
+        return
+      }
+      updateCashlink(from, target.address, { status: 'Reverted ✓' })
       setCashlinkHistory(loadCashlinks(from))
+      setCashlinkResult((prev) =>
+        prev && prev.address === target.address ? { ...prev, status: 'Reverted ✓' } : prev
+      )
+      setToast('Cashlink reverted — the NIM is on its way back to your wallet.')
+    } finally {
+      cashlinkRevertBusyRef.current = false
+      setCashlinkRevertBusy(false)
+      setCashlinkRevertTarget(null)
     }
-    setCashlinkResult((prev) => (prev && prev.address === address ? res.cashlink : prev))
-    setToast('Cashlink status refreshed in the Hub.')
   }
 
   const copyCashlinkLink = (link: string | null) => {
@@ -1694,6 +1848,10 @@ export default function App() {
         setConfirmUnstakeOpen(false)
         return
       }
+      if (cashlinkRevertTarget) {
+        setCashlinkRevertTarget(null)
+        return
+      }
       // The banner modal stands alone over Overview, so it peels on its own —
       // and closeUnstakeModal keeps a verification still running.
       if (unstakeModalShown) {
@@ -1736,6 +1894,7 @@ export default function App() {
     closeSend,
     cashlinkOpen,
     closeCashlink,
+    cashlinkRevertTarget,
     receiveOpen,
     unstakeModalShown,
     closeUnstakeModal,
@@ -4976,12 +5135,11 @@ export default function App() {
                     </p>
                   </>
                 )}
-                {hubSession && !isPhoneOrTablet() && sendState === 'idle' && (
-                  // Cashlinks are a Hub-only path (no Pay equivalent). Phones
-                  // and tablets get the Hub's redirect flow, which cannot
-                  // return a created link; the affordance lights up for every
-                  // browser session elsewhere — a narrow window or a
-                  // touch-screen laptop is still a browser with real popups.
+                {canSend() && !(hubSession && isPhoneOrTablet()) && sendState === 'idle' && (
+                  // Cashlinks work on both rails now: Nimiq Pay funds them with
+                  // its usual approval, the Hub funds them with a checkout
+                  // popup. Only Hub-on-a-phone stays out (the Hub would
+                  // redirect, and a redirected click has nothing to return to).
                   <button className="btn-ghost-lg" onClick={openCashlink}>
                     Send a claimable link instead
                   </button>
@@ -5032,53 +5190,37 @@ export default function App() {
                     <span>{cashlinkResult.status}</span>
                   </div>
                 </div>
-                {cashlinkResult.link ? (
-                  <>
-                    <div className="invoice-qr">
-                      <QrCode
-                        value={cashlinkResult.link}
-                        size={200}
-                        label="QR code of the cashlink"
-                      />
-                    </div>
-                    <p className="mono receive-addr">{cashlinkResult.link}</p>
-                    <p className="hint small">
-                      Anyone with this link can claim the NIM — send it over chat or email, or show
-                      the QR. The funds travel inside the link, not to a wallet address.
-                    </p>
-                    <button
-                      className="btn-primary send-submit"
-                      onClick={() => copyCashlinkLink(cashlinkResult.link)}
-                    >
-                      Copy link
-                    </button>
-                    <button
-                      className="btn-secondary"
-                      onClick={() => void shareCashlink(cashlinkResult.link)}
-                    >
-                      Share
-                    </button>
-                  </>
-                ) : (
-                  <p className="hint small">
-                    The Hub created the cashlink and showed your share options — the link itself
-                    stays with the Hub, so send it to the recipient from there. You can still
-                    manage or cancel this cashlink from here.
-                  </p>
-                )}
-                {cashlinkResult.status === 'Not funded yet' && (
-                  <p className="hint small warn">
-                    It is not funded yet: nobody can claim until the NIM is charged. Open it in the
-                    Nimiq Hub to finish funding it.
-                  </p>
-                )}
-                {cashlinkError && <p className="hint small warn">{cashlinkError}</p>}
+                <div className="invoice-qr">
+                  <QrCode
+                    value={cashlinkShareUrl(cashlinkResult.secret)}
+                    size={200}
+                    label="QR code of the cashlink"
+                  />
+                </div>
+                <p className="mono receive-addr">{cashlinkShareUrl(cashlinkResult.secret)}</p>
+                <p className="hint small">
+                  Anyone with this link can claim the NIM — send it over chat or email, or show
+                  the QR. If it never gets claimed, revert it and the funds come back.
+                </p>
+                <button
+                  className="btn-primary send-submit"
+                  onClick={() => copyCashlinkLink(cashlinkShareUrl(cashlinkResult.secret))}
+                >
+                  Copy link
+                </button>
+                <button
+                  className="btn-secondary"
+                  onClick={() => void shareCashlink(cashlinkShareUrl(cashlinkResult.secret))}
+                >
+                  Share
+                </button>
                 <button
                   className="btn-ghost"
-                  onClick={() => void manageCashlinkClick(cashlinkResult.address)}
+                  onClick={() => setCashlinkRevertTarget(cashlinkResult)}
                 >
-                  Manage in Nimiq Hub
+                  Revert to my wallet
                 </button>
+                {cashlinkError && <p className="hint small warn">{cashlinkError}</p>}
                 <button className="btn-ghost-lg" onClick={closeCashlink}>
                   Done
                 </button>
@@ -5087,8 +5229,8 @@ export default function App() {
               <div className="send-form">
                 <p className="hint">
                   A cashlink is a shareable link with NIM inside it: no recipient address, and
-                  whoever opens it claims the funds. You'll confirm and charge it in your Nimiq
-                  Hub, then share the link from the Hub's own screen.
+                  whoever opens it claims the funds. Create it here and fund it from your wallet
+                  in one confirmation — then send the link to whoever should claim it.
                 </p>
                 <label className="label" htmlFor="cashlinkAmount">
                   Amount (NIM)
@@ -5099,7 +5241,7 @@ export default function App() {
                   type="text"
                   inputMode="decimal"
                   autoComplete="off"
-                  placeholder="Leave blank to set it in the Hub"
+                  placeholder="0.00"
                   value={cashlinkAmount}
                   onChange={(e) => setCashlinkAmount(e.target.value)}
                 />
@@ -5119,14 +5261,18 @@ export default function App() {
                 <button
                   className="btn-primary send-submit"
                   onClick={() => void submitCashlink()}
-                  disabled={cashlinkBusy}
+                  disabled={cashlinkBusy || !cashlinkSignerReady}
                 >
-                  {cashlinkBusy ? 'Confirm in the Nimiq Hub…' : 'Create cashlink'}
+                  {cashlinkBusy ? 'Confirm in your wallet…' : 'Create cashlink'}
                 </button>
-                <p className="hint small">
-                  The Hub asks you to confirm, charges the NIM from your wallet, then shows your
-                  share options. Keep the link safe — anyone holding it can claim.
-                </p>
+                {cashlinkSignerReady ? (
+                  <p className="hint small">
+                    One wallet confirmation puts the NIM into the link. Anyone holding the link
+                    can claim it — keep it private until you send it.
+                  </p>
+                ) : (
+                  <p className="hint small">Preparing the signing library…</p>
+                )}
 
                 {cashlinkHistory.length > 0 && (
                   <div className="card">
@@ -5140,22 +5286,71 @@ export default function App() {
                         <div className="row">
                           <button
                             className="btn-small"
-                            disabled={!c.link}
-                            onClick={() => copyCashlinkLink(c.link)}
+                            onClick={() => copyCashlinkLink(cashlinkShareUrl(c.secret))}
                           >
                             Copy link
                           </button>
-                          <button
-                            className="btn-small"
-                            onClick={() => void manageCashlinkClick(c.address)}
-                          >
-                            Manage in Hub
-                          </button>
+                          {c.status === 'Ready to claim' || c.status === 'Funding…' ? (
+                            <button
+                              className="btn-small"
+                              onClick={() => setCashlinkRevertTarget(c)}
+                            >
+                              Revert
+                            </button>
+                          ) : (
+                            <button
+                              className="btn-small"
+                              onClick={() => {
+                                const from = account?.nimiqAddress
+                                if (from) {
+                                  removeCashlink(from, c.address)
+                                  setCashlinkHistory(loadCashlinks(from))
+                                }
+                              }}
+                            >
+                              Remove
+                            </button>
+                          )}
                         </div>
                       </div>
                     ))}
                   </div>
                 )}
+              </div>
+            )}
+
+            {cashlinkRevertTarget && (
+              <div className="confirm-overlay" onClick={() => setCashlinkRevertTarget(null)}>
+                <div
+                  className="confirm-dialog"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-label="Confirm revert"
+                  ref={dialogFocus}
+                  tabIndex={-1}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <h3 className="confirm-title">Revert this cashlink?</h3>
+                  <p className="confirm-amount">
+                    {formatLuna(String(cashlinkRevertTarget.valueLuna), lang)} NIM
+                  </p>
+                  <p className="hint small">
+                    The NIM returns to your wallet and the link stops working — anyone you already
+                    sent it to will no longer be able to claim.
+                  </p>
+                  <div className="confirm-actions">
+                    <button className="btn-ghost" onClick={() => setCashlinkRevertTarget(null)}>
+                      Cancel
+                    </button>
+                    <button
+                      className="btn-primary"
+                      onClick={() => void confirmRevertCashlink()}
+                      disabled={cashlinkRevertBusy}
+                    >
+                      {cashlinkRevertBusy ? 'Reverting…' : 'Revert'}
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
           </div>
