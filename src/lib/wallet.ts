@@ -547,6 +547,11 @@ export interface SendNimParams {
   recipient: string
   amountLuna: string // string in, so callers never do float maths on Luna
   memo?: string // plain UTF-8; hex-encoded here for the chain
+  /**
+   * Raw extra-data override for the Hub path (Nimiq Pay takes text only, via
+   * `memo`). Cashlink funding uses the Hub's own FUNDING tag bytes here.
+   */
+  extraData?: Uint8Array
   fee?: number
   from?: string // connected address — pins the sender in the Hub flow
 }
@@ -1060,6 +1065,11 @@ export async function unstakeRemove(amountNim: number): Promise<UnstakeResult> {
 }
 
 // --- Cashlinks (Hub sessions) ---
+//
+// ⚠️ UNUSED since cashlinks v2 (see cashlink.ts): the hand-rolled flow
+// replaced this path because `returnLink` needs an authorized origin. Kept
+// briefly as the reference for what the Hub's own flow does; delete once v2
+// has soaked in production.
 //
 // A cashlink is a shareable link with claimable NIM inside: the Hub creates
 // and charges it from the signed-in wallet. The link itself stays inside the
