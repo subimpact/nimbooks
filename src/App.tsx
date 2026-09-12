@@ -1433,6 +1433,8 @@ export default function App() {
         extraData: FUNDING_DATA,
         from,
       })
+      clearTxCache() // the funding must show up on the next History load
+      if (account) void refresh(account)
       setCashlinkResult({
         address: fresh.address,
         secret: fresh.secret,
@@ -1469,6 +1471,9 @@ export default function App() {
             try {
               const balance = Number(await getNimiqBalance(fresh.address))
               if (balance > 0) {
+                // Balance visible on the link address means the funding mined —
+                // drop the tx cache again so the next History walk is fresh.
+                clearTxCache()
                 updateCashlink(from, fresh.address, { status: 'Ready to claim' })
                 setCashlinkHistory(loadCashlinks(from))
                 setCashlinkResult((prev) =>
@@ -1515,6 +1520,8 @@ export default function App() {
         setToast(res.error)
         return
       }
+      clearTxCache() // the incoming NIM must show up on the next History load
+      if (account) void refresh(account)
       updateCashlink(from, target.address, { status: 'Reverted ✓' })
       setCashlinkHistory(loadCashlinks(from))
       setCashlinkResult((prev) =>
