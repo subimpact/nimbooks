@@ -16,6 +16,8 @@ import {
   isDemoMode,
   canSend,
   canStake,
+  prepareHubStaking,
+  stopHubStakingPrep,
   sendNim,
   stakeNim,
   unstakeDeactivate,
@@ -1890,6 +1892,34 @@ export default function App() {
     return null
   }, [pendingUnstake, stakingHolding, currentBlock])
 
+  // A Hub session signs staking through the Hub popup, and that popup must
+  // open from the click that asks for it. So the signing library (wasm) and a
+  // fresh block height are warmed up while a staking surface is on screen, and
+  // the submit buttons stay disabled until ready; the height keeps refreshing
+  // until the last surface closes.
+  const [hubStakeReady, setHubStakeReady] = useState(false)
+  const hubSession = account?.provider === 'hub'
+  useEffect(() => {
+    if (!hubSession) {
+      stopHubStakingPrep()
+      setHubStakeReady(false)
+      return
+    }
+    const surfaceOpen =
+      stakeOpen || unstakeActivity?.kind === 'cooling' || unstakeActivity?.kind === 'ready'
+    if (!surfaceOpen) {
+      stopHubStakingPrep()
+      return
+    }
+    let cancelled = false
+    void prepareHubStaking().then((ready) => {
+      if (!cancelled) setHubStakeReady(ready)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [hubSession, stakeOpen, unstakeActivity])
+
   // Unstake timing (protocol): retire-stake takes effect at the NEXT election
   // block (epoch boundary, ~12h), then the reporting window (1 epoch, ~12h)
   // must pass before the funds become withdrawable. Worst case ≈ 2 epochs
@@ -2692,7 +2722,8 @@ export default function App() {
                 on your phone.
               </p>
               {/* Phone without the app: the Hub login works on mobile browsers
-                  via redirect (lib/wallet.connectHub), read and sign only. */}
+                  via redirect (lib/wallet.connectHub) — staking included,
+                  since the Hub signing path shipped. */}
               <button
                 className="btn-ghost-lg"
                 onClick={connectWithHub}
@@ -2716,10 +2747,10 @@ export default function App() {
           </button>
           <ul className="feature-list">
             <li>Balance &amp; history with live fiat values (37 currencies)</li>
-            {/* Staking is signed by the injected Pay provider, so the browser
-                and mobile-web paths can read it but never send it — say so
-                here rather than in the stake panel the user has yet to open. */}
-            <li>Stake, unstake &amp; track rewards{!inNimiqPay && ' (in Nimiq Pay)'}</li>
+            {/* A Pay user needs no suffix; everyone else gets a pointer to the
+                two ways in — Hub sign-in now signs staking for real, and the
+                Pay app stays the one-tap path. */}
+            <li>Stake, unstake &amp; track rewards{!inNimiqPay && ' (Nimiq Pay or Hub sign-in)'}</li>
             <li>Payment requests (invoices) that settle on-chain</li>
             <li>Signed receipts: verifiable proof of payment</li>
             <li>Tax-ready CSV statements &amp; exports</li>
@@ -3119,7 +3150,7 @@ export default function App() {
                       onClick={() => {
                         if (!reopenBannerUnstake('retire')) void completeUnstake()
                       }}
-                      disabled={!canStake() || staking || unstaking}
+                      disabled={!canStake() || staking || unstaking || (hubSession && !hubStakeReady)}
                     >
                       {unstaking ? 'Submitting…' : 'Complete unstake'}
                     </button>
@@ -3142,7 +3173,7 @@ export default function App() {
                     onClick={() => {
                       if (!reopenBannerUnstake('withdraw')) void withdrawRetired()
                     }}
-                    disabled={!canStake() || staking || unstaking}
+                    disabled={!canStake() || staking || unstaking || (hubSession && !hubStakeReady)}
                   >
                     {unstaking ? 'Submitting…' : 'Withdraw'}
                   </button>
@@ -4166,16 +4197,17 @@ export default function App() {
               )}
             </div>
 
-            {/* Demo mode is the exception to the "not in Pay, nothing to show
-                here" rule: the panel is the flagship feature, and a sample
-                wallet can show all of it — the real validator list, the real
-                yields, the real numbers — with every button that signs left
-                disabled. Same read-only treatment the send sheet gets. */}
-            {!inNimiqPay && !demoMode ? (
+            {/* Two exceptions to the "not in Pay, nothing to show here" rule.
+                Demo mode shows the whole panel read-only (the real validators,
+                yields and numbers — every signing button disabled, same as the
+                send sheet). A Hub session gets it for real: since the Hub
+                signing path shipped, browser sessions can stake, so the gate
+                below only remains for a session that can do neither. */}
+            {!inNimiqPay && !demoMode && !hubSession ? (
               <>
                 <p className="hint">
-                  Staking is signed by your wallet, so it runs in the Nimiq Pay app. Open NimBooks
-                  there to delegate your NIM.
+                  Staking is signed by your wallet: sign in with the Nimiq Hub to delegate from
+                  this browser, or open NimBooks inside the Nimiq Pay app.
                 </p>
                 <a
                   className="btn-primary btn-link"
@@ -4440,18 +4472,36 @@ export default function App() {
                 <button
                   className="btn-primary stake-submit"
                   onClick={submitStake}
-                  disabled={!canStake() || staking || !stakeAmountValid || !validatorChosen}
+                  disabled={
+                    !canStake() ||
+                    staking ||
+                    !stakeAmountValid ||
+                    !validatorChosen ||
+                    (hubSession && !hubStakeReady)
+                  }
                 >
-                  {staking ? 'Confirm in your wallet…' : hasStaker ? 'Add to stake' : 'Stake'}
+                  {staking
+                    ? hubSession
+                      ? 'Confirm in the Nimiq Hub…'
+                      : 'Confirm in your wallet…'
+                    : hasStaker
+                      ? 'Add to stake'
+                      : 'Stake'}
                 </button>
+                {hubSession && !hubStakeReady && (
+                  // The Hub popup must open from the submit click itself, so
+                  // the signing library and a block height warm up first; this
+                  // is brief and only shows for browser sessions.
+                  <p className="hint small">Preparing the signing library…</p>
+                )}
                 {demoMode && (
                   // Read-only, and nothing here is faked: the validators, the
                   // yields and the balances are live. wallet.stakeNim refuses
                   // demo mode outright, so the button above stays disabled.
                   <p className="hint small">
                     Demo mode is read-only: this is the real validator list and the sample
-                    wallet's real numbers, but nothing here can sign. Open NimBooks in Nimiq Pay
-                    with your own wallet to stake.
+                    wallet's real numbers, but nothing here can sign. Connect your own wallet to
+                    stake: Hub sign-in works in this browser, or open NimBooks in Nimiq Pay.
                   </p>
                 )}
                 {hasStaker && (
@@ -4459,7 +4509,7 @@ export default function App() {
                     <button
                       className="btn-ghost unstake-toggle"
                       onClick={() => setUnstakeOpen((v) => !v)}
-                      disabled={!canStake() || staking || unstaking}
+                      disabled={!canStake() || staking || unstaking || (hubSession && !hubStakeReady)}
                     >
                       {unstakeOpen ? 'Hide unstake' : 'Unstake'}
                     </button>
@@ -4514,7 +4564,10 @@ export default function App() {
                         <button
                           className="btn-primary stake-submit"
                           onClick={() => setConfirmUnstakeOpen(true)}
-                          disabled={!canStake() || unstaking || !(Number(unstakeAmount) > 0)}
+                          disabled={
+                            !canStake() || unstaking || !(Number(unstakeAmount) > 0) ||
+                            (hubSession && !hubStakeReady)
+                          }
                         >
                           {unstaking ? 'Submitting…' : 'Unstake'}
                         </button>
