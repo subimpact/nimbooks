@@ -9,6 +9,9 @@ import type { NimiqProvider } from '@nimiq/mini-app-sdk'
 // `default`, so a named import type-checks and then fails to bundle. The
 // behaviours are reachable as statics on the class instead.
 import HubApi from '@nimiq/hub-api'
+// Type-only, so it erases at build (the package's named RUNTIME exports are
+// not real — see the note above).
+import type { CreateCashlinkRequest } from '@nimiq/hub-api'
 import type { SignedReceipt } from './receipt'
 import { canonicalPayload } from './receipt'
 import { broadcastRawTransaction, getNimiqBlockNumber } from './chain'
@@ -1053,6 +1056,123 @@ export async function unstakeRemove(amountNim: number): Promise<UnstakeResult> {
   } catch (e) {
     console.error('Nimiq Pay unstake (remove) failed:', e)
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+// --- Cashlinks (Hub sessions) ---
+//
+// A cashlink is a shareable link with claimable NIM inside: the Hub creates
+// and charges it from the signed-in wallet, NimBooks presents the link (QR,
+// copy, share) and can reopen the Hub's manage screen for it later. There is
+// no equivalent on the injected Pay provider, so this whole section is a Hub
+// path — the UI only offers it for Hub sessions.
+
+export interface CreatedCashlink {
+  address: string
+  link: string | null
+  valueLuna: number
+  message: string
+  status: string
+  createdAt: number
+}
+
+export type CashlinkResult =
+  | { ok: true; cashlink: CreatedCashlink }
+  | { ok: false; error: string }
+
+/** Human label for HubApi.CashlinkState (0–4), the lifecycle the Hub reports. */
+export function cashlinkStatusLabel(state: number): string {
+  switch (state) {
+    case 0:
+      return 'Not funded yet'
+    case 1:
+      return 'Funding…'
+    case 2:
+      return 'Ready to claim'
+    case 3:
+      return 'Being claimed…'
+    case 4:
+      return 'Claimed'
+    default:
+      return 'Status unknown'
+  }
+}
+
+function toCreatedCashlink(cashlink: {
+  address: string
+  link?: string
+  value: number
+  message: string
+  status: number
+}): CreatedCashlink {
+  return {
+    address: cashlink.address,
+    link: cashlink.link ?? null,
+    valueLuna: cashlink.value,
+    message: cashlink.message,
+    status: cashlinkStatusLabel(cashlink.status),
+    createdAt: Date.now(),
+  }
+}
+
+/**
+ * Create a cashlink through the Hub. Call from the click that asks for it —
+ * `createCashlink` opens the Hub popup with no await in front of it here.
+ * A null `amountNim` lets the Hub UI ask for the amount instead.
+ */
+export async function createCashlink(
+  amountNim: number | null,
+  message: string
+): Promise<CashlinkResult> {
+  if (activeProvider === 'demo') {
+    return { ok: false, error: 'Demo mode is read-only. Connect your wallet to create a cashlink.' }
+  }
+  if (activeProvider !== 'hub') {
+    return {
+      ok: false,
+      error:
+        'Cashlinks are created with the Nimiq Hub. Sign in with the Hub in this browser to make one.',
+    }
+  }
+  let value: number | undefined
+  if (amountNim !== null) {
+    const luna = Math.round(amountNim * 100000)
+    if (!Number.isSafeInteger(luna) || luna <= 0) {
+      return { ok: false, error: 'Enter an amount above 0, or leave it blank to set it in the Hub.' }
+    }
+    value = luna
+  }
+  const trimmed = message.trim()
+  const request = {
+    appName: 'NimBooks',
+    ...(value !== undefined ? { value } : {}),
+    ...(trimmed ? { message: trimmed.slice(0, 200), autoTruncateMessage: true } : {}),
+    ...(currentAccount?.nimiqAddress ? { senderAddress: currentAccount.nimiqAddress } : {}),
+    returnLink: true as const,
+    skipSharing: true,
+  }
+  try {
+    // No await before this call: the popup opens from the click's own task.
+    const cashlink = await getHub().createCashlink(request as CreateCashlinkRequest)
+    return { ok: true, cashlink: toCreatedCashlink(cashlink) }
+  } catch (e) {
+    console.error('Hub cashlink creation failed:', e)
+    return { ok: false, error: hubSigningError(e) }
+  }
+}
+
+/** Reopen the Hub's manage screen for one cashlink (status, fund, cancel). */
+export async function manageCashlink(cashlinkAddress: string): Promise<CashlinkResult> {
+  if (activeProvider !== 'hub') {
+    return { ok: false, error: 'Managing a cashlink needs the Nimiq Hub sign-in.' }
+  }
+  try {
+    // No await before this call — same popup rule as creation.
+    const cashlink = await getHub().manageCashlink({ appName: 'NimBooks', cashlinkAddress })
+    return { ok: true, cashlink: toCreatedCashlink(cashlink) }
+  } catch (e) {
+    console.error('Hub cashlink manage failed:', e)
+    return { ok: false, error: hubSigningError(e) }
   }
 }
 
