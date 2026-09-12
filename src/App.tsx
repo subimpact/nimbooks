@@ -1546,14 +1546,15 @@ export default function App() {
   }, [account?.nimiqAddress, stakeOpen, validators.length, stakingHolding?.delegation])
 
   // When the stake panel is open and the in-memory list has validators but is
-  // missing logos (i.e. served from cache), trigger ONE forced refresh in the
-  // background so logos fill in. Fallback avatars render until it lands.
-  // Guarded so at most one attempt runs per page session; failures are swallowed
-  // and the existing list is never cleared.
+  // missing logos (no full logo AND no cached thumbnail, i.e. an old-format
+  // cache), trigger ONE forced refresh in the background. Once thumbnails are
+  // baked into the cache this never fires, so the picker stops refetching the
+  // big payload entirely. Guarded to one attempt per page session; failures
+  // are swallowed and the existing list is never cleared.
   useEffect(() => {
     if (!stakeOpen || validators.length === 0) return
     if (validatorLogosRefreshedRef.current) return
-    const hasLogos = validators.some((v) => Boolean(v.logo))
+    const hasLogos = validators.some((v) => Boolean(v.logo || v.logoSmall))
     if (hasLogos) return
 
     validatorLogosRefreshedRef.current = true
@@ -4310,12 +4311,13 @@ export default function App() {
                         >
                           <span className="option-dot" aria-hidden="true" />
                           {/* Logos ride along on the payload we already paid
-                              for. When missing (cache-served before background
-                              refresh or offline), fall back to a monogram chip. */}
-                          {v.logo ? (
+                              for; cached lists carry small baked thumbnails,
+                              so icons render instantly and offline. A monogram
+                              chip is only a last resort. */}
+                          {v.logo || v.logoSmall ? (
                             <img
                               className="validator-logo"
-                              src={v.logo}
+                              src={v.logo || v.logoSmall}
                               alt=""
                               aria-hidden="true"
                               width={28}
