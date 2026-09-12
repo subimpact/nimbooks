@@ -618,17 +618,236 @@ export async function sendNim({
   return { hash: null, serializedTx: res }
 }
 
+// --- Hub staking (desktop / browser sessions) ---
+//
+// Nimiq Pay signs staking transactions itself; the Nimiq Hub does not — its
+// `signStaking` wants raw, pre-serialized transaction bytes. So a browser
+// session builds the transaction locally with @nimiq/core (lazily imported:
+// ~1.2 MB of wasm that Pay users never download), has the Hub popup sign it,
+// and broadcasts the signed bytes over the same RPC the rest of the app uses.
+//
+// Popup-blocker discipline: `signStaking` must be called from the click
+// handler's own task with no `await` in front of it. Everything it needs —
+// the wasm module and a recent block height — is prepared while the user is
+// still choosing an amount (prepareHubStaking), and the UI keeps its submit
+// disabled until this module reports ready.
+
+type NimiqCoreModule = typeof import('@nimiq/core')
+
+// Nimiq mainnet. Staking transactions carry no fee on Nimiq PoS.
+const HUB_STAKING_NETWORK_ID = 24
+const HUB_STAKING_FEE = 0n
+// Heights feed validityStartHeight only; the refresh below keeps the value
+// far fresher than this while a staking surface is on screen.
+const HUB_HEIGHT_MAX_AGE_MS = 90_000
+const HUB_HEIGHT_REFRESH_MS = 30_000
+
+let hubCore: NimiqCoreModule | null = null
+let hubCorePromise: Promise<NimiqCoreModule> | null = null
+let hubHeight: number | null = null
+let hubHeightAt = 0
+let hubHeightTimer: ReturnType<typeof setInterval> | null = null
+
+async function refreshHubHeight(): Promise<void> {
+  try {
+    const height = await getNimiqBlockNumber()
+    if (Number.isFinite(height)) {
+      hubHeight = height
+      hubHeightAt = Date.now()
+    }
+  } catch (e) {
+    console.warn('Hub staking height refresh failed:', e)
+  }
+}
+
+/** True when the Hub signing path has everything it needs right now. */
+export function hubStakingReady(): boolean {
+  return hubCore !== null && hubHeight !== null && Date.now() - hubHeightAt < HUB_HEIGHT_MAX_AGE_MS
+}
+
+/**
+ * Warm up the Hub signing path: load the wasm module and a fresh block
+ * height, and keep the height fresh while a staking surface is visible.
+ * Safe to call repeatedly; resolves to whether the path is ready.
+ */
+export async function prepareHubStaking(): Promise<boolean> {
+  if (activeProvider !== 'hub') return false
+  if (!hubCorePromise) {
+    hubCorePromise = import('@nimiq/core')
+      .then((m) => {
+        hubCore = m
+        return m
+      })
+      .catch((e) => {
+        hubCorePromise = null
+        console.warn('@nimiq/core failed to load:', e)
+        throw e
+      })
+  }
+  try {
+    await hubCorePromise
+  } catch {
+    return false
+  }
+  if (!hubStakingReady()) await refreshHubHeight()
+  if (!hubHeightTimer) {
+    hubHeightTimer = setInterval(() => void refreshHubHeight(), HUB_HEIGHT_REFRESH_MS)
+  }
+  return hubStakingReady()
+}
+
+/** Stop the height refresh once no staking surface is on screen. */
+export function stopHubStakingPrep(): void {
+  if (hubHeightTimer) {
+    clearInterval(hubHeightTimer)
+    hubHeightTimer = null
+  }
+}
+
+type HubStakingOp =
+  | { kind: 'create'; delegation: string; valueLuna: number }
+  | { kind: 'add'; valueLuna: number }
+  | { kind: 'setActive'; newActiveLuna: number }
+  | { kind: 'retire'; retireLuna: number }
+  | { kind: 'remove'; valueLuna: number }
+
+/**
+ * Build the raw staking transaction for {op}. Synchronous on purpose: it runs
+ * inside the submit click, right before signStaking, with no await between.
+ */
+function buildHubStakingTx(
+  op: HubStakingOp,
+  from: string,
+  height: number,
+  core: NimiqCoreModule
+): Uint8Array {
+  const { Address, TransactionBuilder } = core
+  const sender = Address.fromUserFriendlyAddress(from)
+  switch (op.kind) {
+    case 'create':
+      return TransactionBuilder.newCreateStaker(
+        sender,
+        Address.fromUserFriendlyAddress(op.delegation.replace(/\s+/g, '').toUpperCase()),
+        BigInt(op.valueLuna),
+        HUB_STAKING_FEE,
+        height,
+        HUB_STAKING_NETWORK_ID
+      ).serialize()
+    case 'add':
+      // The staker's own address is the staker record for delegated stake.
+      return TransactionBuilder.newAddStake(
+        sender,
+        sender,
+        BigInt(op.valueLuna),
+        HUB_STAKING_FEE,
+        height,
+        HUB_STAKING_NETWORK_ID
+      ).serialize()
+    case 'setActive':
+      return TransactionBuilder.newSetActiveStake(
+        sender,
+        BigInt(op.newActiveLuna),
+        HUB_STAKING_FEE,
+        height,
+        HUB_STAKING_NETWORK_ID
+      ).serialize()
+    case 'retire':
+      return TransactionBuilder.newRetireStake(
+        sender,
+        BigInt(op.retireLuna),
+        HUB_STAKING_FEE,
+        height,
+        HUB_STAKING_NETWORK_ID
+      ).serialize()
+    case 'remove':
+      // Withdrawals go back to the account itself.
+      return TransactionBuilder.newRemoveStake(
+        sender,
+        BigInt(op.valueLuna),
+        HUB_STAKING_FEE,
+        height,
+        HUB_STAKING_NETWORK_ID
+      ).serialize()
+  }
+}
+
+function hubSigningError(e: unknown): string {
+  const message = e instanceof Error ? e.message : String(e)
+  if (/cancel|denied|abort/i.test(message)) return 'You cancelled the request in the Nimiq Hub.'
+  // A chained multi-step unstake can hit the popup blocker on a later signing:
+  // each retry starts from a fresh tap, so this reads as "tap again".
+  if (/popup|blocked/i.test(message))
+    return 'The browser blocked the Nimiq Hub window. Tap again to continue.'
+  return message || 'The Nimiq Hub request failed.'
+}
+
+/**
+ * Sign one staking transaction in the Hub popup and broadcast it. Only meant
+ * to be called from the submit click: `signStaking` is invoked with no await
+ * in front of it so the popup is never blocked.
+ */
+async function hubStakeSignAndBroadcast(op: HubStakingOp): Promise<StakeResult> {
+  const address = currentAccount?.nimiqAddress
+  if (!address) return { ok: false, error: 'No Nimiq wallet connected.' }
+  const core = hubCore
+  const height = hubHeight
+  if (!core || height === null || Date.now() - hubHeightAt >= HUB_HEIGHT_MAX_AGE_MS) {
+    void prepareHubStaking()
+    return { ok: false, error: 'Preparing the wallet… give it a moment and try again.' }
+  }
+
+  let bytes: Uint8Array
+  try {
+    bytes = buildHubStakingTx(op, address, height, core)
+  } catch (e) {
+    console.warn('Hub staking transaction build failed:', e)
+    return { ok: false, error: 'The staking transaction could not be built.' }
+  }
+
+  // NO await between here and signStaking(): the popup needs this click.
+  const signing = getHub().signStaking({
+    appName: 'NimBooks',
+    senderLabel: address,
+    transaction: bytes,
+    ...(op.kind === 'create'
+      ? { validatorAddress: op.delegation.replace(/\s+/g, '').toUpperCase(), amount: op.valueLuna }
+      : {}),
+  })
+
+  let signed: unknown
+  try {
+    signed = await signing
+  } catch (e) {
+    return { ok: false, error: hubSigningError(e) }
+  }
+  const list = (Array.isArray(signed) ? signed : [signed]) as Array<{ serializedTx?: string }>
+  const first = list.find((t) => typeof t?.serializedTx === 'string' && t.serializedTx)
+  if (!first?.serializedTx) {
+    return { ok: false, error: 'The wallet did not return a signed transaction.' }
+  }
+  try {
+    const hash = await broadcastRawTransaction(first.serializedTx)
+    return { ok: true, hash }
+  } catch (e) {
+    console.error('Hub staking broadcast failed:', e)
+    return {
+      ok: false,
+      error: 'The signed transaction could not reach the network. Please try again.',
+    }
+  }
+}
+
 // --- Staking ---
 
 export type StakeResult = { ok: true; hash: string } | { ok: false; error: string }
 
 /**
- * Can the active provider stake? Nimiq Pay only: the injected provider signs
- * and sends staking transactions itself, while Nimiq Hub's `signStaking` wants
- * a pre-serialized transaction (and therefore the @nimiq/core wasm bundle).
+ * Can the active provider stake? Nimiq Pay signs and sends staking
+ * transactions itself; a Hub session builds them locally (@nimiq/core) and
+ * signs through the Hub popup, so both can stake. Demo cannot (read-only).
  */
 export function canStake(): boolean {
-  return activeProvider === 'pay'
+  return activeProvider === 'pay' || activeProvider === 'hub'
 }
 
 /**
@@ -645,16 +864,17 @@ export async function stakeNim(delegation: string | null, amountNim: number): Pr
   if (activeProvider === 'demo') {
     return { ok: false, error: 'Demo mode is read-only. Connect your wallet to stake.' }
   }
-  if (activeProvider === 'hub') {
-    return {
-      ok: false,
-      error: 'Staking needs the Nimiq Pay app. The browser login can read and sign, but not stake.',
-    }
-  }
 
   const value = Math.round(amountNim * 100000)
   if (!Number.isSafeInteger(value) || value <= 0) {
     return { ok: false, error: 'Enter an amount above 0.' }
+  }
+
+  if (activeProvider === 'hub') {
+    // Browser session: build locally, sign in the Hub popup, broadcast.
+    return delegation
+      ? hubStakeSignAndBroadcast({ kind: 'create', delegation, valueLuna: value })
+      : hubStakeSignAndBroadcast({ kind: 'add', valueLuna: value })
   }
 
   // Same as connectWallet: re-init if the provider handle was never obtained
@@ -704,23 +924,20 @@ export type UnstakeResult = { ok: true; hash: string } | { ok: false; error: str
  *   amount being deactivated — `sendSetActiveStakeTransaction` sets an
  *   absolute balance (`newActiveBalance`), so a full unstake passes 0.
  *
- * Works only inside Nimiq Pay (same provider constraint as `stakeNim`).
+ * Works inside Nimiq Pay and in Hub browser sessions (see `stakeNim`).
  */
 export async function unstakeDeactivate(newActiveBalanceNim: number): Promise<UnstakeResult> {
   if (activeProvider === 'demo') {
     return { ok: false, error: 'Demo mode is read-only. Connect your wallet to unstake.' }
   }
-  if (activeProvider === 'hub') {
-    return {
-      ok: false,
-      error: 'Unstaking needs the Nimiq Pay app. The browser login can read and sign, but not unstake.',
-    }
-  }
-
   // 0 is the normal case (unstake everything), so only negatives are invalid.
   const value = Math.round(newActiveBalanceNim * 100000)
   if (!Number.isSafeInteger(value) || value < 0) {
     return { ok: false, error: 'Invalid unstake amount.' }
+  }
+
+  if (activeProvider === 'hub') {
+    return hubStakeSignAndBroadcast({ kind: 'setActive', newActiveLuna: value })
   }
 
   if (!nimiqProvider) {
@@ -756,22 +973,19 @@ export async function unstakeDeactivate(newActiveBalanceNim: number): Promise<Un
  * @param amountNim a portion of the inactive balance (`newRetireStake` takes
  *   an amount, not a target balance).
  *
- * Works only inside Nimiq Pay (same provider constraint as `stakeNim`).
+ * Works inside Nimiq Pay and in Hub browser sessions (see `stakeNim`).
  */
 export async function unstakeRetire(amountNim: number): Promise<UnstakeResult> {
   if (activeProvider === 'demo') {
     return { ok: false, error: 'Demo mode is read-only. Connect your wallet to unstake.' }
   }
-  if (activeProvider === 'hub') {
-    return {
-      ok: false,
-      error: 'Unstaking needs the Nimiq Pay app. The browser login can read and sign, but not unstake.',
-    }
-  }
-
   const value = Math.round(amountNim * 100000)
   if (!Number.isSafeInteger(value) || value <= 0) {
     return { ok: false, error: 'Enter an amount above 0.' }
+  }
+
+  if (activeProvider === 'hub') {
+    return hubStakeSignAndBroadcast({ kind: 'retire', retireLuna: value })
   }
 
   if (!nimiqProvider) {
@@ -803,22 +1017,19 @@ export async function unstakeRetire(amountNim: number): Promise<UnstakeResult> {
  * Only the amount already shown as `retiredBalance` (after the cooldown)
  * can be removed; `amountNim` is an amount, not a target balance.
  *
- * Works only inside Nimiq Pay.
+ * Works inside Nimiq Pay and in Hub browser sessions.
  */
 export async function unstakeRemove(amountNim: number): Promise<UnstakeResult> {
   if (activeProvider === 'demo') {
     return { ok: false, error: 'Demo mode is read-only. Connect your wallet to withdraw.' }
   }
-  if (activeProvider === 'hub') {
-    return {
-      ok: false,
-      error: 'Withdrawing needs the Nimiq Pay app. The browser login can read and sign, but not withdraw.',
-    }
-  }
-
   const value = Math.round(amountNim * 100000)
   if (!Number.isSafeInteger(value) || value <= 0) {
     return { ok: false, error: 'Enter an amount above 0.' }
+  }
+
+  if (activeProvider === 'hub') {
+    return hubStakeSignAndBroadcast({ kind: 'remove', valueLuna: value })
   }
 
   if (!nimiqProvider) {

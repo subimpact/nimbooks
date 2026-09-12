@@ -20,6 +20,8 @@ export const CHANGELOG: ChangelogEntry[] = [
     version: '1.14.0',
     date: '2026-09-12',
     items: [
+      'Staking opens to the browser: sign in with the Nimiq Hub on desktop and stake, unstake, retire and withdraw from right here — the app builds the transaction, the Hub signs it, and the same confirming cards walk it to the chain',
+      'The signing library behind browser staking downloads once, the first time you open a staking surface in a Hub session — Nimiq Pay users never load it',
       'Validator icons now load instantly, even offline: the picker bakes small logo thumbnails into the list it saves, so cached opens show real icons right away and no longer re-download the big logo payload, with the monogram chip kept as a last resort',
       'ImpactZero now leads the validator picker: 0% fees, pinned first, and a brand-new validator stays selectable while its score is still building',
       'Stake and unstake amounts take typed round numbers: the slider now pairs with a field, so setting exactly 100 or 1,000 NIM is a quick type instead of a careful drag (thanks to Bjorn van der Schaaf for the suggestion)',
