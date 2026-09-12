@@ -812,10 +812,12 @@ export interface ValidatorInfo {
   isListed: boolean
   balance: number // Luna staked with this validator (for network total)
   annualReward: number | null // net annual yield after fee, as a fraction (0.0831 = 8.31% p.a.)
-  // Picker branding. In-memory only: the logos are inlined data URIs and the
-  // 24-validator payload is ~1.4 MB, so they are stripped before caching (see
-  // getValidators). A cache hit therefore renders name + metrics, no logo.
-  logo?: string // data:image/… URI
+  // Picker branding. Full logos are inlined data URIs and the payload is
+  // ~1.4 MB, so only baked LOGO THUMBNAILS (a few KB each) are stored in the
+  // cache; `logo` itself stays in-memory. A cache hit still renders real
+  // icons, instantly and offline, from `logoSmall`.
+  logo?: string // data:image/… URI (in-memory only)
+  logoSmall?: string // small baked thumbnail, rides in the cache
   accentColor?: string // '#F39C12' — the pool's brand colour
 }
 
@@ -883,6 +885,78 @@ export function sortValidators(list: ValidatorInfo[]): ValidatorInfo[] {
   })
 }
 
+/**
+ * Bake a small thumbnail from an inlined logo data URI.
+ *
+ * Logos arrive as PNG / WebP / SVG data URIs and together weigh ~1.4 MB, far
+ * too much for localStorage. A 64 px raster is a few KB and is all the 28 px
+ * picker rows ever need, so thumbnails are baked at fetch time and ride in
+ * the cache. Best-effort: any decode/encode failure (or an oversized result)
+ * returns null and the row falls back to the monogram chip.
+ */
+function bakeLogoThumb(dataUri: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    if (typeof document === 'undefined') return resolve(null)
+    let settled = false
+    const done = (v: string | null) => {
+      if (!settled) {
+        settled = true
+        resolve(v)
+      }
+    }
+    try {
+      const img = new Image()
+      const timer = setTimeout(() => done(null), 2500)
+      img.onload = () => {
+        clearTimeout(timer)
+        try {
+          const w = img.naturalWidth
+          const h = img.naturalHeight
+          if (!w || !h) return done(null)
+          const render = (px: number) => {
+            const scale = Math.min(px / w, px / h)
+            const canvas = document.createElement('canvas')
+            canvas.width = Math.max(1, Math.round(w * scale))
+            canvas.height = Math.max(1, Math.round(h * scale))
+            const ctx = canvas.getContext('2d')
+            if (!ctx) return null
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+            let out = canvas.toDataURL('image/webp', 0.8)
+            if (!out.startsWith('data:image/webp')) out = canvas.toDataURL('image/png')
+            return out.length <= 16_000 ? out : null
+          }
+          done(render(64) ?? render(40))
+        } catch {
+          done(null)
+        }
+      }
+      img.onerror = () => {
+        clearTimeout(timer)
+        done(null)
+      }
+      img.src = dataUri
+    } catch {
+      done(null)
+    }
+  })
+}
+
+/** Bake thumbnails for a fresh validator list (parallel, best-effort per row). */
+async function withLogoThumbs(validators: ValidatorInfo[]): Promise<ValidatorInfo[]> {
+  return Promise.all(
+    validators.map(async (v) => {
+      if (!v.logo) return v
+      const logoSmall = await bakeLogoThumb(v.logo)
+      return logoSmall ? { ...v, logoSmall } : v
+    })
+  )
+}
+
+// A cold open can race the stake-panel load effect against the forced logo
+// refresh; both would otherwise download the whole ~1.4 MB list. Share one
+// in-flight request instead.
+let validatorsInflight: Promise<ValidatorInfo[]> | null = null
+
 export async function getValidators(opts?: { force?: boolean }): Promise<ValidatorInfo[]> {
   // A stale list still beats an empty picker if the API is down.
   let stale: ValidatorInfo[] | null = null
@@ -899,6 +973,16 @@ export async function getValidators(opts?: { force?: boolean }): Promise<Validat
     /* unreadable cache — refetch */
   }
 
+  if (validatorsInflight) return validatorsInflight
+  validatorsInflight = fetchValidatorsFresh(stale)
+  try {
+    return await validatorsInflight
+  } finally {
+    validatorsInflight = null
+  }
+}
+
+async function fetchValidatorsFresh(stale: ValidatorInfo[] | null): Promise<ValidatorInfo[]> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 10000)
   try {
@@ -948,11 +1032,14 @@ export async function getValidators(opts?: { force?: boolean }): Promise<Validat
       }
     })
     if (validators.length === 0) throw new Error('Validators API returned no validators')
+    // Bake cache-safe thumbnails so warm-cache and offline loads render real
+    // icons without ever refetching the ~1.4 MB payload just for avatars.
+    const withThumbs = await withLogoThumbs(validators)
     try {
-      // Logos are dropped here and only here: they are ~1.4 MB of base64 and
-      // localStorage is a ~5 MB budget shared with history, receipts and
-      // invoices. The returned list keeps them for this session's picker.
-      const cacheable = validators.map(({ logo: _logo, ...v }) => v)
+      // Full logos are dropped here and only here: they are ~1.4 MB of base64
+      // and localStorage is a ~5 MB budget shared with history, receipts and
+      // invoices. The baked thumbnails are a few KB total and ride along.
+      const cacheable = withThumbs.map(({ logo: _logo, ...v }) => v)
       localStorage.setItem(
         VALIDATORS_CACHE_KEY,
         JSON.stringify({ at: Date.now(), validators: cacheable } satisfies ValidatorCacheEntry)
@@ -960,7 +1047,7 @@ export async function getValidators(opts?: { force?: boolean }): Promise<Validat
     } catch {
       /* storage full — the list just isn't cached */
     }
-    return sortValidators(validators)
+    return sortValidators(withThumbs)
   } catch (e) {
     if (stale) {
       console.warn('Validators refresh failed, serving cached list:', e)
