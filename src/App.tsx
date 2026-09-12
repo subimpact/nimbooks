@@ -104,7 +104,7 @@ import {
 } from './lib/invoice'
 import { seedDemoData } from './lib/demoData'
 import { getRestakeRewardTxs, restakeWindow } from './lib/stakingEvents'
-import { isInNimiqPay, isMobileDevice, NIMIQ_PAY_APP_URL, siteLink } from './lib/device'
+import { isInNimiqPay, isMobileDevice, isPhoneOrTablet, NIMIQ_PAY_APP_URL, siteLink } from './lib/device'
 import { dialogFocus } from './lib/dialogFocus'
 import { shortenUrl } from './lib/shorten'
 import { buildDownloadLink } from './lib/downloadLink'
@@ -4976,10 +4976,12 @@ export default function App() {
                     </p>
                   </>
                 )}
-                {hubSession && !isMobileDevice() && sendState === 'idle' && (
-                  // Cashlinks are a Hub-only path (no Pay equivalent, and the
-                  // mobile redirect flow cannot return a link), so the
-                  // affordance only lights up for a desktop Hub session.
+                {hubSession && !isPhoneOrTablet() && sendState === 'idle' && (
+                  // Cashlinks are a Hub-only path (no Pay equivalent). Phones
+                  // and tablets get the Hub's redirect flow, which cannot
+                  // return a created link; the affordance lights up for every
+                  // browser session elsewhere — a narrow window or a
+                  // touch-screen laptop is still a browser with real popups.
                   <button className="btn-ghost-lg" onClick={openCashlink}>
                     Send a claimable link instead
                   </button>
@@ -5059,8 +5061,9 @@ export default function App() {
                   </>
                 ) : (
                   <p className="hint small">
-                    The Hub created the cashlink but did not hand back a shareable link. Open your
-                    cashlinks inside the Hub wallet to copy it.
+                    The Hub created the cashlink and showed your share options — the link itself
+                    stays with the Hub, so send it to the recipient from there. You can still
+                    manage or cancel this cashlink from here.
                   </p>
                 )}
                 {cashlinkResult.status === 'Not funded yet' && (
@@ -5084,8 +5087,8 @@ export default function App() {
               <div className="send-form">
                 <p className="hint">
                   A cashlink is a shareable link with NIM inside it: no recipient address, and
-                  whoever opens it claims the funds. The link is created and charged through your
-                  Nimiq Hub wallet.
+                  whoever opens it claims the funds. You'll confirm and charge it in your Nimiq
+                  Hub, then share the link from the Hub's own screen.
                 </p>
                 <label className="label" htmlFor="cashlinkAmount">
                   Amount (NIM)
@@ -5121,8 +5124,8 @@ export default function App() {
                   {cashlinkBusy ? 'Confirm in the Nimiq Hub…' : 'Create cashlink'}
                 </button>
                 <p className="hint small">
-                  The Hub asks you to confirm, then charges the NIM from your wallet into the
-                  link. Keep the link safe — anyone holding it can claim.
+                  The Hub asks you to confirm, charges the NIM from your wallet, then shows your
+                  share options. Keep the link safe — anyone holding it can claim.
                 </p>
 
                 {cashlinkHistory.length > 0 && (

@@ -15,6 +15,17 @@ export function isMobileDevice(): boolean {
   )
 }
 
+/**
+ * Phone or tablet — by user agent. This is the line where the Hub falls back
+ * to its full-page redirect flow (and where a created link could not come
+ * back yet); distinct from `isMobileDevice()`, which also treats a narrow or
+ * touch-screen desktop window as mobile for wallet-routing purposes.
+ */
+export function isPhoneOrTablet(): boolean {
+  if (typeof window === 'undefined') return false
+  return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
+}
+
 export function isInNimiqPay(): boolean {
   return typeof window !== 'undefined' && !!window.nimiqPay
 }
