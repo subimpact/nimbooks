@@ -1062,10 +1062,13 @@ export async function unstakeRemove(amountNim: number): Promise<UnstakeResult> {
 // --- Cashlinks (Hub sessions) ---
 //
 // A cashlink is a shareable link with claimable NIM inside: the Hub creates
-// and charges it from the signed-in wallet, NimBooks presents the link (QR,
-// copy, share) and can reopen the Hub's manage screen for it later. There is
-// no equivalent on the injected Pay provider, so this whole section is a Hub
-// path — the UI only offers it for Hub sessions.
+// and charges it from the signed-in wallet. The link itself stays inside the
+// Hub's own share flow — `returnLink` is a privileged request (hub.nimiq.com
+// rejects non-authorized origins with "not authorized to request returnLink"),
+// so NimBooks never receives it; it keeps the record (address, amount, status)
+// and reopens the Hub's manage UI for it later. There is no equivalent on the
+// injected Pay provider, so this whole section is a Hub path — the UI only
+// offers it for Hub sessions.
 
 export interface CreatedCashlink {
   address: string
@@ -1119,6 +1122,11 @@ function toCreatedCashlink(cashlink: {
  * Create a cashlink through the Hub. Call from the click that asks for it —
  * `createCashlink` opens the Hub popup with no await in front of it here.
  * A null `amountNim` lets the Hub UI ask for the amount instead.
+ *
+ * No `returnLink`: hub.nimiq.com only hands the shareable link back to
+ * authorized origins, so the Hub runs its own flow and shows its share
+ * screen. The response carries the cashlink's address and status, not the
+ * link — the sheet says so plainly.
  */
 export async function createCashlink(
   amountNim: number | null,
@@ -1143,13 +1151,13 @@ export async function createCashlink(
     value = luna
   }
   const trimmed = message.trim()
+  // The Hub runs its own flow and shows its share screen (no `returnLink` —
+  // see the section note above), so the request carries only the prefill.
   const request = {
     appName: 'NimBooks',
     ...(value !== undefined ? { value } : {}),
     ...(trimmed ? { message: trimmed.slice(0, 200), autoTruncateMessage: true } : {}),
     ...(currentAccount?.nimiqAddress ? { senderAddress: currentAccount.nimiqAddress } : {}),
-    returnLink: true as const,
-    skipSharing: true,
   }
   try {
     // No await before this call: the popup opens from the click's own task.
