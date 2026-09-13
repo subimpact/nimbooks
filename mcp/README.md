@@ -33,17 +33,24 @@ This is the part to read first.
 - **It is not a wallet, and not a replacement for one.** It reads what the chain already
   says in public about an address you name.
 
-Not sure? The whole server is six files under `src/`, about 1,200 lines. `src/index.ts`
+Not sure? The whole server is five files under `src/`, about 1,600 lines. `src/index.ts`
 is the tool surface; there is nothing else to audit.
 
 ---
 
 ## Setup
 
-Node 20 or newer.
+Node 20 or newer. Nothing to clone — from npm:
 
 ```bash
-cd mcp
+npx -y nimbooks-mcp --help
+```
+
+Or from source, if you would rather build and audit it yourself:
+
+```bash
+git clone https://github.com/subimpact/nimbooks
+cd nimbooks/mcp
 npm install
 npm run build     # → dist/index.js
 ```
@@ -56,9 +63,9 @@ npm run build     # → dist/index.js
 {
   "mcpServers": {
     "nimbooks": {
-      "command": "node",
+      "command": "npx",
       "args": [
-        "/absolute/path/to/nimbooks/mcp/dist/index.js",
+        "-y", "nimbooks-mcp",
         "--address", "NQ43 Y1RH P1K7 JH78 LRTS 95RY GAUU UBDK FFGX"
       ]
     }
@@ -71,9 +78,12 @@ Restart Claude Desktop. The six tools appear under the tools icon.
 ### Claude Code
 
 ```bash
-claude mcp add nimbooks -- node /absolute/path/to/nimbooks/mcp/dist/index.js \
+claude mcp add nimbooks -- npx -y nimbooks-mcp \
   --address "NQ43 Y1RH P1K7 JH78 LRTS 95RY GAUU UBDK FFGX"
 ```
+
+Built from source instead? Point both commands at
+`node /absolute/path/to/nimbooks/mcp/dist/index.js` in place of `npx -y nimbooks-mcp`.
 
 ### Options
 
