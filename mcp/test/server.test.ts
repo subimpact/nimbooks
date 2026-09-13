@@ -59,6 +59,10 @@ test('tools/list returns exactly the six tools', async () => {
       assert.ok(tool.description && tool.description.length > 40, `${tool.name} has a real description`)
       assert.ok(tool.inputSchema, `${tool.name} has an input schema`)
     }
+    // A configured default is only usable if the assistant is told it exists —
+    // otherwise it asks for an address the server already has.
+    const instructions = client.getInstructions() ?? ''
+    assert.match(instructions, /Configured default address: NQ43 Y1RH P1K7 JH78 LRTS 95RY GAUU UBDK FFGX/)
   } finally {
     await client.close()
   }
@@ -77,6 +81,13 @@ test('every tool description states the fence', async () => {
     assert.match(draft.description!, /DRAFTS/)
     assert.match(draft.description!, /never signs/)
     assert.match(draft.description!, /only the payer’s wallet/)
+    // The link's own amountNim field carries Luna (the app's format). Saying so
+    // here is what stops a reader comparing it to this tool's NIM output and
+    // calling a correct link a 100,000× overcharge.
+    assert.match(draft.description!, /amountNim is denominated in Luna/)
+
+    // With no --address, the instructions claim no default.
+    assert.equal((client.getInstructions() ?? '').includes('Configured default address'), false)
   } finally {
     await client.close()
   }
