@@ -134,7 +134,7 @@ reconciles its own books from the same chain data.
 
 ## The closing line
 
-> Six tools. About 1,200 lines. It talks to exactly two hosts — the public Nimiq RPC and
+> Six tools. About 1,600 lines. It talks to exactly two hosts — the public Nimiq RPC and
 > CoinGecko — and it has no key handling in it at all. The assistant can read your books
 > and write you an invoice. It cannot move your money, and there is no code path in there
 > by which it could learn how.

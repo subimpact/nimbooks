@@ -20,6 +20,7 @@ It shows your NIM balance and transaction history with fiat values, lets you **s
 - **Payment requests (invoices)** — amount + memo + optional expiry → shareable link and QR; the payer settles it in-app, and the tagged transaction (`nimbooks:invoice:<id>`) marks the request paid automatically when it lands on-chain
 - **EVM balances** — native + USDT across Polygon, Base, Arbitrum, Optimism, Ethereum (via public RPCs)
 - **Signed receipts** — `signMessage` attestation over `{txHash, amount, memo, timestamp}` → shareable verification link
+- **AI, fenced** — `mcp/` ships `nimbooks-mcp` ([npm](https://www.npmjs.com/package/nimbooks-mcp)): a local MCP server that lets an AI assistant read your books and draft payment requests, while never signing and holding no key material. The app links to it from the MCP chip beside the version badge, and the setup page lives at `/mcp`
 - **Public verification page** — Ed25519 signature check + signer-address binding + on-chain cross-check by transaction hash
 - **CSV export** — accountant-ready statement downloads (formula-injection safe, UTF-8 BOM); statements aggregate daily CoinGecko UTC closes
 - **Download via link** — Nimiq Pay's WebView can't save files, so exports there go through a gzip-in-URL Pages Function that serves the CSV with `Content-Disposition`, plus QR and clipboard fallbacks
