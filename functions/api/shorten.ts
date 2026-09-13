@@ -14,14 +14,14 @@
 // No cache: short.io dedupes by originalURL server-side, so re-sharing the
 // same receipt returns the same path and burns no extra quota.
 
+import { APP_ORIGIN as ORIGIN, isFromApp } from '../_lib/fromApp'
+
 // Minimal local types — @cloudflare/workers-types is not a dependency and this
 // directory is outside the tsconfig includes (wrangler bundles it with esbuild).
 interface Ctx {
   request: Request
   env: { SHORTIO_API_KEY?: string; SHORTIO_DOMAIN?: string }
 }
-
-const ORIGIN = 'https://nimbooks.subimpact.net'
 
 /** Only NimBooks share links get shortened, so the short domain can't be
  *  turned into an open redirector pointing anywhere on the web. Receipt and
@@ -30,37 +30,14 @@ const ORIGIN = 'https://nimbooks.subimpact.net'
  *
  *  /export links are deliberately absent: those carry the user's whole ledger
  *  as a gzipped CSV in the query string, and shortening one would post it to
- *  short.io. Export links stay long and never leave the device. */
+ *  short.io. Export links get shortened by /api/export-link instead, which
+ *  keeps the payload on our own edge and never talks to a third party. */
 const ALLOWED: ReadonlyArray<{ prefix: string; maxUrl: number }> = [
   { prefix: `${ORIGIN}/#/`, maxUrl: 4096 },
 ]
 
 const isShareLink = (url: string): boolean =>
   ALLOWED.some(({ prefix, maxUrl }) => url.startsWith(prefix) && url.length <= maxUrl)
-
-/** Did this come from one of the app's own pages?
- *
- *  The allowlist above already stops the short domain becoming an open
- *  redirector; this is about the quota. Anyone can mint links by POSTing
- *  distinct `#/` payloads, and a browser tells us where a request came from:
- *  fetch metadata first, then Origin (a same-origin POST carries one), then
- *  Referer. A request that shows none of the three is not a share button, so
- *  it is refused — the client falls back to the long URL on any non-200, so
- *  a false negative costs the user nothing but a longer link.
- *
- *  Headers can be forged by anything that isn't a browser, so a rate-limit
- *  rule on the route stays the real quota control. */
-const isFromApp = (request: Request): boolean => {
-  const site = request.headers.get('Sec-Fetch-Site')
-  const origin = request.headers.get('Origin')
-  const referer = request.headers.get('Referer')
-  // 'none' is a top-level, user-initiated request (a privacy context that
-  // strips the origin, say); anything cross-site is not ours.
-  if (site && site !== 'same-origin' && site !== 'none') return false
-  if (origin && origin !== ORIGIN) return false
-  if (referer && !referer.startsWith(`${ORIGIN}/`)) return false
-  return !!(site || origin || referer)
-}
 
 const DEFAULT_DOMAIN = 'nimbook.s.gy'
 

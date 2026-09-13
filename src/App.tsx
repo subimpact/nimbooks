@@ -116,7 +116,7 @@ import { getRestakeRewardTxs, restakeWindow } from './lib/stakingEvents'
 import { isInNimiqPay, isMobileDevice, isPhoneOrTablet, NIMIQ_PAY_APP_URL, siteLink } from './lib/device'
 import { dialogFocus } from './lib/dialogFocus'
 import { shortenUrl } from './lib/shorten'
-import { buildDownloadLink } from './lib/downloadLink'
+import { buildDownloadLink, buildShortExportLink } from './lib/downloadLink'
 import { exportBackup, importBackup, validateBackup } from './lib/backup'
 import { APP_VERSION_LABEL, CHANGELOG } from './lib/changelog'
 import QrCode from './QrCode'
@@ -535,6 +535,10 @@ export default function App() {
   const [statementLoading, setStatementLoading] = useState(false)
   // Real-HTTPS download link for WebViews that can't save files (see downloadLink.ts).
   const [downloadLink, setDownloadLink] = useState<string | null>(null)
+  // Is the link above the short /s/ form (payload in our KV, gone in 48h) or
+  // the long /export/ one (payload in the URL, stored nowhere)? The modal has
+  // to say which, because only one of them leaves anything behind.
+  const [downloadShortLink, setDownloadShortLink] = useState(false)
   const [linkBusy, setLinkBusy] = useState(false)
   // Backup/restore modal: which half is showing, plus the two text buffers.
   const [backupMode, setBackupMode] = useState<'backup' | 'restore' | null>(null)
@@ -2838,11 +2842,16 @@ export default function App() {
         }
         return
       }
-      // Not shortened, on purpose: the whole export rides inside this URL, so
-      // the link *is* the user's ledger. Handing it to a third-party shortener
-      // would hand them the ledger with it. The URL stays long; the modal
-      // offers copy and open, and drops the QR when it outgrows a camera.
-      setDownloadLink(link)
+      // Shortened on our own edge, never short.io: the whole export rides
+      // inside this URL, so the link *is* the user's ledger, and a third-party
+      // shortener would be handed the ledger with it. /api/export-link keeps
+      // the payload in our KV for 48h and gives back a URL short enough to
+      // scan. Any failure there (no binding yet, offline, slow) falls back to
+      // the long URL, which the modal still offers to copy and open, dropping
+      // the QR when it outgrows a camera.
+      const short = await buildShortExportLink(e.csv, e.filename)
+      setDownloadShortLink(short.ok)
+      setDownloadLink(short.ok ? short.url : link)
     } catch {
       setError('Could not build download link.')
     } finally {
@@ -4409,7 +4418,9 @@ export default function App() {
               </p>
             )}
             <p className="hint small">
-              The link carries the CSV itself, compressed. Nothing is stored on a server.
+              {downloadShortLink
+                ? 'The CSV sits behind this link on the NimBooks server, never a third party. This download link expires in 48 hours.'
+                : 'The link carries the CSV itself, compressed. Nothing is stored on a server.'}
             </p>
           </div>
         </div>
