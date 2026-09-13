@@ -13,6 +13,7 @@ import {
   isLabelledTxKind,
   txLabel,
 } from './lib/chain'
+import { isCashlinkMemo } from './lib/cashlink'
 import { parseInvoiceMemo } from './lib/invoice'
 import DetailSheet from './DetailSheet'
 
@@ -901,7 +902,14 @@ export default function Analytics({
                       </a>
                     )}
                   </div>
-                  {memo && <div className="tx-memo">memo: {memo}</div>}
+                  {/* Same rule as History: a cashlink tag is protocol
+                      furniture, not a note, so it is named rather than
+                      printed as hex. */}
+                  {memo && (
+                    <div className="tx-memo">
+                      {isCashlinkMemo(memo) ? 'Cashlink' : `memo: ${memo}`}
+                    </div>
+                  )}
                 </div>
               )
             })
