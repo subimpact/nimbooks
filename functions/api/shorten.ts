@@ -1,4 +1,7 @@
-// POST /api/shorten — turns a NimBooks share link into a short.io link.
+// POST /api/shorten — turns a NimBooks receipt or invoice share link into a
+// short.io link. Nothing that carries a ledger is shortened: the payload of a
+// short link is handed to a third party, so only the small fragment-borne
+// share links go through here.
 //
 // Why a server Function: the short.io API key is a bearer secret. It lives
 // only as the Cloudflare Pages secret SHORTIO_API_KEY, so the call has to
@@ -21,13 +24,15 @@ interface Ctx {
 const ORIGIN = 'https://nimbooks.subimpact.net'
 
 /** Only NimBooks share links get shortened, so the short domain can't be
- *  turned into an open redirector pointing anywhere on the web. Each prefix
- *  carries its own cap: receipts ride in the fragment and stay small, while
- *  an /export link carries a gzipped CSV (up to ~12 KB) in its query string.
- *  The caps just keep a junk body from being forwarded upstream. */
+ *  turned into an open redirector pointing anywhere on the web. Receipt and
+ *  invoice links ride in the fragment and stay small; the cap just keeps a
+ *  junk body from being forwarded upstream.
+ *
+ *  /export links are deliberately absent: those carry the user's whole ledger
+ *  as a gzipped CSV in the query string, and shortening one would post it to
+ *  short.io. Export links stay long and never leave the device. */
 const ALLOWED: ReadonlyArray<{ prefix: string; maxUrl: number }> = [
   { prefix: `${ORIGIN}/#/`, maxUrl: 4096 },
-  { prefix: `${ORIGIN}/export/`, maxUrl: 16384 },
 ]
 
 const isShareLink = (url: string): boolean =>

@@ -7,7 +7,7 @@
 // Badge text. Spelled out rather than built from a version constant so the exact
 // label ships as one string in the bundle (JSX would emit "v" as a separate node).
 // package.json carries the machine-readable version.
-export const APP_VERSION_LABEL = 'v1.14.0'
+export const APP_VERSION_LABEL = 'v1.15.0'
 
 export interface ChangelogEntry {
   version: string
@@ -16,6 +16,16 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '1.15.0',
+    date: '2026-09-13',
+    items: [
+      'Cashlink safety pass: the link key is verified on your device before a single NIM moves, a link that is still funding can never be mistaken for a claimed one, and deleting a link asks first and is only offered for finished links',
+      'Cashlinks you fund in a browser now carry the same on-chain cashlink tag the Nimiq Hub itself uses, so other Nimiq apps recognize them as cashlinks',
+      'Statement download links stay entirely on our own domain: your export never passes through a third-party shortener, with copy and open always available and the QR appearing when the link is compact enough to scan',
+      'Unstaking bounces double-taps, and a cashlink message that cannot fit the link format is refused up front instead of corrupting silently',
+    ],
+  },
   {
     version: '1.14.0',
     date: '2026-09-12',
