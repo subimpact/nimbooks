@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NimBooks MCP: your books, answerable in plain language</title>
+<meta name="description" content="nimbooks-mcp is a local MCP server that lets an AI assistant read your Nimiq books and draft payment requests. It never signs, holds no key material, and involves no server of ours." />
+<meta name="color-scheme" content="dark" />
+<style>
+  :root {
+    --bg: #0f1117;
+    --bg-elev: #141722;
+    --card: #1a1d27;
+    --card-2: #222634;
+    --border: #2a2f3d;
+    --text: #e8eaf0;
+    --muted: #8b90a0;
+    --accent: #e9a23b;
+    --accent-2: #f5c26b;
+    --green: #3ddc84;
+    --radius: 14px;
+    --radius-sm: 10px;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { -webkit-text-size-adjust: 100%; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.55;
+    letter-spacing: -0.01em;
+    min-height: 100vh;
+    /* Hex-forward without a single request: two radial washes in the brand
+       amber, laid over the app's own background colour. */
+    background-image:
+      radial-gradient(720px 420px at 80% -10%, rgba(233, 162, 59, 0.10), transparent 70%),
+      radial-gradient(560px 360px at -10% 8%, rgba(233, 162, 59, 0.055), transparent 70%);
+    background-attachment: fixed;
+  }
+
+  .wrap {
+    max-width: 680px;
+    margin: 0 auto;
+    padding: 28px 16px 64px;
+  }
+
+  a { color: var(--accent); }
+  a:hover { color: var(--accent-2); }
+
+  .back {
+    display: inline-block;
+    font-size: 13px;
+    color: var(--muted);
+    text-decoration: none;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 3px 11px;
+    margin-bottom: 22px;
+  }
+  .back:hover { color: var(--text); border-color: var(--muted); }
+
+  /* The mark: one Nimiq hexagon, drawn with clip-path, no image. */
+  .mark {
+    width: 34px;
+    height: 34px;
+    flex: 0 0 34px;
+    clip-path: polygon(25% 2%, 75% 2%, 100% 50%, 75% 98%, 25% 98%, 0 50%);
+    background: linear-gradient(140deg, var(--accent-2), var(--accent));
+  }
+
+  header.top { display: flex; align-items: center; gap: 12px; }
+  h1 {
+    font-size: 27px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+  }
+  .chip {
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 2px 7px;
+    white-space: nowrap;
+  }
+  .lede {
+    margin-top: 14px;
+    font-size: 17px;
+    color: var(--text);
+  }
+  .lede .quiet { color: var(--muted); }
+
+  h2 {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 34px 0 12px;
+  }
+  h3 {
+    font-size: 15px;
+    font-weight: 650;
+    margin: 22px 0 8px;
+  }
+  h3:first-of-type { margin-top: 4px; }
+  p { margin: 10px 0; }
+  p.note { color: var(--muted); font-size: 14px; }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 18px;
+  }
+
+  .prompts {
+    list-style: none;
+    display: grid;
+    gap: 8px;
+    margin: 14px 0 0;
+  }
+  .prompts li {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-left: 2px solid var(--accent);
+    border-radius: var(--radius-sm);
+    padding: 9px 13px;
+    color: var(--text);
+    font-size: 15px;
+  }
+
+  /* The fence: the one block that has to be read, so it gets the green edge. */
+  .fence {
+    background: linear-gradient(180deg, #16201a, var(--card));
+    border: 1px solid #1d4a2f;
+    border-radius: var(--radius);
+    padding: 16px 18px;
+  }
+  .fence .line {
+    font-size: 15px;
+    color: var(--text);
+    margin: 0 0 12px;
+  }
+  .fence ul { list-style: none; display: grid; gap: 9px; }
+  .fence li {
+    font-size: 14px;
+    color: var(--muted);
+    padding-left: 20px;
+    position: relative;
+  }
+  .fence li::before {
+    content: "";
+    position: absolute;
+    left: 2px;
+    top: 7px;
+    width: 9px;
+    height: 9px;
+    clip-path: polygon(25% 2%, 75% 2%, 100% 50%, 75% 98%, 25% 98%, 0 50%);
+    background: var(--green);
+  }
+  .fence b { color: var(--text); font-weight: 650; }
+
+  pre {
+    background: #0b0d13;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 12px 14px;
+    margin: 10px 0;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.65;
+    color: #d6dae6;
+    -webkit-overflow-scrolling: touch;
+  }
+  code { font-family: var(--mono); font-size: 0.94em; }
+  p code, li code {
+    background: var(--card-2);
+    border-radius: 5px;
+    padding: 1px 5px;
+    color: var(--accent-2);
+  }
+
+  .steps { counter-reset: step; list-style: none; }
+  .req {
+    display: inline-block;
+    font-size: 12px;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 2px 9px;
+    margin-bottom: 4px;
+  }
+
+  footer {
+    margin-top: 40px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+    font-size: 14px;
+    color: var(--muted);
+  }
+  footer ul { list-style: none; display: grid; gap: 9px; margin-bottom: 14px; }
+  footer .built { font-size: 14px; }
+
+  @media (max-width: 400px) {
+    .wrap { padding: 20px 13px 52px; }
+    h1 { font-size: 23px; }
+    .lede { font-size: 16px; }
+    pre { font-size: 12px; padding: 11px 12px; }
+    .mark { width: 28px; height: 28px; flex-basis: 28px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <a class="back" href="/">&#8592; Back to NimBooks</a>
+
+  <header class="top">
+    <div class="mark" aria-hidden="true"></div>
+    <h1>NimBooks MCP</h1>
+    <span class="chip">MCP</span>
+  </header>
+
+  <p class="lede">Your books, answerable in plain language. <span class="quiet">The assistant can't spend a single Luna.</span></p>
+
+  <h2>What it is</h2>
+  <div class="card">
+    <p><code>nimbooks-mcp</code> is a small Model Context Protocol server that runs on your own machine. Point an AI assistant at it and your Nimiq books become answerable in ordinary sentences: balances, classified history, day-by-day statements priced at each day's close. It can also draft a payment request and hand you back the link. Six tools, about 1,600 lines, no account to create.</p>
+    <ul class="prompts">
+      <li>"How much came in last month, and who from?"</li>
+      <li>"Draft a request for 25 NIM for the September retainer."</li>
+      <li>"Has anyone paid request a1b2c3d4e5 yet?"</li>
+    </ul>
+  </div>
+
+  <h2>The fence</h2>
+  <div class="fence">
+    <p class="line">It never signs, it holds no key material, and no server of ours is involved: it reads the public chain and your local backup file, over two network endpoints in total.</p>
+    <ul>
+      <li><b>It never signs anything.</b> There is no key handling in the package at all. No private key, seed phrase or passphrase is generated, stored, read, derived or asked for, so there is no code path by which a signature could be produced.</li>
+      <li><b>A request is not a payment.</b> <code>create_payment_request</code> returns a link. Only the payer's wallet can move money, and only when its owner approves it there.</li>
+      <li><b>It writes nothing.</b> Every tool is a read or a pure function. Nothing is built, broadcast or queued, and nothing is marked paid, on chain or in your app's own books. The backup file you point it at is opened read-only.</li>
+      <li><b>No server of ours.</b> This process never calls <code>nimbooks.subimpact.net</code>. Exactly two hosts: <code>rpc.nimiqwatch.com</code> for the public chain, and <code>api.coingecko.com</code> for daily prices. That is the whole network surface.</li>
+    </ul>
+  </div>
+
+  <h2>Setup</h2>
+  <span class="req">Node 20 or newer</span>
+
+  <h3>From npm</h3>
+  <p>One command, nothing to clone or build:</p>
+  <pre>npx -y nimbooks-mcp --help</pre>
+
+  <h3>From source</h3>
+  <p class="note">Prefer to build it yourself, or to read every line before you run it:</p>
+  <pre>git clone https://github.com/subimpact/nimbooks
+cd nimbooks/mcp
+npm install
+npm run build</pre>
+
+  <p>Then register it with your assistant. <b>Claude Code</b>:</p>
+  <pre>claude mcp add nimbooks -- npx -y nimbooks-mcp \
+  --address "YOUR_NQ_ADDRESS"</pre>
+
+  <p><b>Claude Desktop</b>: Settings, then Developer, then Edit Config, and add the server to <code>claude_desktop_config.json</code>:</p>
+  <pre>{
+  "mcpServers": {
+    "nimbooks": {
+      "command": "npx",
+      "args": [
+        "-y", "nimbooks-mcp",
+        "--address", "YOUR_NQ_ADDRESS"
+      ]
+    }
+  }
+}</pre>
+
+  <p class="note">Built from source instead? Swap <code>npx -y nimbooks-mcp</code> for <code>node /absolute/path/to/nimbooks/mcp/dist/index.js</code> in either config.</p>
+
+  <p class="note">Restart the client and the six tools appear. <code>--address</code> is the account used when a question does not name one; every tool also takes an address of its own. Add <code>--backup /path/to/nimbooks-backup.json</code> if you want it to see the payment requests your app keeps on the device: that file holds cashlink keys, so keep it as carefully as a wallet. The server discards that part of it at the door.</p>
+
+  <footer>
+    <ul>
+      <li><a href="https://github.com/subimpact/nimbooks/tree/main/mcp">Source and full documentation on GitHub</a>, including the tool table, the stated limits, and the tests that pin a drafted link to the bytes the app itself would produce.</li>
+      <li><a href="https://github.com/subimpact/nimbooks/blob/main/mcp/DEMO.md">The demo script</a>: three beats, four minutes, ending with a link an assistant wrote opening in the real app.</li>
+    </ul>
+    <p class="built">Built into the NimBooks app: look for the MCP chip next to the version badge.</p>
+  </footer>
+
+</div>
+</body>
+</html>

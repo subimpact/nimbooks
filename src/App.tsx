@@ -3044,6 +3044,21 @@ export default function App() {
     </button>
   )
 
+  // The AI door. A link, not a button: /mcp is a static page outside the app,
+  // and it opens in its own tab so an app session is never disturbed.
+  const mcpChip = (
+    <a
+      className="mcp-chip"
+      href="/mcp"
+      target="_blank"
+      rel="noopener"
+      title="NimBooks for AI assistants: the MCP server"
+      aria-label="Open the MCP setup page"
+    >
+      MCP
+    </a>
+  )
+
   // Coming back from a link Nimiq Pay opened in this same WebView: the session
   // is being restored, so hold the hero and say so. Deliberately nothing to
   // press — the connect screen would invite a second connect for a wallet that
@@ -3079,6 +3094,7 @@ export default function App() {
         <header className="hero">
           <div className="hero-actions">
             {versionBadge}
+            {mcpChip}
             <button
               className="btn-ghost theme-toggle"
               onClick={toggleTheme}
@@ -3267,6 +3283,7 @@ export default function App() {
         <div className="logo small">📒</div>
         <h1>NimBooks</h1>
         {versionBadge}
+        {mcpChip}
         <button
           className="btn-ghost"
           onClick={toggleTheme}
