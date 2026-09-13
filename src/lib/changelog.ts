@@ -20,6 +20,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     version: '1.15.0',
     date: '2026-09-13',
     items: [
+      'The books get an AI door: a small MCP chip sits beside the version badge and opens the setup page for nimbooks-mcp, the local assistant server that can read your books and draft requests but can never spend a Luna',
       'Cashlink safety pass: the link key is verified on your device before a single NIM moves, a link that is still funding can never be mistaken for a claimed one, and deleting a link asks first and is only offered for finished links',
       'Cashlinks you fund in a browser now carry the same on-chain cashlink tag the Nimiq Hub itself uses, so other Nimiq apps recognize them as cashlinks',
       'Statement download links are short and scannable again: your export waits behind a random link on the NimBooks server, never a third party, and deletes itself after 48 hours, with copy, open and the QR back in the modal',

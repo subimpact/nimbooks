@@ -384,6 +384,31 @@ a:focus-visible {
   border-color: var(--muted);
 }
 
+/* MCP chip — sits beside the version badge and opens the /mcp setup page.
+   Same pill family, one notch quieter and smaller: three letterspaced
+   characters, so it reads as a mark rather than competing with the version. */
+.mcp-chip {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.75;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  text-decoration: none;
+  transition: color 0.15s ease, border-color 0.15s ease;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.mcp-chip:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
 /* Narrow phones: the topbar already carries four icon buttons — give the badge
    back the pixels it costs rather than squeezing the icons. */
 @media (max-width: 374px) {
@@ -396,6 +421,11 @@ a:focus-visible {
   .topbar .version-badge {
     padding: 2px 6px;
     font-size: 10px;
+  }
+  .topbar .mcp-chip {
+    padding: 2px 5px;
+    font-size: 9px;
+    letter-spacing: 0.06em;
   }
 }
 
@@ -2152,6 +2182,7 @@ a.btn-ghost.btn-link {
   .btn-small,
   .theme-toggle,
   .version-badge,
+  .mcp-chip,
   .error-banner,
   .toast,
   .modal-overlay,
