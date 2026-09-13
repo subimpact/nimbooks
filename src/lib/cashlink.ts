@@ -32,6 +32,8 @@ export const CLAIMING_DATA = new Uint8Array([0, 139, 136, 141, 138])
 // Nimiq mainnet; the app is mainnet-only.
 const MAINNET_NETWORK_ID = 24
 const FEE = 0n
+// The message length rides in a uint8, so that is the hard ceiling.
+const MAX_MESSAGE_BYTES = 255
 
 let core: NimiqCoreModule | null = null
 let corePromise: Promise<NimiqCoreModule> | null = null
@@ -97,6 +99,14 @@ export function newCashlink(valueLuna: number, message: string): FreshCashlink {
   if (!N) throw new Error('The cashlink signer is not ready yet.')
   if (!Number.isSafeInteger(valueLuna) || valueLuna <= 0) {
     throw new Error('Enter an amount above 0.')
+  }
+  // The format stores the message length in a single byte, and the writer
+  // below wraps silently past that — so refuse here rather than mint a link
+  // whose message decodes as garbage.
+  if (new TextEncoder().encode(message).length > MAX_MESSAGE_BYTES) {
+    throw new Error(
+      `That message is too long. A cashlink message holds up to ${MAX_MESSAGE_BYTES} bytes.`
+    )
   }
   const keyPair = N.KeyPair.derive(N.PrivateKey.generate())
   const secret = renderSecret(N, keyPair.privateKey.serialize(), valueLuna, message)
@@ -180,6 +190,10 @@ export type SweepResult = { ok: true; hash: string } | { ok: false; error: strin
  * exists.
  */
 export async function sweepCashlink(secret: string, recipient: string): Promise<SweepResult> {
+  // A revert can be tapped from the shelf on a fresh load, where nothing has
+  // warmed the signer yet. This leg is already async, so load it here instead
+  // of sending the user away; the message below is the last resort.
+  if (!core) await prepareCashlinkCore()
   const N = core
   if (!N) return { ok: false, error: 'The cashlink signer is not ready yet.' }
   const decoded = decodeSecret(secret)

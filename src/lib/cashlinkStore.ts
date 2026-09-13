@@ -26,7 +26,13 @@ export interface StoredCashlink {
 }
 
 const KEY = 'nimbooks.cashlinks.v1'
-const LIMIT = 20
+/** How many records the shelf holds. Exported so the sheet's copy can name the
+ *  number instead of repeating it by hand. */
+export const CASHLINK_ACTIVE_LIMIT = 20
+
+/** Statuses that mean the link is closed out and its key is worth nothing —
+ *  the only entries the shelf may ever evict on its own. */
+const FINAL_STATUSES = ['Claimed or reverted', 'Reverted ✓']
 
 function readAll(): StoredCashlink[] {
   try {
@@ -40,11 +46,15 @@ function readAll(): StoredCashlink[] {
   }
 }
 
-function writeAll(list: StoredCashlink[]): void {
+/** Returns whether the write landed: a created link must not be funded until
+ *  its key is really on the device, so the caller has to be able to tell. */
+function writeAll(list: StoredCashlink[]): boolean {
   try {
-    localStorage.setItem(KEY, JSON.stringify(list.slice(0, LIMIT)))
+    localStorage.setItem(KEY, JSON.stringify(list))
+    return true
   } catch {
-    /* storage full or unavailable — the shelf is best-effort */
+    /* storage full or unavailable */
+    return false
   }
 }
 
@@ -55,10 +65,36 @@ export function loadCashlinks(from: string): StoredCashlink[] {
     .sort((a, b) => b.createdAt - a.createdAt)
 }
 
-/** Add (or replace, keyed by address) a created cashlink. */
-export function saveCashlink(entry: StoredCashlink): void {
-  const list = readAll().filter((c) => c.address !== entry.address)
-  writeAll([entry, ...list])
+export type SaveCashlinkResult = { ok: true } | { ok: false; reason: 'storage' | 'limit' }
+
+/**
+ * Add (or replace, keyed by address) a created cashlink, and confirm it really
+ * landed — the caller must not move any NIM until this answers `ok`.
+ *
+ * Pruning is state-aware: the shelf only evicts entries that are closed out,
+ * oldest first. When nothing is evictable the save is refused rather than
+ * dropping a live key, because that key is the only thing that could still
+ * claim or revert the funds sitting in its link.
+ */
+export function saveCashlink(entry: StoredCashlink): SaveCashlinkResult {
+  const rest = readAll().filter((c) => c.address !== entry.address)
+  let list = [entry, ...rest]
+  if (list.length > CASHLINK_ACTIVE_LIMIT) {
+    const evictable = list
+      .filter((c) => c.address !== entry.address && FINAL_STATUSES.includes(c.status))
+      .sort((a, b) => a.createdAt - b.createdAt)
+    const drop = new Set(
+      evictable.slice(0, list.length - CASHLINK_ACTIVE_LIMIT).map((c) => c.address)
+    )
+    list = list.filter((c) => !drop.has(c.address))
+    if (list.length > CASHLINK_ACTIVE_LIMIT) return { ok: false, reason: 'limit' }
+  }
+  if (!writeAll(list)) return { ok: false, reason: 'storage' }
+  // Written is not the same as stored: read it back before anyone funds it.
+  const saved = loadCashlinks(entry.from).some(
+    (c) => c.address === entry.address && c.secret === entry.secret
+  )
+  return saved ? { ok: true } : { ok: false, reason: 'storage' }
 }
 
 /** Merge fields into a shelved cashlink (status refreshes, funding hash). */
@@ -74,7 +110,9 @@ export function updateCashlink(
   writeAll(list)
 }
 
-/** Forget a shelved cashlink (only for entries with nothing left in them). */
+/** Forget a shelved cashlink. The sheet only offers this for entries that are
+ *  closed out, or for one that was never funded behind an explicit confirm —
+ *  the key goes with the record. */
 export function removeCashlink(from: string, address: string): void {
   writeAll(readAll().filter((c) => !(c.from === from && c.address === address)))
 }
