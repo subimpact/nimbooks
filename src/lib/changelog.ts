@@ -22,7 +22,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     items: [
       'Cashlink safety pass: the link key is verified on your device before a single NIM moves, a link that is still funding can never be mistaken for a claimed one, and deleting a link asks first and is only offered for finished links',
       'Cashlinks you fund in a browser now carry the same on-chain cashlink tag the Nimiq Hub itself uses, so other Nimiq apps recognize them as cashlinks',
-      'Statement download links stay entirely on our own domain: your export never passes through a third-party shortener, with copy and open always available and the QR appearing when the link is compact enough to scan',
+      'Statement download links are short and scannable again: your export waits behind a random link on the NimBooks server, never a third party, and deletes itself after 48 hours, with copy, open and the QR back in the modal',
       'Unstaking bounces double-taps, and a cashlink message that cannot fit the link format is refused up front instead of corrupting silently',
       'History and the CSV name cashlink rows for what they are instead of printing the raw on-chain tag',
       'Backups carry your cashlinks, keys included, and keep the heavy history caches out so the file stays small: store it as safely as you store your wallet',

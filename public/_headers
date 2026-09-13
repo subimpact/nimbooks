@@ -23,7 +23,8 @@
 #                            api.coingecko.com           fiat rates and daily closes
 #                            validators-api-main…        validator list, fees, reliability
 #                            the five EVM public RPCs viem defaults to
-#                          plus 'self' for /api/shorten and /export
+#                          plus 'self' for /api/shorten, /api/export-link,
+#                          /export and /s
 #   frame-src              the Nimiq Hub opens an iframe for its desktop login
 #   img-src data:          validator logos ride along as data: URIs
 #
