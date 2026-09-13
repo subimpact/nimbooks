@@ -44,6 +44,10 @@ Calls `get_summary`. Expected shape:
 }
 ```
 
+Note that the address is never spoken: `--address` is configured above, the server names it
+in its instructions, and the tools use it when none is given. If you are running without a
+default, name the address in this first question.
+
 **Say:** the balance reads 382, but there are another 700 NIM staked — the app splits those
 out because they live in the staking contract, and so does this. Nothing here is an
 estimate: Luna are integers all the way through.
@@ -94,6 +98,10 @@ expiry, the QR. This is the beat — the link an assistant just wrote opens in t
 because the bytes are identical to what the app itself would have produced. There is a test
 that holds that line across every amount, memo and expiry combination, encoding here and
 decoding with the app's own module.
+
+**If anyone decodes the link on the spot:** the payload inside it has `amountNim` holding a
+Luna figure (`2500000`) — that is the app's own link format, not a bug and not a 100,000×
+overcharge. This tool's output reports `amountNim` in NIM and `amountLuna` in Luna.
 
 **Say, while it's on screen:** nothing was signed to make this. The whole request rides
 inside the link — there is no server holding it, and this process has no key material of

@@ -51,7 +51,7 @@ import {
 import { listBackupInvoices, readBackupFile, type BackupFile } from './backup.ts'
 import { computeStatement, getDailyCloses, periodBounds, priceCoverageNote } from './statement.ts'
 
-const VERSION = '1.0.0'
+const VERSION = '1.0.1'
 
 // How far back a tool will walk the transaction index. The RPC pages 50 at a
 // time and is rate-limited, so these are budgets, not guesses — every tool
@@ -100,6 +100,22 @@ function log(msg: string): void {
   // stdout is the protocol. Diagnostics go to stderr, always.
   process.stderr.write(`[nimbooks-mcp] ${msg}\n`)
 }
+
+// A configured default is validated here, before anything is said about it: the
+// server instructions name the address so the assistant can answer "how are my
+// books looking?" without asking for one, and naming an address the tools would
+// then reject is worse than naming none.
+let defaultAddressSpaced: string | null = null
+if (options.defaultAddress) {
+  try {
+    defaultAddressSpaced = spacedAddress(normalizeAddress(options.defaultAddress))
+  } catch {
+    log(`WARNING: --address ${options.defaultAddress} is not a valid Nimiq address; tools will ask for one.`)
+    options.defaultAddress = null
+  }
+}
+
+const DEFAULTS_TO_CONFIGURED = 'Optional; defaults to the server’s configured address.'
 
 // The backup is read once at first use and kept in memory: re-reading it per
 // call would make `list_invoices` disagree with itself mid-conversation.
@@ -204,15 +220,20 @@ const READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: 
 
 // --- Server ---
 
+const BASE_INSTRUCTIONS =
+  'Read-only access to a Nimiq address\'s books, plus drafting of payment ' +
+  'requests. This server never signs and never sends: create_payment_request ' +
+  'produces a shareable link and nothing more. It reads the public Nimiq ' +
+  'chain and CoinGecko prices; it has no account, no keys and no server of ' +
+  'its own. Amounts are reported in both Luna (integer, exact) and NIM.'
+
 const server = new McpServer(
   { name: 'nimbooks-mcp', version: VERSION },
   {
-    instructions:
-      'Read-only access to a Nimiq address\'s books, plus drafting of payment ' +
-      'requests. This server never signs and never sends: create_payment_request ' +
-      'produces a shareable link and nothing more. It reads the public Nimiq ' +
-      'chain and CoinGecko prices; it has no account, no keys and no server of ' +
-      'its own. Amounts are reported in both Luna (integer, exact) and NIM.',
+    instructions: defaultAddressSpaced
+      ? `${BASE_INSTRUCTIONS} Configured default address: ${defaultAddressSpaced} — ` +
+        'tools that take an address use it when none is given.'
+      : BASE_INSTRUCTIONS,
   }
 )
 
@@ -231,7 +252,7 @@ server.registerTool(
       address: z
         .string()
         .optional()
-        .describe('Nimiq address — "NQ43 Y1RH …", the flat form, or 40 hex characters.'),
+        .describe(`Nimiq address — "NQ43 Y1RH …", the flat form, or 40 hex characters. ${DEFAULTS_TO_CONFIGURED}`),
       since: z.string().optional().describe('Start of the window, YYYY-MM-DD or ISO 8601 (UTC). Default: no start.'),
       until: z.string().optional().describe('End of the window, YYYY-MM-DD or ISO 8601 (UTC). Default: now.'),
     },
@@ -332,7 +353,10 @@ server.registerTool(
       'raw bytes, and a `nimbooks:invoice:<id>` memo is the reference that ties ' +
       'a payment to a request.',
     inputSchema: {
-      address: z.string().optional().describe('Nimiq address (NQ form, spaced or flat, or 40 hex characters).'),
+      address: z
+        .string()
+        .optional()
+        .describe(`Nimiq address (NQ form, spaced or flat, or 40 hex characters). ${DEFAULTS_TO_CONFIGURED}`),
       limit: z.number().int().min(1).max(500).optional().describe('Rows to return. Default 50.'),
       since: z.string().optional().describe('Only transactions at or after this date (YYYY-MM-DD or ISO 8601, UTC).'),
       until: z.string().optional().describe('Only transactions at or before this date (YYYY-MM-DD or ISO 8601, UTC).'),
@@ -397,7 +421,10 @@ server.registerTool(
       'only. Days with no price available come back with closeUsd: null rather ' +
       'than a guess.',
     inputSchema: {
-      address: z.string().optional().describe('Nimiq address (NQ form, spaced or flat, or 40 hex characters).'),
+      address: z
+        .string()
+        .optional()
+        .describe(`Nimiq address (NQ form, spaced or flat, or 40 hex characters). ${DEFAULTS_TO_CONFIGURED}`),
       year: z.number().int().describe('Calendar year, UTC — e.g. 2026.'),
       month: z.number().int().min(1).max(12).optional().describe('Optional month 1–12. Omit for the whole year.'),
     },
@@ -451,12 +478,14 @@ server.registerTool(
       'whole request rides inside the link, and only the payer’s wallet, with ' +
       'their approval, can actually move money. The link opens in the NimBooks ' +
       'app; the payment it produces carries the reference nimbooks:invoice:<id>, ' +
-      'which check_request_paid looks for later.',
+      'which check_request_paid looks for later. Note: inside the link, the ' +
+      'payload field amountNim is denominated in Luna by the app’s link format; ' +
+      'this tool’s own output reports amountNim in NIM and amountLuna in Luna.',
     inputSchema: {
       amountNim: z
         .string()
         .describe('Amount in NIM, as a decimal string — "12.5". Up to 5 decimals (1 NIM = 100000 Luna).'),
-      payee: z.string().optional().describe('Address to be paid. Defaults to the server’s --address.'),
+      payee: z.string().optional().describe(`Address to be paid. ${DEFAULTS_TO_CONFIGURED}`),
       memo: z.string().optional().describe(`What the request is for, up to ${MAX_MEMO_CHARS} characters. Travels in the link, not on chain.`),
       expiry: z
         .string()
@@ -548,7 +577,10 @@ server.registerTool(
       'changes nothing, here or in the app. Scans the newest ' +
       `${INVOICE_SCAN_CAP} transactions.`,
     inputSchema: {
-      address: z.string().optional().describe('The payee address the request was made for.'),
+      address: z
+        .string()
+        .optional()
+        .describe(`The payee address the request was made for. ${DEFAULTS_TO_CONFIGURED}`),
       id: z.string().describe('The request id, as returned by create_payment_request.'),
     },
     annotations: READ_ONLY,
@@ -633,7 +665,7 @@ server.registerTool(
       'and the cashlink shelf inside it — which holds link private keys — is ' +
       'never opened.',
     inputSchema: {
-      address: z.string().optional().describe('The account whose requests to list.'),
+      address: z.string().optional().describe(`The account whose requests to list. ${DEFAULTS_TO_CONFIGURED}`),
     },
     annotations: READ_ONLY,
   },
@@ -664,14 +696,7 @@ async function main(): Promise<void> {
   await server.connect(transport)
   log(`v${VERSION} ready — 6 tools, read-only.`)
   log(options.backupPath ? `backup: ${options.backupPath}` : 'no --backup given; list_invoices will explain how to make one')
-  if (options.defaultAddress) {
-    try {
-      log(`default address: ${spacedAddress(normalizeAddress(options.defaultAddress))}`)
-    } catch {
-      log(`WARNING: --address ${options.defaultAddress} is not a valid Nimiq address; tools will ask for one.`)
-      options.defaultAddress = null
-    }
-  }
+  if (defaultAddressSpaced) log(`default address: ${defaultAddressSpaced} (named in the server instructions)`)
 }
 
 main().catch((e) => {

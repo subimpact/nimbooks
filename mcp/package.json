@@ -1,6 +1,6 @@
 {
   "name": "nimbooks-mcp",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Read-only MCP server for your Nimiq books — balances, history, statements, and draft payment requests. Never signs.",
   "license": "MIT",
   "author": "Jeremy Lee",
