@@ -573,6 +573,7 @@ export async function sendNim({
   recipient,
   amountLuna,
   memo,
+  extraData,
   fee = 0,
   from,
 }: SendNimParams): Promise<SendNimResult> {
@@ -593,7 +594,10 @@ export async function sendNim({
       recipient: to,
       value,
       fee,
-      ...(memo ? { extraData: new TextEncoder().encode(memo) } : {}),
+      // Raw bytes win when the caller supplied them (cashlink funding needs
+      // the Hub's exact FUNDING tag, which is not text); otherwise the memo
+      // rides as UTF-8 like every other payment.
+      ...(extraData ? { extraData } : memo ? { extraData: new TextEncoder().encode(memo) } : {}),
       ...(from ? { sender: from.replace(/\s+/g, ''), forceSender: true } : {}),
     })
     if (!result || !('hash' in result)) {
@@ -614,6 +618,9 @@ export async function sendNim({
   // transaction — pre-encoding here (encodeMemo) would put hex-of-hex
   // on-chain and break memo matching (verified on a live payment). Pass the
   // plain UTF-8 text; the wallet encodes it exactly once.
+  //
+  // `extraData` has no route here by the shape of the API: Pay takes a string,
+  // so a binary tag (a cashlink's FUNDING bytes) cannot ride this rail at all.
   const res = memo
     ? await nimiqProvider.sendBasicTransactionWithData({ recipient: to, value, fee, data: memo })
     : await nimiqProvider.sendBasicTransaction({ recipient: to, value, fee })

@@ -30,6 +30,7 @@ import {
   type WalletAccount,
 } from './lib/wallet'
 import {
+  CASHLINK_ACTIVE_LIMIT,
   loadCashlinks,
   removeCashlink,
   saveCashlink,
@@ -562,6 +563,9 @@ export default function App() {
     valueLuna: number
   } | null>(null)
   const [cashlinkRevertBusy, setCashlinkRevertBusy] = useState(false)
+  // Removing a shelf row deletes the link's private key from this device, so
+  // it asks first — same overlay pattern as the revert confirmation.
+  const [cashlinkRemoveTarget, setCashlinkRemoveTarget] = useState<StoredCashlink | null>(null)
   // Hard guards against a double-tap racing the disabled attribute: both
   // paths move money, so a second entry must bounce before React re-renders.
   const cashlinkSubmittingRef = useRef(false)
@@ -586,6 +590,9 @@ export default function App() {
   const [confirmUnstakeOpen, setConfirmUnstakeOpen] = useState(false)
   const [unstakeAmount, setUnstakeAmount] = useState('')
   const [unstaking, setUnstaking] = useState(false)
+  // Same hard guard as the cashlink paths: all three unstake submits move
+  // money, so a double-tap must bounce before React re-renders the button.
+  const unstakingRef = useRef(false)
   const [unstakeError, setUnstakeError] = useState<string | null>(null)
   const [unstakeVerify, setUnstakeVerify] = useState<TxVerify | null>(null)
   // What the unstake actually sent, captured at submit time — the confirming
@@ -1332,16 +1339,29 @@ export default function App() {
   // --- Cashlink sheet: create a claimable link, present it (link, QR, share)
   // and shelve it locally so it can be re-copied or reverted later. ---
 
+  // The link is funded by an ordinary send, so it lives under the same parser
+  // and the same ceiling as the send sheet above.
+  const cashlinkLuna = parseNimToLuna(cashlinkAmount)
+  const cashlinkAmountOverBalance = !!cashlinkLuna && Number(cashlinkLuna) > sendMaxLuna
+  const cashlinkAmountReady = !!cashlinkLuna && !cashlinkAmountOverBalance
+
   const refreshCashlinkStatuses = async (from: string) => {
     for (const entry of loadCashlinks(from).slice(0, 5)) {
       try {
         const balance = Number(await getNimiqBalance(entry.address))
+        // Only a link this device has actually seen funded may fall to
+        // 'Claimed or reverted'. A zero balance on a link that was never
+        // observed funded proves nothing — the funding may still be in flight,
+        // or the indexer may simply be behind the broadcast — and calling it
+        // finished is what would offer to delete a key that still holds NIM.
         const status =
           balance > 0
             ? 'Ready to claim'
-            : entry.status === 'Funding…'
-              ? 'Not funded yet'
-              : 'Claimed or reverted'
+            : entry.status === 'Ready to claim'
+              ? 'Claimed or reverted'
+              : entry.status === 'Funding…' || entry.status === 'Not funded yet'
+                ? 'Not funded yet'
+                : entry.status
         if (status !== entry.status) updateCashlink(from, entry.address, { status })
       } catch {
         /* one unreadable link must not block the rest */
@@ -1380,16 +1400,20 @@ export default function App() {
 
   const submitCashlink = async () => {
     if (cashlinkSubmittingRef.current) return
-    const amount = Number(cashlinkAmount)
-    if (!Number.isFinite(amount) || amount <= 0) {
-      setCashlinkError('Enter an amount above 0.')
+    // Parsed and capped exactly like the send sheet: same parser, same
+    // ceiling, so a link can never be armed for more than the wallet holds and
+    // no amount is silently rounded behind the user's back.
+    if (!cashlinkLuna) {
+      setCashlinkError('Enter an amount above 0 with at most 5 decimals (max 2,000,000,000 NIM).')
       return
     }
-    const valueLuna = Math.round(amount * 100000)
-    if (!Number.isSafeInteger(valueLuna) || valueLuna <= 0) {
-      setCashlinkError('Enter a positive amount with at most 5 decimals.')
+    if (Number(cashlinkLuna) > sendMaxLuna) {
+      setCashlinkError(
+        `Only ${formatLuna(String(sendMaxLuna), lang)} NIM is available to send right now.`
+      )
       return
     }
+    const valueLuna = Number(cashlinkLuna)
     const from = account?.nimiqAddress
     if (!from || !canSend()) {
       setCashlinkError('Connect a wallet that can send to create a cashlink.')
@@ -1423,7 +1447,18 @@ export default function App() {
       from,
       createdAt: Date.now(),
     }
-    saveCashlink(entry)
+    const saved = saveCashlink(entry)
+    if (!saved.ok) {
+      // No key on the device means no way back: refuse before any NIM moves.
+      setCashlinkError(
+        saved.reason === 'limit'
+          ? `You already have ${CASHLINK_ACTIVE_LIMIT} active links saved. Claim, revert or remove one first.`
+          : 'This device could not store the link, so nothing was sent. Free up storage and try again.'
+      )
+      cashlinkSubmittingRef.current = false
+      setCashlinkBusy(false)
+      return
+    }
     setCashlinkHistory(loadCashlinks(from))
     try {
       const res = await sendNim({
@@ -1533,6 +1568,19 @@ export default function App() {
       setCashlinkRevertBusy(false)
       setCashlinkRevertTarget(null)
     }
+  }
+
+  // Forgetting a row throws away the link's private key, which is kept nowhere
+  // else — so it goes through a confirmation of its own, and the dialog says
+  // plainly what a never-funded link would cost.
+  const confirmRemoveCashlink = () => {
+    const target = cashlinkRemoveTarget
+    const from = account?.nimiqAddress
+    if (target && from) {
+      removeCashlink(from, target.address)
+      setCashlinkHistory(loadCashlinks(from))
+    }
+    setCashlinkRemoveTarget(null)
   }
 
   const copyCashlinkLink = (link: string | null) => {
@@ -1855,6 +1903,12 @@ export default function App() {
         setConfirmUnstakeOpen(false)
         return
       }
+      // The remove confirmation sits above the cashlink sheet too, and peels
+      // first — the key it deletes cannot be brought back.
+      if (cashlinkRemoveTarget) {
+        setCashlinkRemoveTarget(null)
+        return
+      }
       if (cashlinkRevertTarget) {
         setCashlinkRevertTarget(null)
         return
@@ -1901,6 +1955,7 @@ export default function App() {
     closeSend,
     cashlinkOpen,
     closeCashlink,
+    cashlinkRemoveTarget,
     cashlinkRevertTarget,
     receiveOpen,
     unstakeModalShown,
@@ -2314,6 +2369,7 @@ export default function App() {
   }
 
   const submitUnstake = async () => {
+    if (unstakingRef.current) return
     const amountNim = Number(unstakeAmount)
     if (!Number.isFinite(amountNim) || amountNim <= 0) {
       setUnstakeError('Enter an amount above 0.')
@@ -2325,6 +2381,7 @@ export default function App() {
       )
       return
     }
+    unstakingRef.current = true
     setUnstaking(true)
     setUnstakeError(null)
     setUnstakeSubmitted(null)
@@ -2422,6 +2479,7 @@ export default function App() {
         if (account) await refresh(account)
       }
     } finally {
+      unstakingRef.current = false
       setUnstaking(false)
     }
   }
@@ -2430,6 +2488,7 @@ export default function App() {
   // balance. Only valid once the deactivation took effect and the reporting
   // window passed — before that the provider rejects it and says so.
   const completeUnstake = async () => {
+    if (unstakingRef.current) return
     if (inactiveLuna <= 0) return
     // Belt and braces: the banner already hides the button until the retire is
     // valid, but a click racing a refresh must not send a tx the chain will
@@ -2437,6 +2496,7 @@ export default function App() {
     const inactiveFrom = stakingHolding?.inactiveFrom || 0
     const retireValidAt = inactiveFrom > 0 ? inactiveFrom + BLOCKS_PER_EPOCH : 0
     if (retireValidAt > 0 && currentBlock < retireValidAt) return
+    unstakingRef.current = true
     setUnstaking(true)
     setUnstakeError(null)
     setUnstakeSubmitted(null)
@@ -2461,13 +2521,16 @@ export default function App() {
       clearTxCache()
       if (account) await refresh(account)
     } finally {
+      unstakingRef.current = false
       setUnstaking(false)
     }
   }
 
   // Step 3: retired → basic balance, for the whole withdrawable balance.
   const withdrawRetired = async () => {
+    if (unstakingRef.current) return
     if (retiredLuna <= 0) return
+    unstakingRef.current = true
     setUnstaking(true)
     setUnstakeError(null)
     setUnstakeSubmitted(null)
@@ -2490,6 +2553,7 @@ export default function App() {
       clearTxCache()
       if (account) await refresh(account)
     } finally {
+      unstakingRef.current = false
       setUnstaking(false)
     }
   }
@@ -2728,10 +2792,11 @@ export default function App() {
         }
         return
       }
-      // The gzipped CSV makes for a URL long enough that its QR needs a phone
-      // camera held very still. A short link brings that back to a couple of
-      // dozen characters, and shortenUrl hands back the long one if it can't.
-      setDownloadLink(await shortenUrl(link))
+      // Not shortened, on purpose: the whole export rides inside this URL, so
+      // the link *is* the user's ledger. Handing it to a third-party shortener
+      // would hand them the ledger with it. The URL stays long; the modal
+      // offers copy and open, and drops the QR when it outgrows a camera.
+      setDownloadLink(link)
     } catch {
       setError('Could not build download link.')
     } finally {
@@ -4253,8 +4318,9 @@ export default function App() {
               </button>
             </div>
             <p className="hint">
-              Nimiq Pay can't save files directly. Open this link in your phone's browser (or scan
-              the QR with another device) to download the CSV.
+              Nimiq Pay can't save files directly. Open this link in your phone's browser
+              {downloadLink.length <= 1200 ? ' (or scan the QR with another device)' : ''} to
+              download the CSV.
             </p>
             <textarea
               className="input download-link"
@@ -4885,6 +4951,7 @@ export default function App() {
                                     setConfirmUnstakeOpen(false)
                                     void submitUnstake()
                                   }}
+                                  disabled={unstaking}
                                 >
                                   Confirm unstake
                                 </button>
@@ -5252,6 +5319,16 @@ export default function App() {
                   value={cashlinkAmount}
                   onChange={(e) => setCashlinkAmount(e.target.value)}
                 />
+                {cashlinkAmount.trim() !== '' && !cashlinkLuna ? (
+                  <span className="hint small warn">
+                    Enter a positive amount with at most 5 decimals (max 2,000,000,000 NIM).
+                  </span>
+                ) : cashlinkAmountOverBalance ? (
+                  <span className="hint small warn">
+                    More than this wallet can send. Available:{' '}
+                    {formatLuna(String(sendMaxLuna), lang)} NIM.
+                  </span>
+                ) : null}
                 <label className="label" htmlFor="cashlinkMessage">
                   Message (optional)
                 </label>
@@ -5261,6 +5338,7 @@ export default function App() {
                   type="text"
                   autoComplete="off"
                   placeholder="Thanks for the coffee!"
+                  maxLength={200}
                   value={cashlinkMessage}
                   onChange={(e) => setCashlinkMessage(e.target.value)}
                 />
@@ -5268,7 +5346,7 @@ export default function App() {
                 <button
                   className="btn-primary send-submit"
                   onClick={() => void submitCashlink()}
-                  disabled={cashlinkBusy || !cashlinkSignerReady}
+                  disabled={cashlinkBusy || !cashlinkSignerReady || !cashlinkAmountReady}
                 >
                   {cashlinkBusy ? 'Confirm in your wallet…' : 'Create cashlink'}
                 </button>
@@ -5284,43 +5362,52 @@ export default function App() {
                 {cashlinkHistory.length > 0 && (
                   <div className="card">
                     <span className="label">Recent links</span>
-                    {cashlinkHistory.slice(0, 5).map((c) => (
-                      <div key={c.address} className="invoice-confirm">
-                        <div className="row">
-                          <span>{formatLuna(String(c.valueLuna), lang)} NIM</span>
-                          <span>{c.status}</span>
-                        </div>
-                        <div className="row">
-                          <button
-                            className="btn-small"
-                            onClick={() => copyCashlinkLink(cashlinkShareUrl(c.secret))}
-                          >
-                            Copy link
-                          </button>
-                          {c.status === 'Ready to claim' || c.status === 'Funding…' ? (
+                    {cashlinkHistory.slice(0, 5).map((c) => {
+                      // A link that is closed out has nothing left to move; one
+                      // that might still hold NIM is reverted, never removed.
+                      // 'Not funded yet' is the ambiguous middle: it offers
+                      // both, so a shelf full of stuck rows can still be
+                      // cleared, but Remove asks a harder question first.
+                      const finished =
+                        c.status === 'Claimed or reverted' || c.status === 'Reverted ✓'
+                      const canRevert =
+                        c.status === 'Funding…' ||
+                        c.status === 'Not funded yet' ||
+                        c.status === 'Ready to claim'
+                      const canRemove = finished || c.status === 'Not funded yet'
+                      return (
+                        <div key={c.address} className="invoice-confirm">
+                          <div className="row">
+                            <span>{formatLuna(String(c.valueLuna), lang)} NIM</span>
+                            <span>{c.status}</span>
+                          </div>
+                          <div className="row">
                             <button
                               className="btn-small"
-                              onClick={() => setCashlinkRevertTarget(c)}
+                              onClick={() => copyCashlinkLink(cashlinkShareUrl(c.secret))}
                             >
-                              Revert
+                              Copy link
                             </button>
-                          ) : (
-                            <button
-                              className="btn-small"
-                              onClick={() => {
-                                const from = account?.nimiqAddress
-                                if (from) {
-                                  removeCashlink(from, c.address)
-                                  setCashlinkHistory(loadCashlinks(from))
-                                }
-                              }}
-                            >
-                              Remove
-                            </button>
-                          )}
+                            {canRevert && (
+                              <button
+                                className="btn-small"
+                                onClick={() => setCashlinkRevertTarget(c)}
+                              >
+                                Revert
+                              </button>
+                            )}
+                            {canRemove && (
+                              <button
+                                className="btn-small"
+                                onClick={() => setCashlinkRemoveTarget(c)}
+                              >
+                                Remove
+                              </button>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 )}
               </div>
@@ -5355,6 +5442,47 @@ export default function App() {
                       disabled={cashlinkRevertBusy}
                     >
                       {cashlinkRevertBusy ? 'Reverting…' : 'Revert'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {cashlinkRemoveTarget && (
+              <div className="confirm-overlay" onClick={() => setCashlinkRemoveTarget(null)}>
+                <div
+                  className="confirm-dialog"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-label="Confirm remove"
+                  ref={dialogFocus}
+                  tabIndex={-1}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <h3 className="confirm-title">Remove this link record?</h3>
+                  <p className="confirm-amount">
+                    {formatLuna(String(cashlinkRemoveTarget.valueLuna), lang)} NIM
+                  </p>
+                  <p className="hint small">
+                    This deletes the link's saved key from this device. The key is kept nowhere
+                    else, so the row cannot be brought back.
+                  </p>
+                  {cashlinkRemoveTarget.status === 'Not funded yet' ? (
+                    <p className="hint small warn">
+                      Only remove it if you are sure it holds no NIM. If it was funded and not yet
+                      claimed, this device loses the only key that could claim or revert it.
+                    </p>
+                  ) : (
+                    <p className="hint small">It looks finished, so this is just tidying up.</p>
+                  )}
+                  <div className="confirm-actions">
+                    <button className="btn-ghost" onClick={() => setCashlinkRemoveTarget(null)}>
+                      Cancel
+                    </button>
+                    <button className="btn-primary" onClick={confirmRemoveCashlink}>
+                      {cashlinkRemoveTarget.status === 'Not funded yet'
+                        ? 'Remove anyway'
+                        : 'Remove'}
                     </button>
                   </div>
                 </div>
