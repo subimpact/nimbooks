@@ -40,6 +40,7 @@ import {
 import {
   cashlinkCoreReady,
   cashlinkShareUrl,
+  isCashlinkMemo,
   newCashlink,
   prepareCashlinkCore,
   sweepCashlink,
@@ -614,6 +615,17 @@ export default function App() {
   // The hash the verification poll is allowed to report on — a second submit
   // supersedes the first, and a stale poll must not overwrite its result.
   const unstakeVerifyRef = useRef<string | null>(null)
+  // Leg 1 of a chained unstake, once it is out: a withdraw that has been signed
+  // and broadcast but has not mined yet. The staker record keeps its retired
+  // balance until it does, so `retiredLuna > 0` cannot tell "not withdrawn" from
+  // "withdrawn, still settling" — and the retry the popup blocker sends the user
+  // on (leg 2 needs its own click) would sign the same withdraw again. Cleared
+  // the moment the chain answers either way.
+  const withdrawSubmittedRef = useRef<{
+    hash: string
+    retiredLuna: number
+    amountNim: number
+  } | null>(null)
   // A retire-stake tx is submitted but only takes effect at the next election
   // block (~12h). Until the staker record reflects it, show it as pending.
   const [pendingUnstake, setPendingUnstake] = useState<{
@@ -1694,6 +1706,11 @@ export default function App() {
         from,
       })
       clearTxCache() // the new payment must show up on the next History load
+      // A refresh that lands in the next second or two can beat the indexer and
+      // cache a list without this payment in it, which the 2-minute TTL would
+      // then hold. One delayed clear (the cashlink funding settles the same
+      // way) hands the 10s tick a clean slate.
+      window.setTimeout(() => clearTxCache(), 6000)
       hash = result.hash
       if (sendTicketRef.current === ticket) {
         // The success dialog (and its confetti) appears the INSTANT the
@@ -2317,6 +2334,12 @@ export default function App() {
           setStakingLog((prev) => prev.filter((a) => a.hash !== hash))
         }
       }
+      // The chain has spoken about this withdraw: mined (the staker record has
+      // no retired balance left to take) or never arrived (so a retry must be
+      // allowed to sign it again). Either way the skip-leg-1 marker is done.
+      if (result !== 'unknown' && withdrawSubmittedRef.current?.hash === hash) {
+        withdrawSubmittedRef.current = null
+      }
       if (unstakeVerifyRef.current !== hash) return // superseded by a newer submit
       setUnstakeVerify(result)
       if (result === 'confirmed') {
@@ -2401,15 +2424,28 @@ export default function App() {
       //    to send a tx for the smaller figure and get the full balance back.
       if (retiredLuna > 0 && remainingNim > 0) {
         const removeNim = retiredLuna / 100000
-        const remove = await unstakeRemove(removeNim)
-        if (!remove.ok) {
-          setUnstakeError(remove.error)
-          return
+        // Already out from an earlier tap of this same submit? Then carry that
+        // leg forward instead of signing it again: the deactivation below needs
+        // a click of its own when the popup blocker eats it, and that click
+        // re-enters here with the staker record untouched (see the ref).
+        const prior = withdrawSubmittedRef.current
+        const reused = prior && prior.retiredLuna === retiredLuna ? prior : null
+        let removeHash = reused?.hash ?? null
+        if (!removeHash) {
+          const remove = await unstakeRemove(removeNim)
+          if (!remove.ok) {
+            setUnstakeError(remove.error)
+            return
+          }
+          removeHash = remove.hash
+          withdrawSubmittedRef.current = { hash: remove.hash, retiredLuna, amountNim: removeNim }
         }
         if (removeNim > remainingNim) notes.push(FULL_WITHDRAW_NOTE)
-        legs.push({ kind: 'withdraw', amountNim: removeNim, hash: remove.hash })
+        legs.push({ kind: 'withdraw', amountNim: removeNim, hash: removeHash })
         setUnstakeSubmitted({ legs: [...legs], source: 'panel', notes: [...notes] })
-        verifyUnstakeTx(remove.hash, { kind: 'withdraw', amountNim: removeNim })
+        // A reused leg is already being watched by the poll the first tap
+        // started — verifying it twice would duplicate its staking-log row.
+        if (!reused) verifyUnstakeTx(removeHash, { kind: 'withdraw', amountNim: removeNim })
         // Clamped: withdrawing the whole retired balance can cover more than
         // was asked for, and the steps below only run on what's still owed.
         remainingNim = Math.max(0, remainingNim - removeNim)
@@ -2543,6 +2579,10 @@ export default function App() {
         setToast(remove.error)
         return
       }
+      // The same marker the panel's chained path sets: this withdraw is out,
+      // and until it mines the staker record still reports the balance it
+      // moves — so the panel must carry this leg rather than sign its own.
+      withdrawSubmittedRef.current = { hash: remove.hash, retiredLuna, amountNim: removeNim }
       setUnstakeSubmitted({
         legs: [{ kind: 'withdraw', amountNim: removeNim, hash: remove.hash }],
         source: 'banner',
@@ -2674,6 +2714,7 @@ export default function App() {
         .map((t) => {
           const isOut = t.sender.replace(/\s+/g, '').toUpperCase() === own
           const kind = txLabel(t, own)
+          const memo = decodeMemo(t.data) ?? ''
           return [
             new Date(t.timestamp ?? Date.now()).toISOString(),
             t.hash,
@@ -2689,8 +2730,13 @@ export default function App() {
             rates.nim > 0 ? ((Number(t.value) / 100000) * rates.nim).toFixed(6) : '',
             // A staking transaction's data field is a signalling payload, not
             // a note: the kind column already says what it is, and the raw hex
-            // has no place in an accountant's memo column.
-            kind === 'stake' || kind === 'unstake' ? '' : (decodeMemo(t.data) ?? ''),
+            // has no place in an accountant's memo column. A cashlink's tag is
+            // the same thing, and reads as the word it stands for.
+            kind === 'stake' || kind === 'unstake'
+              ? ''
+              : isCashlinkMemo(memo)
+                ? 'Cashlink'
+                : memo,
           ]
         }),
     ]
@@ -3860,6 +3906,7 @@ export default function App() {
                   senderClean === account.remoteAddress?.replace(/\s+/g, '').toUpperCase())
               const label = txLabel(tx, account.nimiqAddress ?? '')
               const memo = decodeMemo(tx.data)
+              const cashlinkTag = isCashlinkMemo(memo)
               const demo = isDemoMode()
               // Two kinds of synthesized row, and they differ in exactly one
               // way that matters here: a staking action is a real transaction
@@ -3918,22 +3965,28 @@ export default function App() {
                   </div>
                   {/* A staking transaction's data field is a signalling
                       payload, not a note anyone wrote: rendering that hex blob
-                      as "memo:" is noise on screen and in the export. */}
-                  {memo && label !== 'stake' && label !== 'unstake' && (
-                    <div className="tx-memo">
-                      memo:{' '}
-                      {(() => {
-                        // The on-chain memo is the invoice reference
-                        // (nimbooks:invoice:<id>); the human description
-                        // travels in the share link. When this tx settled a
-                        // request we know locally, show the friendly name.
-                        const invId = parseInvoiceMemo(memo)
-                        const inv = invId
-                          ? invoices.find((i) => i.id === invId)
-                          : undefined
-                        return inv?.memo ? `${inv.memo} (${memo})` : memo
-                      })()}
-                    </div>
+                      as "memo:" is noise on screen and in the export. The
+                      cashlink funding and claiming tags are the same kind of
+                      furniture, so the row names the thing instead. */}
+                  {cashlinkTag ? (
+                    <div className="tx-memo">Cashlink</div>
+                  ) : (
+                    memo &&
+                    label !== 'stake' &&
+                    label !== 'unstake' && (
+                      <div className="tx-memo">
+                        memo:{' '}
+                        {(() => {
+                          // The on-chain memo is the invoice reference
+                          // (nimbooks:invoice:<id>); the human description
+                          // travels in the share link. When this tx settled a
+                          // request we know locally, show the friendly name.
+                          const invId = parseInvoiceMemo(memo)
+                          const inv = invId ? invoices.find((i) => i.id === invId) : undefined
+                          return inv?.memo ? `${inv.memo} (${memo})` : memo
+                        })()}
+                      </div>
+                    )
                   )}
                   {/* A deposit into the staking contract (toType 3) is not a
                       receipt candidate either — see lib/chain: the wallet
@@ -4412,7 +4465,9 @@ export default function App() {
                 </button>
                 <p className="hint small">
                   Receipts, payment requests, the staking log and your preferences. Prices and
-                  transaction history are left out, and come back from the chain on their own.
+                  transaction history are left out, and come back from the chain on their own. Your
+                  cashlinks travel too, keys included, so keep this text as safe as you keep your
+                  wallet.
                 </p>
               </>
             ) : (

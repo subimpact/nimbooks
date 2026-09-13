@@ -29,6 +29,26 @@ type NimiqCoreModule = typeof import('@nimiq/core')
 export const FUNDING_DATA = new Uint8Array([0, 130, 128, 146, 135])
 export const CLAIMING_DATA = new Uint8Array([0, 139, 136, 141, 138])
 
+// The same two tags as they come back from the chain. They are not text, so
+// `decodeMemo` hands them back as raw hex; Nimiq Pay's rail takes a string
+// rather than bytes, so a funding sent from there carries the word instead.
+const CASHLINK_TAGS = [FUNDING_DATA, CLAIMING_DATA].map((bytes) =>
+  Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('')
+)
+const PAY_FUNDING_MEMO = 'Cashlink'
+
+/**
+ * Is this decoded memo one of the cashlink tags rather than a note someone
+ * wrote? Protocol furniture, like a staking transaction's signalling payload:
+ * History and the CSV say "Cashlink" instead of printing the bytes.
+ */
+export function isCashlinkMemo(memo: string): boolean {
+  if (memo === PAY_FUNDING_MEMO) return true
+  return CASHLINK_TAGS.includes(memo.replace(/^0x/, '').toLowerCase())
+}
+
 // Nimiq mainnet; the app is mainnet-only.
 const MAINNET_NETWORK_ID = 24
 const FEE = 0n

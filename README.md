@@ -15,7 +15,8 @@ It shows your NIM balance and transaction history with fiat values, lets you **s
 ## Features
 
 - **NIM balance + full transaction history** with fiat conversion in **37 currencies** (currency switcher, remembered per device)
-- **Staking** — stake and unstake with a validator picker (live APY estimates, pool fee and reliability), reward rollups in history, and an HTLC-aware balance breakdown (Available / Locked in swaps / Staked / Unstaking / Ready to withdraw / Vesting)
+- **Staking** — stake and unstake with a validator picker (live APY estimates, pool fee and reliability), reward rollups in history, and an HTLC-aware balance breakdown (Available / Locked in swaps / Staked / Unstaking / Ready to withdraw / Vesting); Nimiq Pay signs the staking transactions itself, and a browser session builds them locally and has the **Nimiq Hub** sign them, so the full deactivate → retire → withdraw flow works on desktop too
+- **Cashlinks** — send NIM as a claimable link with the money inside: the key is generated on-device, the funding transaction carries the Hub's own cashlink tag (so `hub.nimiq.com/cashlink` claims it), and the sender keeps a local shelf with live status and one-tap revert
 - **Payment requests (invoices)** — amount + memo + optional expiry → shareable link and QR; the payer settles it in-app, and the tagged transaction (`nimbooks:invoice:<id>`) marks the request paid automatically when it lands on-chain
 - **EVM balances** — native + USDT across Polygon, Base, Arbitrum, Optimism, Ethereum (via public RPCs)
 - **Signed receipts** — `signMessage` attestation over `{txHash, amount, memo, timestamp}` → shareable verification link
@@ -29,6 +30,7 @@ It shows your NIM balance and transaction history with fiat values, lets you **s
 - React 19 + TypeScript + Vite
 - `@nimiq/mini-app-sdk` (v0.1.0) — `init()`, `listAccounts()`, `sign()`, `sendBasicTransactionWithData()`, `requestDeviceIdentifier()`
 - `@nimiq/hub-api` — the desktop path: sign-in, checkout and staking transactions when there's no Nimiq Pay provider to talk to
+- `@nimiq/core` — the wasm signer: builds the staking transactions the Hub signs, and mints and sweeps cashlink keys; lazy-loaded via dynamic `import()` (~1.2 MB wasm) the first time a staking or cashlink surface opens in a browser session, so Nimiq Pay users never download it
 - `viem` — multi-chain EVM balance reads via public RPCs (no chain-switching needed); lazy-loaded via dynamic `import()`, so it code-splits out of the initial bundle and only downloads when EVM balances are read
 - Nimiq public RPC (`rpc.nimiqwatch.com`) — balance + transaction history + staker records
 - Nimiq validators API — validator list, pool fees and reliability scores (cached 10 min)
@@ -49,10 +51,12 @@ src/
 │   ├── downloadLink.ts  # gzip-in-URL export links for Nimiq Pay's WebView
 │   ├── receipt.ts       # Receipt encode/decode + Ed25519 verify + signer binding + on-chain cross-check
 │   ├── invoice.ts       # Payment requests — exact Luna maths, link encoding, per-account storage
+│   ├── cashlink.ts      # Cashlink format, byte-for-byte with the Hub — keygen, encode/decode, sweep
+│   ├── cashlinkStore.ts # Local shelf of created links — holds the only copy of each link's key
 │   ├── qr.ts            # Dependency-free QR encoder (byte mode, ECC L/M, versions 1–40)
 │   ├── shorten.ts       # Client half of the share-link shortener — never throws, falls back to the long URL
 │   ├── stakingLog.ts    # Local log of staking actions the public tx index doesn't return
-│   ├── backup.ts        # Export/restore of everything the app keeps in localStorage
+│   ├── backup.ts        # Export/restore of the app's localStorage — caches out, cashlink keys in
 │   ├── demoData.ts      # Demo-mode story: a real signed receipt and a chain-paid invoice
 │   ├── changelog.ts     # Release notes + the version label shown in the badge
 │   ├── device.ts        # One-path-per-device detection (Nimiq Pay on mobile, Hub on desktop)

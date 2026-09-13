@@ -340,7 +340,12 @@ function readTxCache(address: string): NimiqTx[] | null {
     const raw = localStorage.getItem(txCacheKey(address))
     if (!raw) return null
     const entry = JSON.parse(raw) as TxCacheEntry
-    if (entry.address !== address || Date.now() - entry.at > TX_CACHE_TTL) return null
+    if (entry.address !== address) return null
+    // A negative age means the entry claims to be from the future — a clock
+    // that moved, or a hand-written entry that would otherwise never expire.
+    // Either way it is not something to serve.
+    const age = Date.now() - entry.at
+    if (age < 0 || age > TX_CACHE_TTL) return null
     // Entries cached before HTLC support carry no `toType`; serving them would
     // hide swap labels and locked balances until the TTL expired.
     if (entry.txs.some((t) => t.toType === undefined)) return null
@@ -351,8 +356,31 @@ function readTxCache(address: string): NimiqTx[] | null {
 }
 
 function writeTxCache(address: string, txs: NimiqTx[]) {
+  const key = txCacheKey(address)
+  const payload = JSON.stringify({ address, at: Date.now(), txs })
   try {
-    localStorage.setItem(txCacheKey(address), JSON.stringify({ address, at: Date.now(), txs }))
+    localStorage.setItem(key, payload)
+    return
+  } catch {
+    /* quota, most likely — make room once, below */
+  }
+  // The other history slots are the biggest things this app stores and the
+  // cheapest to lose (they come back from the chain). Drop the largest one and
+  // try again; if that still doesn't fit, the cache goes without, as before.
+  try {
+    let biggest: string | null = null
+    let biggestLength = 0
+    for (const k of Object.keys(localStorage)) {
+      if (k === key || !k.startsWith(TX_CACHE_PREFIX)) continue
+      const length = localStorage.getItem(k)?.length ?? 0
+      if (length > biggestLength) {
+        biggest = k
+        biggestLength = length
+      }
+    }
+    if (!biggest) return
+    localStorage.removeItem(biggest)
+    localStorage.setItem(key, payload)
   } catch {
     /* storage full — skip */
   }
@@ -368,12 +396,11 @@ export function clearTxCache(address?: string) {
       localStorage.removeItem(txCacheKey(address))
       return
     }
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i)
-      if (key?.startsWith(TX_CACHE_PREFIX)) {
-        localStorage.removeItem(key)
-        i-- // removal shifts indices
-      }
+    // Snapshot the key list first: removing while walking indices shifts every
+    // key after the one that went, and a miscounted step would leave a slot
+    // behind — exactly the stale list this call exists to get rid of.
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith(TX_CACHE_PREFIX)) localStorage.removeItem(key)
     }
   } catch {
     /* storage unavailable */

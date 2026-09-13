@@ -902,7 +902,11 @@ export async function stakeNim(delegation: string | null, amountNim: number): Pr
     }
   }
   if (!nimiqProvider) {
-    return { ok: false, error: 'No Nimiq wallet connected. Open NimBooks inside Nimiq Pay to stake.' }
+    return {
+      ok: false,
+      error:
+        'No Nimiq wallet connected. Open NimBooks in Nimiq Pay or sign in with the Nimiq Hub to stake.',
+    }
   }
 
   try {
@@ -963,7 +967,11 @@ export async function unstakeDeactivate(newActiveBalanceNim: number): Promise<Un
     }
   }
   if (!nimiqProvider) {
-    return { ok: false, error: 'No Nimiq wallet connected. Open NimBooks inside Nimiq Pay to unstake.' }
+    return {
+      ok: false,
+      error:
+        'No Nimiq wallet connected. Open NimBooks in Nimiq Pay or sign in with the Nimiq Hub to unstake.',
+    }
   }
 
   try {
@@ -1011,7 +1019,11 @@ export async function unstakeRetire(amountNim: number): Promise<UnstakeResult> {
     }
   }
   if (!nimiqProvider) {
-    return { ok: false, error: 'No Nimiq wallet connected. Open NimBooks inside Nimiq Pay to unstake.' }
+    return {
+      ok: false,
+      error:
+        'No Nimiq wallet connected. Open NimBooks in Nimiq Pay or sign in with the Nimiq Hub to unstake.',
+    }
   }
 
   try {
@@ -1055,7 +1067,11 @@ export async function unstakeRemove(amountNim: number): Promise<UnstakeResult> {
     }
   }
   if (!nimiqProvider) {
-    return { ok: false, error: 'No Nimiq wallet connected. Open NimBooks inside Nimiq Pay to withdraw.' }
+    return {
+      ok: false,
+      error:
+        'No Nimiq wallet connected. Open NimBooks in Nimiq Pay or sign in with the Nimiq Hub to withdraw.',
+    }
   }
 
   try {
