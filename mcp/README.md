@@ -89,7 +89,7 @@ Built from source instead? Point both commands at
 
 | Flag | What it does |
 | --- | --- |
-| `--address <NQ…>` | The account to use when a tool isn't given one. Optional — every tool also takes an `address` argument. |
+| `--address <NQ…>` | The account tools use when a call doesn't name one; the server tells the assistant about it, so questions like "how are my books looking?" work without repeating your address. Optional — every tool also takes an address argument. |
 | `--backup <path>` | A NimBooks backup file. Only `list_invoices` needs it. |
 
 **Getting a backup file:** the app keeps your payment requests on the device, not on a
