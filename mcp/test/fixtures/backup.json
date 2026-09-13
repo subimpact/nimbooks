@@ -1,0 +1,14 @@
+{
+  "app": "nimbooks",
+  "version": 1,
+  "exportedAt": 1757721600000,
+  "keys": {
+    "nimbooks:invoices:NQ43 Y1RH P1K7 JH78 LRTS 95RY GAUU UBDK FFGX": "[{\"app\":\"nimbooks\",\"v\":1,\"id\":\"pend1ng001\",\"payee\":\"NQ43Y1RHP1K7JH78LRTS95RYGAUUUBDKFFGX\",\"amountNim\":\"1250000\",\"memo\":\"September retainer\",\"createdAt\":1757635200000,\"role\":\"payee\"},{\"app\":\"nimbooks\",\"v\":1,\"id\":\"pa1d000002\",\"payee\":\"NQ43Y1RHP1K7JH78LRTS95RYGAUUUBDKFFGX\",\"amountNim\":\"500000\",\"memo\":\"Kaffee ☕ für Anna\",\"createdAt\":1757548800000,\"role\":\"payee\",\"paid\":true,\"paidTxHash\":\"3f7a1c8e9b2d4a6f5c0e8d7b3a9f1e2c4d6b8a0f5e3c7d9b1a2f4e6c8d0b3a5f\",\"paidAt\":1757552400000},{\"app\":\"nimbooks\",\"v\":1,\"id\":\"exp1red003\",\"payee\":\"NQ43Y1RHP1K7JH78LRTS95RYGAUUUBDKFFGX\",\"amountNim\":\"100000\",\"createdAt\":1757462400000,\"expiresAt\":1757548800000,\"role\":\"payee\"},{\"app\":\"nimbooks\",\"v\":1,\"id\":\"payer00004\",\"payee\":\"NQ08ACT8T0FEPTG8P5RLH2S3QGXHV15RNVXY\",\"amountNim\":\"250000\",\"createdAt\":1757376000000,\"role\":\"payer\"},{\"app\":\"nimbooks\",\"v\":1,\"id\":\"nopayee005\",\"amountNim\":\"100000\",\"createdAt\":1757376000000,\"role\":\"payee\"},{\"app\":\"nimbooks\",\"v\":1,\"id\":\"numamount6\",\"payee\":\"NQ43Y1RHP1K7JH78LRTS95RYGAUUUBDKFFGX\",\"amountNim\":100000,\"createdAt\":1757376000000,\"role\":\"payee\"},{\"app\":\"nimbooks\",\"v\":1,\"id\":\"bad id !!\",\"payee\":\"NQ43Y1RHP1K7JH78LRTS95RYGAUUUBDKFFGX\",\"amountNim\":\"100000\",\"createdAt\":1757376000000,\"role\":\"payee\"},{\"app\":\"nimbooks\",\"v\":1,\"id\":\"overcap008\",\"payee\":\"NQ43Y1RHP1K7JH78LRTS95RYGAUUUBDKFFGX\",\"amountNim\":\"200000000000001\",\"createdAt\":1757376000000,\"role\":\"payee\"},null,\"not an invoice at all\"]",
+    "nimbooks:invoices:NQ08 ACT8 T0FE PTG8 P5RL H2S3 QGXH V15R NVXY": "[{\"app\":\"nimbooks\",\"v\":1,\"id\":\"other00009\",\"payee\":\"NQ08ACT8T0FEPTG8P5RLH2S3QGXHV15RNVXY\",\"amountNim\":\"900000\",\"createdAt\":1757289600000,\"role\":\"payee\"}]",
+    "nimbooks:invoices:NQ22 5RNP 0CAY 2TXT NJDR CY9L E9RS 8XKB 7NG3": "{ this slot is not even JSON",
+    "nimbooks.cashlinks.v1": "[{\"address\":\"NQ56 2FS9 5RNP 0CAY 2TXT NJDR CY9L E9RS 8XKB\",\"secret\":\"SECRET-MUST-NEVER-APPEAR-IN-OUTPUT\",\"valueLuna\":100000,\"message\":\"a link that still holds NIM\",\"status\":\"Ready to claim\",\"from\":\"NQ43Y1RHP1K7JH78LRTS95RYGAUUUBDKFFGX\",\"createdAt\":1757635200000}]",
+    "nimbooks:receipts:NQ43 Y1RH P1K7 JH78 LRTS 95RY GAUU UBDK FFGX": "[]",
+    "nimbooks:theme": "dark",
+    "nimbooks:currency": "usd"
+  }
+}
