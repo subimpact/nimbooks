@@ -155,7 +155,7 @@ function OfferCard({ onStart, onDismiss }: { onStart: () => void; onDismiss: () 
           <button type="button" className="btn-primary" onClick={onStart}>
             Let&apos;s go
           </button>
-          <button type="button" className="btn-ghost" onClick={onDismiss}>
+          <button type="button" className="btn-secondary" onClick={onDismiss}>
             Not now
           </button>
         </div>
