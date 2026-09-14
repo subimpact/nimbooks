@@ -1371,7 +1371,7 @@ export default function App() {
   const cashlinkAmountReady = !!cashlinkLuna && !cashlinkAmountOverBalance
 
   const refreshCashlinkStatuses = async (from: string) => {
-    for (const entry of loadCashlinks(from).slice(0, 5)) {
+    for (const entry of loadCashlinks(from)) {
       try {
         const balance = Number(await getNimiqBalance(entry.address))
         // Only a link this device has actually seen funded may fall to
@@ -2347,12 +2347,6 @@ export default function App() {
           setStakingLog((prev) => prev.filter((a) => a.hash !== hash))
         }
       }
-      // The chain has spoken about this withdraw: mined (the staker record has
-      // no retired balance left to take) or never arrived (so a retry must be
-      // allowed to sign it again). Either way the skip-leg-1 marker is done.
-      if (result !== 'unknown' && withdrawSubmittedRef.current?.hash === hash) {
-        withdrawSubmittedRef.current = null
-      }
       if (unstakeVerifyRef.current !== hash) return // superseded by a newer submit
       setUnstakeVerify(result)
       if (result === 'confirmed') {
@@ -2365,9 +2359,29 @@ export default function App() {
         // right behind the card.
         clearTxCache()
         if (account) void refresh(account)
+        // The tx is on chain, but the skip-leg-1 marker may only clear once the
+        // chain proves the retired balance is gone. getStakingHolding refreshes
+        // the staker record asynchronously after refresh(account) kicks off, so
+        // re-read it here: only when retired flips to '0' is it safe to drop the
+        // marker. If the record is missing or still shows retired balance, leave
+        // the marker so the retry path keeps reusing the same hash and the
+        // refresh flips the record shortly.
+        if (addr) {
+          void getStakingHolding(addr).then((holding) => {
+            if (holding && holding.retired === '0' && withdrawSubmittedRef.current?.hash === hash) {
+              withdrawSubmittedRef.current = null
+            }
+          })
+        }
         return
       }
       if (result !== 'expired') return
+      // Never arrived on chain — the tx never reached a block, so a retry must be
+      // allowed to sign it again. Clear the marker only when it still belongs to
+      // this hash; a newer deactivation's marker survives.
+      if (withdrawSubmittedRef.current?.hash === hash) {
+        withdrawSubmittedRef.current = null
+      }
       // Only the deactivation that owns the marker may clear it. A withdraw or
       // a retire is a different step of a different leg, and wiping the marker
       // for one of those would drop a live deactivation's banner for the ~12h
@@ -5495,7 +5509,7 @@ export default function App() {
                 {cashlinkHistory.length > 0 && (
                   <div className="card">
                     <span className="label">Recent links</span>
-                    {cashlinkHistory.slice(0, 5).map((c) => {
+                    {cashlinkHistory.map((c) => {
                       // A link that is closed out has nothing left to move; one
                       // that might still hold NIM is reverted, never removed.
                       // 'Not funded yet' is the ambiguous middle: it offers
