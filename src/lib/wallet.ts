@@ -554,6 +554,19 @@ export async function getCurrentBlock(): Promise<number | null> {
   }
 }
 
+/** Human-readable text for a signing failure. Pay's SDK rejects with an
+ * ErrorResponse object ({ error: { type, message } }) rather than an Error,
+ * and String() of that is "[object Object]" — extract the real message. */
+function signErrorText(e: unknown): string {
+  if (e instanceof Error) return e.message
+  if (e && typeof e === 'object') {
+    const maybe = e as { error?: { message?: unknown }; message?: unknown }
+    if (maybe.error && typeof maybe.error.message === 'string') return maybe.error.message
+    if (typeof maybe.message === 'string') return maybe.message
+  }
+  return ''
+}
+
 export async function signMessage(
   message: string,
   signer?: string
@@ -573,19 +586,27 @@ export async function signMessage(
       }
     } catch (e) {
       console.error('Hub signMessage failed:', e)
-      throw new Error('Nimiq Hub signing failed: ' + (e instanceof Error ? e.message : String(e)))
+      throw new Error(signErrorText(e) || 'The Nimiq Hub signing request failed.')
     }
   }
   if (!nimiqProvider) return null
   try {
     const result = await nimiqProvider.sign(message)
+    if (result && 'error' in result && result.error) {
+      throw new Error(
+        (result.error && typeof result.error.message === 'string'
+          ? result.error.message
+          : null) || 'The Nimiq Pay request failed.'
+      )
+    }
     if (result && 'signature' in result) {
       return { publicKey: result.publicKey, signature: result.signature }
     }
     return null
   } catch (e) {
     console.error('Nimiq Pay sign failed:', e)
-    throw new Error('Nimiq Pay signing failed: ' + (e instanceof Error ? e.message : String(e)))
+    const text = signErrorText(e)
+    throw new Error(text || 'The Nimiq Pay request failed.')
   }
 }
 
