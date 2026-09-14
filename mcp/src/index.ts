@@ -9,7 +9,9 @@
 //     passphrase. `create_payment_request` returns a link; only a wallet, with
 //     its owner's approval, can move money.
 //   - phone home. The only hosts this process contacts are the public Nimiq
-//     RPC (rpc.nimiqwatch.com) and CoinGecko's public price API. There is no
+//     RPC (rpc.nimiqwatch.com), the public Nimiq Watch analytics API
+//     (v2.nimiqwatch.com — for staking rewards, the same second API the
+//     NimBooks app reads) and CoinGecko's public price API. There is no
 //     NimBooks server — the app has none either — and this server never calls
 //     nimbooks.subimpact.net. Links it mints contain that address the way a
 //     printed invoice carries a street address: it is data, not a request.
@@ -35,6 +37,8 @@ import {
   normalizeAddress,
   spacedAddress,
   txLabel,
+  getRestakeRewardTxs,
+  restakeWindow,
   type NimiqTx,
 } from './chain.ts'
 import {
@@ -51,7 +55,7 @@ import {
 import { listBackupInvoices, readBackupFile, type BackupFile } from './backup.ts'
 import { computeStatement, getDailyCloses, periodBounds, priceCoverageNote } from './statement.ts'
 
-const VERSION = '1.0.1'
+const VERSION = '1.0.2'
 
 // How far back a tool will walk the transaction index. The RPC pages 50 at a
 // time and is rate-limited, so these are budgets, not guesses — every tool
@@ -95,6 +99,11 @@ function parseArgs(argv: string[]): Options {
 }
 
 const options = parseArgs(process.argv.slice(2))
+
+// The restake-rewards fetch (v2.nimiqwatch.com) is additive and failure-
+// tolerant by design, but the offline test suite must stay offline: the test
+// script sets this so statement/summary tests never reach the second host.
+const REWARDS_DISABLED = process.env.NIMBOOKS_MCP_NO_REWARDS === '1'
 
 function log(msg: string): void {
   // stdout is the protocol. Diagnostics go to stderr, always.
@@ -247,7 +256,10 @@ server.registerTool(
       'never signs, never sends. Defaults to the full history the public index ' +
       `returns (up to ${HISTORY_CAP} transactions, newest first). Balance is the ` +
       'live account balance now, not the balance at the end of the window; any ' +
-      'staked NIM is reported separately because it lives in the staking contract.',
+      'staked NIM is reported separately because it lives in the staking contract. ' +
+      'Money out includes transfers into the staking contract and out of it — the ' +
+      'same treatment as the app’s statement; validator rewards arrive through a ' +
+      'separate channel and are reported as their own line (rewardsReceivedNim).',
     inputSchema: {
       address: z
         .string()
@@ -263,11 +275,17 @@ server.registerTool(
       const addr = addressArg(address)
       const from = parseWhen(since, 'since', false)
       const to = parseWhen(until, 'until', true)
-      const [balanceLuna, txs, staking] = await Promise.all([
+      const [balanceLuna, walk, staking] = await Promise.all([
         getBalance(addr),
-        getTransactionHistory(addr, HISTORY_CAP),
+        getTransactionHistory(addr, HISTORY_CAP, 200),
         getStaking(addr),
       ])
+      // Restaking rewards never appear in the tx index — they are read from
+      // the same v2 endpoint the app uses and folded in as rows, so a
+      // staker's balance trajectory is not silently missing its income.
+      const { fromMs, toMs } = restakeWindow()
+      const rewardTxs = REWARDS_DISABLED ? [] : await getRestakeRewardTxs(addr, fromMs, toMs)
+      const txs = [...walk.txs, ...rewardTxs].sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
 
       let inLuna = 0n
       let outLuna = 0n
@@ -334,8 +352,14 @@ server.registerTool(
         txCount: inCount + outCount,
         inCount,
         outCount,
-        historyFetched: txs.length,
-        truncated: txs.length >= HISTORY_CAP ? `Only the newest ${HISTORY_CAP} transactions were read.` : null,
+        historyFetched: walk.txs.length,
+        rewardsFetched: rewardTxs.length,
+        truncated:
+          walk.txs.length >= HISTORY_CAP || walk.overrun
+            ? walk.overrun
+              ? `The index stopped answering part-way through (rate limit); only the newest ${walk.txs.length} of the available history was read, then this summary.`
+              : `Only the newest ${HISTORY_CAP} transactions were read.`
+            : null,
       })
     })
 )
@@ -372,7 +396,8 @@ server.registerTool(
       // A window has to be applied after fetching (the index pages by cursor,
       // not by date), so fetch generously and filter.
       const fetchCap = from !== null || to !== null ? HISTORY_CAP : Math.min(HISTORY_CAP, Math.max(max, 50))
-      const txs = await getTransactionHistory(addr, fetchCap)
+      const walk = await getTransactionHistory(addr, fetchCap, 200)
+      const txs = walk.txs
 
       const rows = txs
         .filter((tx) => tx.executionResult !== false && inWindow(tx, from, to))
@@ -403,7 +428,9 @@ server.registerTool(
         note:
           rows.length === 0
             ? 'No transactions matched. The address may be new, or the window may be outside its history.'
-            : undefined,
+            : walk.overrun
+              ? `The index stopped answering part-way through (rate limit); rows cover the newest ${txs.length} transactions read.`
+              : undefined,
       })
     })
 )
@@ -418,8 +445,10 @@ server.registerTool(
       'the CoinGecko daily close in USD for each UTC day — the same basis the ' +
       'NimBooks tax statement uses. Read-only: never signs, never sends. Failed ' +
       'transactions are excluded and fees are counted on outgoing transactions ' +
-      'only. Days with no price available come back with closeUsd: null rather ' +
-      'than a guess.',
+      'only. Staking rewards (restaking payouts) are included as in-day income; ' +
+      'moving NIM into or out of the staking contract is not a fiat flow, so it ' +
+      'is excluded, exactly like the app’s statement. Days with no price ' +
+      'available come back with closeUsd: null rather than a guess.',
     inputSchema: {
       address: z
         .string()
@@ -434,7 +463,12 @@ server.registerTool(
     guard('get_statement', async () => {
       const addr = addressArg(address)
       const bounds = periodBounds(year, month)
-      const txs = await getTransactionHistory(addr, HISTORY_CAP)
+      const walk = await getTransactionHistory(addr, HISTORY_CAP, 200)
+      // Restaking rewards are income too: the same v2 rows the app folds into
+      // its statement, so a staker's statement is not missing them.
+      const { fromMs, toMs } = restakeWindow()
+      const rewardTxs = REWARDS_DISABLED ? [] : await getRestakeRewardTxs(addr, fromMs, toMs)
+      const txs = [...walk.txs, ...rewardTxs].sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
       const prices = await getDailyCloses(bounds.from, Math.min(bounds.to, Date.now()))
       const statement = computeStatement(txs, addr, bounds, prices)
 
@@ -462,7 +496,11 @@ server.registerTool(
                 .filter(Boolean)
                 .join(' ')
             : undefined,
-        truncated: txs.length >= HISTORY_CAP ? `Only the newest ${HISTORY_CAP} transactions were read.` : undefined,
+        truncated: walk.overrun
+          ? `The index stopped answering part-way through (rate limit); the newest ${walk.txs.length} transactions were read, so the statement may be missing older rows.`
+          : walk.txs.length >= HISTORY_CAP
+            ? `Only the newest ${HISTORY_CAP} transactions were read.`
+            : undefined,
       })
     })
 )
@@ -519,6 +557,13 @@ server.registerTool(
       const createdAt = Date.now()
       const expiresAt = parseExpiry(expiry, createdAt)
 
+      // A request is a document that tells a human where to send money — the
+      // payee inside it is the person who gets paid. When the configured
+      // address is used because none was named, say so explicitly; a link
+      // that silently carries the user's own address is how a request ends up
+      // pointing at the wrong wallet.
+      const payeeFromDefault = !!defaultAddressSpaced && !payee
+
       const payload: InvoicePayload = {
         app: 'nimbooks',
         v: 1,
@@ -542,7 +587,11 @@ server.registerTool(
         encoded: encodeInvoice(payload),
         note:
           `${NEVER_SIGNED} Share the link; when it is paid, the payment carries ` +
-          `the reference ${invoiceMemo(requestId)}, and check_request_paid will find it.`,
+          `the reference ${invoiceMemo(requestId)}, and check_request_paid will find it.` +
+          (payeeFromDefault
+            ? ` No payee was named, so the request is addressed to the configured ` +
+              `address ${spacedAddress(addr)} — make sure that is who you meant.`
+            : ''),
       })
     })
 )
@@ -589,17 +638,24 @@ server.registerTool(
     guard('check_request_paid', async () => {
       const addr = addressArg(address)
       const wanted = String(id).trim()
-      const txs = await getTransactionHistory(addr, INVOICE_SCAN_CAP)
+      const walk = await getTransactionHistory(addr, INVOICE_SCAN_CAP)
+      const txs = walk.txs
 
-      // The amount is only known if a backup carries the request, so the
-      // "underpayments stay open" rule can only be applied when it does.
+      // The amount is only known if a backup carries the request. Without it
+      // the paid/found split depends entirely on the reference + payee match,
+      // so the answer says so instead of silently treating any amount as paid
+      // (a 1-Luna payment with the right tag must not read as settled).
       let expectedLuna: bigint | null = null
+      let amountKnown = false
       if (options.backupPath) {
         try {
           const found = listBackupInvoices(backup(), addr, () => '', Date.now()).invoices.find(
             (i) => i.id === wanted
           )
-          if (found) expectedLuna = BigInt(found.amountLuna)
+          if (found) {
+            expectedLuna = BigInt(found.amountLuna)
+            amountKnown = true
+          }
         } catch {
           /* no backup, or unreadable — fall back to tag-only matching */
         }
@@ -629,9 +685,15 @@ server.registerTool(
               ? `A transaction carries this reference but pays ${formatLunaExact(underpaid.value)} NIM, ` +
                 `less than the ${formatLunaExact(expectedLuna.toString())} NIM requested — the app treats ` +
                 `underpayments as still open.`
-              : `No payment tagged ${invoiceMemo(wanted)} was found in the newest ${txs.length} ` +
-                `transactions for this address. If the request is older than that, it may be beyond ` +
-                `the scan; nothing here marks it paid either way.`,
+              : !amountKnown
+                ? `No payment tagged ${invoiceMemo(wanted)} was found in the newest ${txs.length} ` +
+                  `transactions for this address. No backup is configured, so the amount could not be ` +
+                  `verified against the request — a payment with this reference of any size counts as ` +
+                  `found. If the request is older than the scan, it may be beyond it; nothing here ` +
+                  `marks it paid either way.`
+                : `No payment tagged ${invoiceMemo(wanted)} was found in the newest ${txs.length} ` +
+                  `transactions for this address. If the request is older than that, it may be beyond ` +
+                  `the scan; nothing here marks it paid either way.`,
         })
       }
 
@@ -648,7 +710,13 @@ server.registerTool(
           timestamp: iso(match.timestamp),
           explorer: explorerTxUrl(match.hash),
         },
-        note: 'Reported from the public chain. This server does not mark anything paid — the app reconciles its own copy.',
+        note:
+          'Reported from the public chain. This server does not mark anything paid — the app reconciles its own copy.' +
+          (!amountKnown
+            ? ' No backup is configured, so the amount was matched only by the reference and the ' +
+              `payee: this payment (${formatLunaExact(match.value)} NIM) is accepted as settling the ` +
+              'request even though the requested amount could not be verified.'
+            : ''),
       })
     })
 )

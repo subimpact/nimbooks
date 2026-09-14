@@ -26,6 +26,10 @@ export interface NimiqTx {
   // Recipient account type: 0 = basic, 1 = vesting contract, 2 = HTLC
   // (Nimiq Pay swaps), 3 = the staking contract.
   toType?: number
+  // Reward rows are synthesized from the v2 restake API (never mined into the
+  // index): `synthetic: 'reward'` is how the classifier reads them back — the
+  // same marker the app's History uses.
+  synthetic?: 'reward'
 }
 
 export function cleanAddress(address: string): string {
@@ -225,21 +229,39 @@ export async function getTransactions(
 }
 
 /**
- * Walk the whole history by cursor, newest first, capped at `maxTotal`. Paced
- * like the app's version — nimiqwatch 429s on unpaced bursts — and a failure
- * part-way through returns what it already has rather than nothing.
+ * Walk the whole history by cursor, newest first, capped at `maxTotal`.
+ * Paced and bounded like the app's version — nimiqwatch rate-limits unpaced
+ * bursts — but honest about what it could not read:
+ *
+ *  - a rate-limit / transport failure part-way through RETURNS the pages it
+ *    has, and reports `overrun` so callers can say "the rest was not read"
+ *    instead of silently presenting a partial ledger;
+ *  - `maxPageSize` lets callers trade one big page against many paced ones.
+ *
+ * @returns the transactions read; `overrun: true` when a page failed *after*
+ * at least one page was read and the walk stopped because of it.
  */
-export async function getTransactionHistory(address: string, maxTotal = 1000): Promise<NimiqTx[]> {
+export interface HistoryWalk {
+  txs: NimiqTx[]
+  overrun: boolean
+}
+
+export async function getTransactionHistory(
+  address: string,
+  maxTotal = 1000,
+  maxPageSize = 50
+): Promise<HistoryWalk> {
   const all: NimiqTx[] = []
   let cursor: string | null = null
+  let overrun = false
+  const pageSize = Math.max(1, Math.min(maxPageSize, 200))
   for (let i = 0; i < 20; i++) {
     let page: NimiqTx[]
     try {
-      page = await getTransactions(address, 50, cursor)
+      page = await getTransactions(address, pageSize, cursor)
     } catch (e) {
-      if (all.length === 0) throw e
-      // Partial history beats no history — the caller is told how much it got.
-      break
+      overrun = all.length > 0
+      break // partial history beats no history — but the caller is told
     }
     if (!page.length) break
     all.push(...page)
@@ -249,7 +271,7 @@ export async function getTransactionHistory(address: string, maxTotal = 1000): P
     cursor = oldest.hash
     if (i < 19) await new Promise((r) => setTimeout(r, 250))
   }
-  return all
+  return { txs: all, overrun }
 }
 
 // --- Transaction classification (verbatim rules from the app) ---
@@ -259,9 +281,128 @@ export const STAKING_CONTRACT = 'NQ77 0000 0000 0000 0000 0000 0000 0000 0001'
 // Validator reward sender prefix (NQ81 C01N BASE…)
 const VALIDATOR_REWARD_PREFIX = 'NQ81 C01N BASE'
 
+// The v2 analytics API (nimiqwatch's second host) is the only place restaking
+// rewards exist: the transfer index has no staking activity at all. The app
+// reads exactly this endpoint (src/lib/stakingEvents.ts) and synthesizes one
+// History row per UTC day per validator.
+const V2_API = 'https://v2.nimiqwatch.com/api/v2'
+
+/** One 15-minute restaking window, exactly as the v2 API returns it. */
+export interface RestakeGroup {
+  sender_address: string // validator that paid out
+  time_window: string // ISO 8601 — start of the window (UTC)
+  aggregated_value: number // Luna
+}
+
+function utcDay(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 10)
+}
+
+/**
+ * Aggregated restaking reward events for a staker between two instants —
+ * ported from the app's `getRestakeEvents` (src/lib/stakingEvents.ts), same
+ * endpoint, same failure tolerance: returns `[]` on every failure path and
+ * for addresses with no staker record.
+ */
+export async function getRestakeEvents(
+  address: string,
+  fromMs: number,
+  toMs: number
+): Promise<RestakeGroup[]> {
+  const from = utcDay(fromMs)
+  const to = utcDay(Math.min(toMs, Date.now()))
+  if (from >= to) return []
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 20000)
+  try {
+    const res = await fetch(
+      `${V2_API}/staker/${encodeURIComponent(address.replace(/\s+/g, ''))}` +
+        `/events/restake-grouped?from=${from}&to=${to}`,
+      { signal: controller.signal }
+    )
+    if (!res.ok) throw new Error(`Restake events HTTP ${res.status}`)
+    const json: unknown = await res.json()
+    const groups = (json as { groups?: unknown } | null)?.groups
+    if (!Array.isArray(groups)) return []
+    return groups.filter(
+      (g: unknown): g is RestakeGroup =>
+        !!g &&
+        typeof (g as RestakeGroup).time_window === 'string' &&
+        Number.isFinite(Number((g as RestakeGroup).aggregated_value))
+    )
+  } catch (e) {
+    console.warn('getRestakeEvents failed:', e)
+    return []
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/** History range for reward rows: the last 90 days, matching the app. */
+export const RESTAKE_WINDOW_DAYS = 90
+const DAY_MS = 24 * 60 * 60 * 1000
+
+export function restakeWindow(now = Date.now()): { fromMs: number; toMs: number } {
+  return { fromMs: now - RESTAKE_WINDOW_DAYS * DAY_MS, toMs: now }
+}
+
+/**
+ * Restaking rewards collapsed into one synthesized row per UTC day per
+ * validator — the app's `rollUpRestakeRewards` verbatim. Rows carry
+ * `synthetic: 'reward'` so they read as income, never as counterparty money.
+ */
+export function rollUpRestakeRewards(groups: RestakeGroup[], ownAddress: string): NimiqTx[] {
+  const byDay = new Map<string, { validator: string; day: string; luna: number; ts: number }>()
+
+  for (const g of groups) {
+    const ts = Date.parse(g.time_window)
+    if (!Number.isFinite(ts)) continue
+    const luna = Number(g.aggregated_value)
+    if (!Number.isFinite(luna) || luna <= 0) continue
+    const validator = g.sender_address ?? ''
+    const day = utcDay(ts)
+    const key = `${day}|${validator.replace(/\s+/g, '').toUpperCase()}`
+    const bucket = byDay.get(key)
+    if (bucket) {
+      bucket.luna += luna
+      if (ts > bucket.ts) bucket.ts = ts
+    } else {
+      byDay.set(key, { validator, day, luna, ts })
+    }
+  }
+
+  return [...byDay.values()]
+    .sort((a, b) => b.ts - a.ts)
+    .map((b) => ({
+      hash: `restake:${b.day}:${b.validator.replace(/\s+/g, '').toUpperCase()}`,
+      sender: b.validator,
+      recipient: ownAddress,
+      value: String(Math.round(b.luna)),
+      fee: '0',
+      timestamp: b.ts,
+      executionResult: true,
+      toType: 0,
+      synthetic: 'reward' as const,
+    }))
+}
+
+/** Restaking rewards for an address in the app's History shape. Never throws. */
+export async function getRestakeRewardTxs(
+  address: string,
+  fromMs: number,
+  toMs: number
+): Promise<NimiqTx[]> {
+  return rollUpRestakeRewards(await getRestakeEvents(address, fromMs, toMs), address)
+}
+
 export type TxKind = 'payment' | 'stake' | 'unstake' | 'reward' | 'fee' | 'unknown'
 
 export function classifyTx(tx: NimiqTx, ownAddress: string): TxKind {
+  // Synthesized rows carry their kind: a restaked reward is paid by the
+  // validator's own address — an address that also sends payments — so only
+  // the marker can read it as income. Same rule as the app's classifier.
+  if (tx.synthetic) return tx.synthetic
   const own = cleanAddress(ownAddress).toUpperCase()
   const sender = cleanAddress(tx.sender).toUpperCase()
   const recipient = cleanAddress(tx.recipient).toUpperCase()
