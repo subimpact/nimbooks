@@ -8,6 +8,7 @@ import {
   canSend,
   connectHub,
   connectWallet,
+  errorText,
   getConnectedAccount,
   getHubRedirectError,
   hasRestorableSession,
@@ -186,7 +187,7 @@ export default function InvoicePage() {
       setAccount(acc)
       setPayState('confirm')
     } catch (e) {
-      setError('Connection failed: ' + (e instanceof Error ? e.message : String(e)))
+      setError('Connection failed: ' + (errorText(e) || 'The wallet connection failed.'))
     } finally {
       setConnecting(false)
     }
@@ -231,7 +232,7 @@ export default function InvoicePage() {
       })
     } catch (e) {
       setPayState('confirm')
-      setError('Payment failed: ' + (e instanceof Error ? e.message : String(e)))
+      setError('Payment failed: ' + (errorText(e) || 'The payment was rejected.'))
     }
   }, [invoice, account])
 
@@ -293,7 +294,7 @@ export default function InvoicePage() {
       }
       setToast('Receipt signed ✓')
     } catch (e) {
-      setError('Signing failed: ' + (e instanceof Error ? e.message : String(e)))
+      setError('Signing failed: ' + (errorText(e) || 'The signature request failed.'))
     } finally {
       setSigning(false)
     }

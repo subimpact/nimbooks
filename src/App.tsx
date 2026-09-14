@@ -19,6 +19,7 @@ import {
   prepareHubStaking,
   stopHubStakingPrep,
   sendNim,
+  errorText,
   stakeNim,
   unstakeDeactivate,
   unstakeRetire,
@@ -1609,7 +1610,7 @@ export default function App() {
       }
       settle([4000, 8000])
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e)
+      const message = errorText(e)
       if (/cancel|denied|reject|abort/i.test(message)) {
         // Nothing was sent — the unused key can go.
         removeCashlink(from, fresh.address)
@@ -1811,7 +1812,7 @@ export default function App() {
       // rejection, and nothing left this address.
       if (sendTicketRef.current === ticket) {
         setSendState('idle')
-        setSendError('Send failed: ' + (e instanceof Error ? e.message : String(e)))
+        setSendError('Send failed: ' + (errorText(e) || 'The payment was rejected.'))
       }
       return
     }
@@ -2760,7 +2761,7 @@ export default function App() {
       setToast('Receipt signed ✓')
     } catch (e) {
       console.error('signReceipt failed:', e)
-      setError('Signing failed: ' + (e instanceof Error ? e.message : String(e)))
+      setError('Signing failed: ' + (errorText(e) || 'The signature request failed.'))
     } finally {
       setSigningHash(null)
     }
