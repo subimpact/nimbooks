@@ -18,6 +18,7 @@ import {
   isCashlinkMemo,
   memoForRow,
   normalizeAddress,
+  rollUpRestakeRewards,
   spacedAddress,
   txLabel,
   type NimiqTx,
@@ -172,6 +173,60 @@ test('failed transactions are recognisable so callers can exclude them', () => {
   assert.equal(failed.executionResult, false)
   // Classification does not change — the exclusion is the caller's, as in the app.
   assert.equal(txLabel(failed, OWN), 'payment')
+})
+
+// --- Restaking rewards (synthesized rows) ---
+
+// The tx index never returns staking activity: reward rows are built from the
+// v2 restake API with `synthetic: 'reward'`, and only that marker can classify
+// them — the validator's real address also sends ordinary payments it must not
+// be confused with. This mirrors the app's classifier exactly.
+test('a synthesized reward row reads as income, never as counterparty money', () => {
+  const reward = tx({ sender: VALIDATOR_PAYOUT, recipient: OWN, synthetic: 'reward' })
+  assert.equal(txLabel(reward, OWN), 'reward')
+  assert.equal(classifyTx(reward, OWN), app.classifyTx(reward, OWN))
+})
+
+test('a validator’s ordinary payment is a payment — only the marker says reward', () => {
+  // The NQ81 C01N BASE prefix is the classic reward sender: the address rule
+  // alone already reads it as a reward, in both implementations.
+  const classic = tx({ sender: VALIDATOR_PAYOUT, recipient: OWN })
+  assert.equal(txLabel(classic, OWN), 'reward')
+  assert.equal(classifyTx(classic, OWN), app.classifyTx(classic, OWN))
+  // Restaking rewards arrive from the validator’s *own* address (e.g.
+  // NQ29 …), which also sends ordinary payments — only the synthetic marker
+  // tells the two apart, exactly as in the app.
+  const validator = 'NQ29 FBVT B4GM S27H UBP4 1MTC GNKQ VPBT 099M'
+  const ordinary = tx({ sender: validator, recipient: OWN })
+  assert.equal(txLabel(ordinary, OWN), 'payment')
+  assert.equal(classifyTx(ordinary, OWN), app.classifyTx(ordinary, OWN))
+  const rewarded = tx({ sender: validator, recipient: OWN, synthetic: 'reward' })
+  assert.equal(txLabel(rewarded, OWN), 'reward')
+  assert.equal(classifyTx(rewarded, OWN), app.classifyTx(rewarded, OWN))
+})
+
+test('restaking reward rows collapse one day per validator, like the app', () => {
+  const own = OWN
+  const groups = [
+    { sender_address: VALIDATOR_PAYOUT, time_window: '2026-09-09T08:00:00.000Z', aggregated_value: 174 },
+    { sender_address: VALIDATOR_PAYOUT, time_window: '2026-09-09T12:00:00.000Z', aggregated_value: 2928 },
+    { sender_address: VALIDATOR_PAYOUT, time_window: '2026-09-10T04:15:00.000Z', aggregated_value: 1000 },
+    { sender_address: 'NQ29 FBVT B4GM S27H UBP4 1MTC GNKQ VPBT 099M', time_window: '2026-09-09T08:00:00.000Z', aggregated_value: 500 },
+    // Invalid rows are dropped, never summed.
+    { sender_address: VALIDATOR_PAYOUT, time_window: 'not-a-date', aggregated_value: 999 },
+    { sender_address: VALIDATOR_PAYOUT, time_window: '2026-09-11T00:00:00.000Z', aggregated_value: -5 },
+  ] as any
+  const rows = rollUpRestakeRewards(groups, own) as NimiqTx[]
+  assert.equal(rows.length, 3, 'three valid day/validator buckets')
+  for (const r of rows) {
+    assert.equal(r.synthetic, 'reward')
+    assert.equal(txLabel(r, own), 'reward')
+    assert.equal(r.recipient, own)
+  }
+  const day1 = rows.find((r) => r.hash.includes('2026-09-09') && r.sender === VALIDATOR_PAYOUT)
+  assert.ok(day1, 'the two 09/09 windows collapse into one row')
+  assert.equal(day1!.value, '3102', '174 + 2928')
+  assert.ok(rows.every((r) => r.fee === '0'))
 })
 
 // --- Address handling ---

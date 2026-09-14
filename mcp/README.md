@@ -24,8 +24,10 @@ This is the part to read first.
 - **It never sends anything.** No transaction is built, broadcast or queued. Nothing is
   marked paid — not on chain, and not in your app's own books.
 - **It has no server.** The only hosts this process contacts are `rpc.nimiqwatch.com`
-  (the public Nimiq RPC the NimBooks app already uses) and `api.coingecko.com` (public
-  daily prices, for statements). It never calls `nimbooks.subimpact.net`. The links it
+  (the public Nimiq RPC the NimBooks app already uses), `v2.nimiqwatch.com` (Nimiq Watch's
+  public analytics API, the same endpoint the app reads for staking rewards) and
+  `api.coingecko.com` (public daily prices, for statements). It never calls
+  `nimbooks.subimpact.net`. The links it
   mints *contain* that address, the way a printed invoice carries a street address —
   that is data, not a request.
 - **It writes nothing.** Every tool is a read or a pure function. The backup file you
