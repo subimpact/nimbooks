@@ -105,7 +105,9 @@ function CoachCard({
   )
 }
 
-/** Recompute the spotlight rect whenever the tour's step/phase changes. */
+/** Recompute the spotlight rect whenever the tour's step/phase changes, and
+ * keep tracking the target: layout shifts (late data landing, sheet content)
+ * re-read the rect instead of leaving the ring stranded on stale coordinates. */
 function useSpotlightRect(step: TourStepDef): Rect {
   const [rect, setRect] = useState<Rect>(null)
   const ids = useMemo(
@@ -117,15 +119,26 @@ function useSpotlightRect(step: TourStepDef): Rect {
       setRect(null)
       return
     }
-    const recompute = () => setRect(clampRectForSystemBars(readRect(ids)))
+    let raf = 0
+    const recompute = () => {
+      if (raf) cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(() => {
+        raf = 0
+        setRect(clampRectForSystemBars(readRect(ids)))
+      })
+    }
     recompute()
     window.addEventListener('resize', recompute)
     window.addEventListener('orientationchange', recompute)
+    const mo = new MutationObserver(recompute)
+    mo.observe(document.body, { childList: true, subtree: true, attributes: true })
     // Re-read once the DOM settles (spotlighted element may mount late).
     const t = window.setTimeout(recompute, 120)
     return () => {
       window.removeEventListener('resize', recompute)
       window.removeEventListener('orientationchange', recompute)
+      mo.disconnect()
+      if (raf) cancelAnimationFrame(raf)
       window.clearTimeout(t)
     }
   }, [ids])
