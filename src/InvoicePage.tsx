@@ -427,7 +427,7 @@ export default function InvoicePage() {
           <div className="invoice-sent">
             <p className="ok">✓ This request has already been paid on-chain.</p>
             <p className="hint small">
-              The payment is settled. No further action needed — the payee's books marked it paid
+              The payment is settled. No further action needed - the payee's books marked it paid
               automatically.
             </p>
           </div>
