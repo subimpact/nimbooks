@@ -16,21 +16,20 @@ function readRect(id: string): Rect {
   return { top: r.top, left: r.left, width: r.width, height: r.height, bottom: r.bottom }
 }
 
-/** A dock tab / bottom element — put the coach card up top so it clears it. */
+/** A dock tab — put the coach card up top so it clears it. */
 function isBottomSpotlight(id: string): boolean {
   return (
     id === 'request-tab' ||
     id === 'history-tab' ||
     id === 'receipts-tab' ||
-    id === 'export-tab' ||
-    id === 'send-sheet'
+    id === 'export-tab'
   )
 }
 
 function coachPlacement(step: TourStepDef | null, rect: Rect): 'top' | 'center' | 'bottom' {
   if (!step) return 'bottom'
   if (step.spotlights.length === 0) return 'center'
-  // A dock tab or send-sheet sits low enough that the card belongs above it.
+  // A dock tab sits low enough that the card belongs above it.
   if (step.spotlights.some((id) => isBottomSpotlight(id))) return 'top'
   if (rect && rect.bottom > window.innerHeight * 0.7) return 'top'
   return 'bottom'
@@ -97,12 +96,9 @@ function CoachCard({
           </div>
           <h3 id="tour-coach-title">{step.title}</h3>
           <p>{step.body}</p>
-          {step.actionText && <p className="tour-coach-action">{step.actionText}</p>}
-          {step.advance === 'next' && (
-            <button type="button" className="btn-primary" onClick={onNext}>
-              {primaryLabel}
-            </button>
-          )}
+          <button type="button" className="btn-primary" onClick={onNext}>
+            {primaryLabel}
+          </button>
         </div>
       </div>
     </div>
@@ -121,7 +117,7 @@ function useSpotlightRect(step: TourStepDef): Rect {
       setRect(null)
       return
     }
-    const recompute = () => setRect(readRect(ids))
+    const recompute = () => setRect(clampRectForSystemBars(readRect(ids)))
     recompute()
     window.addEventListener('resize', recompute)
     window.addEventListener('orientationchange', recompute)
@@ -134,6 +130,25 @@ function useSpotlightRect(step: TourStepDef): Rect {
     }
   }, [ids])
   return rect
+}
+
+/**
+ * On edge-to-edge WebViews (Nimiq Pay renders under the system nav bar and
+ * reports no safe-area inset) the bottom dock can sit behind the gesture bar,
+ * so the raw rect of a dock tab lands in the hidden zone and the spotlight
+ * ring glows around empty space. For normal-size targets, shift the cutout
+ * up so it stays visible above the system bar; full-height sheets are left
+ * untouched.
+ */
+function clampRectForSystemBars(r: Rect): Rect {
+  if (!r) return r
+  if (r.height > window.innerHeight * 0.6) return r
+  const bottomClearance = 44
+  const maxBottom = window.innerHeight - bottomClearance
+  if (r.bottom <= maxBottom) return r
+  const dy = r.bottom - maxBottom
+  const top = Math.max(0, r.top - dy)
+  return { top, left: r.left, width: r.width, height: r.height, bottom: top + r.height }
 }
 
 function OfferCard({ onStart, onDismiss }: { onStart: () => void; onDismiss: () => void }) {
