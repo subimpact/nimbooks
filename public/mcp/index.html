@@ -248,7 +248,7 @@
       <li><b>It never signs anything.</b> There is no key handling in the package at all. No private key, seed phrase or passphrase is generated, stored, read, derived or asked for, so there is no code path by which a signature could be produced.</li>
       <li><b>A request is not a payment.</b> <code>create_payment_request</code> returns a link. Only the payer's wallet can move money, and only when its owner approves it there.</li>
       <li><b>It writes nothing.</b> Every tool is a read or a pure function. Nothing is built, broadcast or queued, and nothing is marked paid, on chain or in your app's own books. The backup file you point it at is opened read-only.</li>
-      <li><b>No server of ours.</b> This process never calls <code>nimbooks.subimpact.net</code>. Exactly two hosts: <code>rpc.nimiqwatch.com</code> for the public chain, and <code>api.coingecko.com</code> for daily prices. That is the whole network surface.</li>
+      <li><b>No server of ours.</b> This process never calls <code>nimbooks.subimpact.net</code>. Three hosts, all public Nimiq infrastructure: <code>rpc.nimiqwatch.com</code> for the chain, <code>v2.nimiqwatch.com</code> for staking rewards (the same analytics API the app reads), and <code>api.coingecko.com</code> for daily prices. That is the whole network surface.</li>
     </ul>
   </div>
 
