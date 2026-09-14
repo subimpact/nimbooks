@@ -21,6 +21,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     date: '2026-09-14',
     items: [
       'The dock gets its bearings: every tab in the bottom bar now carries a small line icon above its label, lit amber when active, so the app reads at a glance on a phone',
+      'Opening NimBooks inside Nimiq Pay no longer asks you to sign in again on every open: a saved session comes back silently, the wallet is only asked once per visit, and a wallet that takes a moment to answer keeps your books on screen instead of sending you to the connect screen',
     ],
   },
   {

@@ -10,6 +10,10 @@ import {
   connectWallet,
   getConnectedAccount,
   getHubRedirectError,
+  hasRestorableSession,
+  isOrWillBeInNimiqPay,
+  restoreWalletSession,
+  waitForProviderReady,
   sendNim,
   signReceipt,
   type WalletAccount,
@@ -110,6 +114,34 @@ export default function InvoicePage() {
     const t = setTimeout(() => setToast(null), 4000)
     return () => clearTimeout(t)
   }, [toast])
+
+  // Inside Nimiq Pay a page load can arrive with the connection gone (the
+  // WebView boots fresh on a shared link). Restore the session silently — the
+  // saved address comes back read-only so no confirmation prompt is shown on
+  // a page the user only just opened.
+  useEffect(() => {
+    if (!isOrWillBeInNimiqPay() || !hasRestorableSession()) return
+    let cancelled = false
+    const boot = async () => {
+      try {
+        const acc = await restoreWalletSession()
+        if (cancelled || !acc?.nimiqAddress) return
+        // Hold the confirm state until the provider is awake: the Pay button
+        // must not park on the cannot-send affordance while `init()` is still
+        // polling for the injection.
+        await waitForProviderReady(2000)
+        if (cancelled) return
+        setAccount(acc)
+        setPayState('confirm')
+      } catch {
+        /* silent restore failed: the Pay button stays the normal entry */
+      }
+    }
+    void boot()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   // Chain check: does the payee's history already contain a payment tagged
   // with this invoice's reference? Runs once on load (and again after paying
@@ -464,14 +496,34 @@ export default function InvoicePage() {
           </>
         ) : demo || !canSend() ? (
           <>
-            <button className="btn-primary" disabled>
-              Pay {amountNim} NIM
-            </button>
-            <p className="hint small">
-              {demo
-                ? 'Demo mode is read-only. Connect your wallet to pay.'
-                : 'This wallet cannot send transactions here.'}
-            </p>
+            {demo ? (
+              <>
+                <button className="btn-primary" disabled>
+                  Pay {amountNim} NIM
+                </button>
+                <p className="hint small">Demo mode is read-only. Connect your wallet to pay.</p>
+              </>
+            ) : isOrWillBeInNimiqPay() ? (
+              <>
+                {/* A restored session on a load the host did not answer: the
+                    saved address came back read-only and the provider is
+                    still asleep. Connect instead of dead-ending on a
+                    disabled button. This check is UA-based on purpose: inside
+                    the Pay WebView it must hold even before the host injects
+                    the provider. */}
+                <button className="btn-primary" onClick={connect} disabled={connecting}>
+                  {connecting ? 'Connecting…' : 'Connect wallet to pay'}
+                </button>
+                <p className="hint small">The wallet did not answer on this load. Connect again to pay.</p>
+              </>
+            ) : (
+              <>
+                <button className="btn-primary" disabled>
+                  Pay {amountNim} NIM
+                </button>
+                <p className="hint small">This wallet cannot send transactions here.</p>
+              </>
+            )}
           </>
         ) : (
           <>
