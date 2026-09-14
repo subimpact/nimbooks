@@ -3346,35 +3346,61 @@ export default function App() {
           aria-current={view === 'dashboard' ? 'page' : undefined}
           onClick={() => setView('dashboard')}
         >
-          Overview
+          {/* Icons are inline SVG on purpose: icon fonts and unicode glyphs
+              render as tofu in the WebViews this app runs inside. */}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+            <rect x="3" y="3" width="7" height="7" rx="1" />
+            <rect x="14" y="3" width="7" height="7" rx="1" />
+            <rect x="14" y="14" width="7" height="7" rx="1" />
+            <rect x="3" y="14" width="7" height="7" rx="1" />
+          </svg>
+          <span className="tab-label">Overview</span>
         </button>
         <button
           className={view === 'history' ? 'tab active' : 'tab'}
           aria-current={view === 'history' ? 'page' : undefined}
           onClick={() => setView('history')}
         >
-          History
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 7v5l3 2" />
+          </svg>
+          <span className="tab-label">History</span>
         </button>
         <button
           className={view === 'receipts' ? 'tab active' : 'tab'}
           aria-current={view === 'receipts' ? 'page' : undefined}
           onClick={() => setView('receipts')}
         >
-          Receipts
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+            <path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z" />
+            <path d="M14 8H8" />
+            <path d="M16 12H8" />
+          </svg>
+          <span className="tab-label">Receipts</span>
         </button>
         <button
           className={view === 'request' ? 'tab active' : 'tab'}
           aria-current={view === 'request' ? 'page' : undefined}
           onClick={() => setView('request')}
         >
-          Request
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+            <path d="m22 2-7 20-4-9-9-4Z" />
+            <path d="M22 2 11 13" />
+          </svg>
+          <span className="tab-label">Request</span>
         </button>
         <button
           className={view === 'export' ? 'tab active' : 'tab'}
           aria-current={view === 'export' ? 'page' : undefined}
           onClick={() => setView('export')}
         >
-          Export
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <path d="m7 10 5 5 5-5" />
+            <path d="M12 15V3" />
+          </svg>
+          <span className="tab-label">Export</span>
         </button>
       </nav>
 
