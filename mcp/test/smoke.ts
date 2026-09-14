@@ -48,6 +48,7 @@ await client.connect(
 console.log(`nimbooks-mcp live smoke — ${DEMO}\n`)
 
 let seenInvoiceId: string | null = null
+let seenReceivedInvoiceId: string | null = null
 
 await step('get_summary returns a funded account', async () => {
   const res = await client.callTool({ name: 'get_summary', arguments: {} })
@@ -90,6 +91,12 @@ await step('list_transactions returns classified rows', async () => {
     assert.ok(row.timestamp === null || !Number.isNaN(Date.parse(row.timestamp)), `timestamp: ${row.timestamp}`)
     kinds.add(row.kind)
     if (row.invoiceId && !seenInvoiceId) seenInvoiceId = row.invoiceId
+    // Only a payment landing ON the queried payee can read as paid: a row the
+    // wallet *sent* carries the same reference, but check_request_paid for
+    // this address must not find it. Prefer a received row for the assert.
+    if (row.invoiceId && row.direction === 'received' && !seenReceivedInvoiceId) {
+      seenReceivedInvoiceId = row.invoiceId
+    }
   }
   console.log(`       ${transactions.length} rows · kinds: ${[...kinds].join(', ')}`)
 })
@@ -114,12 +121,12 @@ await step('get_statement prices days against CoinGecko closes', async () => {
 await step('check_request_paid finds a payment that really was made', async () => {
   // Prefer a reference this wallet actually carries (found above); fall back to
   // a known one from the demo account's history.
-  const id = seenInvoiceId ?? 'demo000001'
+  const id = seenReceivedInvoiceId ?? seenInvoiceId ?? 'demo000001'
   const res = await client.callTool({ name: 'check_request_paid', arguments: { id } })
   assert.notEqual(res.isError, true, text(res))
   const r = JSON.parse(text(res))
   console.log(`       ${id}: ${r.paid ? `paid, ${r.tx.amountNim} NIM in ${r.tx.hash.slice(0, 10)}…` : 'not found'}`)
-  if (seenInvoiceId) {
+  if (seenReceivedInvoiceId) {
     assert.equal(r.paid, true, `the reference seen in history reads as paid: ${text(res)}`)
     assert.ok(/^[0-9a-f]{64}$/.test(r.tx.hash))
   } else {

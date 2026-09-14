@@ -35,7 +35,7 @@ export const TOUR_STEPS: readonly TourStepDef[] = [
   {
     id: 'welcome',
     title: 'Your books, live from the chain',
-    body: 'NimBooks reads your Nimiq wallet directly — balance, staking, and every payment, with fiat values in your currency.',
+    body: 'NimBooks reads your Nimiq wallet directly - balance, staking, and every payment, with fiat values in your currency.',
     spotlights: ['balance'],
     primaryLabel: 'Next',
   },
