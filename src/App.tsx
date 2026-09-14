@@ -714,9 +714,20 @@ export default function App() {
   // its controls should open anything under the spotlight.
   const tourActive = tour.phase === 'active'
   const tourNext = useCallback(() => {
-    setTour((t) => advanceNext(t))
+    setTour((t) => {
+      const next = advanceNext(t)
+      // When the tour finishes (Done), land back on the Overview dashboard —
+      // never leave the user stranded on the last routed view (Export).
+      if (next.phase === 'completed') setView('dashboard')
+      return next
+    })
   }, [])
-  const tourStart = useCallback(() => setTour((t) => startTour(t)), [])
+  const tourStart = useCallback(() => {
+    // The tour narrates the Overview dashboard — always start the walkthrough
+    // there, regardless of where the offer card was accepted.
+    setView('dashboard')
+    setTour((t) => startTour(t))
+  }, [])
   const tourSkip = useCallback(() => setTour((t) => skipTour(t)), [])
   const tourDismiss = useCallback(() => setTour((t) => dismissOffer(t)), [])
 
@@ -732,13 +743,16 @@ export default function App() {
       if (tour.phase !== 'idle') setTour((t) => (t.phase === 'idle' ? t : { phase: 'idle', stepIndex: 0 }))
       return
     }
-    if (loading) return
+    // The sample wallet must be fully loaded (connect done, first refresh
+    // done) before the offer appears — otherwise the dashboard reflows as
+    // data lands and the spotlight's coordinates go stale.
+    if (connecting || loading) return
     if (!isDemoMode()) return
     if (tour.phase !== 'idle') return
     if (sendOpen || stakeOpen || cashlinkOpen || changelogOpen) return
     setTour((t) => offerTour(t))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [account?.nimiqAddress, loading, sendOpen, stakeOpen, cashlinkOpen, changelogOpen])
+  }, [account?.nimiqAddress, connecting, loading, sendOpen, stakeOpen, cashlinkOpen, changelogOpen])
 
   const toggleTheme = useCallback(() => {
     setTheme((t) => {
