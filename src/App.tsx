@@ -1427,6 +1427,9 @@ export default function App() {
   const cashlinkAmountReady = !!cashlinkLuna && !cashlinkAmountOverBalance
 
   const refreshCashlinkStatuses = async (from: string) => {
+    // The onboarding tour runs on a static snapshot — chain refreshes mid-walk
+    // re-sort the shelf and move the spotlight, so they stand still too.
+    if (tour.phase === 'active') return
     for (const entry of loadCashlinks(from)) {
       try {
         const balance = Number(await getNimiqBalance(entry.address))
@@ -2705,6 +2708,9 @@ export default function App() {
   // real connected wallet (demo mode stays manual to avoid pointless RPC load).
   useEffect(() => {
     if (!account?.nimiqAddress || isDemoMode()) return
+    // The onboarding tour runs on a static snapshot — no live refreshes
+    // mid-walkthrough, or the layout (and the spotlight) could move under it.
+    if (tour.phase === 'active') return
     setCountdown(10)
     const id = setInterval(() => {
       setCountdown((c) => {
@@ -2717,7 +2723,7 @@ export default function App() {
     }, 1000)
     return () => clearInterval(id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [account?.nimiqAddress])
+  }, [account?.nimiqAddress, tour.phase])
 
   const makeReceipt = async (tx: NimiqTx) => {
     if (!account?.nimiqAddress) return
