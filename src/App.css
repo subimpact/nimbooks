@@ -463,31 +463,53 @@ a:focus-visible {
   transform: translateZ(0);
   will-change: transform;
 }
+/* Icon above label. 20px icon + 2px gap + 11px label + 12px padding lands the
+   tap target at ~45px, which keeps the whole dock near 60px — well inside the
+   104px of content clearance below <main>. */
 .tab {
   flex: 1;
   min-width: 0;
-  padding: 10px 1px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 6px 1px;
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--muted);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
   cursor: pointer;
-  white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
   transition: background 0.15s ease, color 0.15s ease;
 }
-/* Narrow phones (320–360px): shrink the labels rather than clip them. */
+.tab svg {
+  width: 20px;
+  height: 20px;
+  flex: none;
+}
+.tab-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Narrow phones (320–360px): shrink icon and label rather than clip them. */
 @media (max-width: 374px) {
   .tabs {
     gap: 2px;
     padding: 5px;
   }
-  .tab {
-    font-size: 11px;
+  .tab svg {
+    width: 18px;
+    height: 18px;
+  }
+  .tab-label {
+    font-size: 10px;
     letter-spacing: -0.02em;
   }
 }
