@@ -133,13 +133,8 @@ import Confetti from './Confetti'
 import TourHost from './TourHost'
 import {
   advanceNext,
-  consumeForceTour,
   dismissOffer,
-  loadTourStatus,
   offerTour,
-  reportTourAction,
-  saveTourStatus,
-  shouldOfferTour,
   skipTour,
   startTour,
   type TourRuntimeState,
@@ -161,10 +156,6 @@ function isView(value: string | null): value is View {
 }
 
 const RATES_KEY = 'nimbooks:rates'
-// The demo account's public mainnet address — used to scope the tour's
-// persisted status for the demo wallet, which has no real key of its own.
-// Must match the seeded wallet in connectDemoAccount.
-const DEMO_ADDRESS = 'NQ43 Y1RH P1K7 JH78 LRTS 95RY GAUU UBDK FFGX'
 // The Nimiq Pay host's device identifier, cached so the prompt is asked once.
 // chain.ts reads the same key to scope per-device preferences.
 const DEVICE_ID_KEY = 'nimbooks:deviceId'
@@ -719,37 +710,32 @@ export default function App() {
   // Onboarding tour state machine (see lib/tour.ts). The App owns setView, so
   // TourHost asks it to navigate via onNavigate when a route step is entered.
   const [tour, setTour] = useState<TourRuntimeState>({ phase: 'idle', stepIndex: 0 })
+  // While the walkthrough runs, the dashboard is a passive showroom: none of
+  // its controls should open anything under the spotlight.
+  const tourActive = tour.phase === 'active'
   const tourNext = useCallback(() => {
-    const addr = account?.nimiqAddress ?? (isDemoMode() ? DEMO_ADDRESS : '')
-    setTour((t) => {
-      const next = advanceNext(t)
-      // Persist 'completed' the moment the tour finishes (Done on step 9, or
-      // advancing past the last step).
-      if (next.phase === 'completed' && addr) saveTourStatus(addr, 'completed')
-      return next
-    })
-  }, [account?.nimiqAddress])
+    setTour((t) => advanceNext(t))
+  }, [])
   const tourStart = useCallback(() => setTour((t) => startTour(t)), [])
   const tourSkip = useCallback(() => setTour((t) => skipTour(t)), [])
-  const tourDismiss = useCallback(() => {
-    const addr = account?.nimiqAddress ?? (isDemoMode() ? DEMO_ADDRESS : '')
-    if (addr) saveTourStatus(addr, 'dismissed')
-    setTour((t) => dismissOffer(t))
-  }, [account?.nimiqAddress])
+  const tourDismiss = useCallback(() => setTour((t) => dismissOffer(t)), [])
 
-  // Auto-offer once per address: runs when an account (real or demo) is ready
-  // and the screen is clean. Never offers while a sheet/dialog is open — the
-  // tour is for a fresh screen.
+  // The tour lives in the sample wallet (demo mode): it offers on EVERY entry
+  // so judges and curious users can always replay it, and a real connected
+  // wallet never sees it. Nothing is persisted. Leaving the sample wallet
+  // resets the walkthrough state so the next entry offers again.
   useEffect(() => {
+    // On the connect screen (no account, not demo): park the tour at idle so
+    // the next sample-wallet entry gets a fresh offer, including after a
+    // completed or dismissed run.
+    if (!account && !isDemoMode()) {
+      if (tour.phase !== 'idle') setTour((t) => (t.phase === 'idle' ? t : { phase: 'idle', stepIndex: 0 }))
+      return
+    }
     if (loading) return
-    if (!account && !isDemoMode()) return
+    if (!isDemoMode()) return
     if (tour.phase !== 'idle') return
     if (sendOpen || stakeOpen || cashlinkOpen || changelogOpen) return
-    const addr = account?.nimiqAddress ?? DEMO_ADDRESS
-    if (!addr) return
-    const forceArmed = consumeForceTour()
-    const status = loadTourStatus(addr)
-    if (!shouldOfferTour({ status, forceArmed })) return
     setTour((t) => offerTour(t))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [account?.nimiqAddress, loading, sendOpen, stakeOpen, cashlinkOpen, changelogOpen])
@@ -1697,9 +1683,6 @@ export default function App() {
     clearSendCelebration()
     setSendState('idle')
     setSendOpen(true)
-    // Onboarding tour step 2 is an 'action' step: opening the send sheet is
-    // the action that advances it to step 3 (a no-op on any other step).
-    setTour((t) => reportTourAction(t, 'open-send'))
   }
 
   // Memoised on `sendState` so the Escape handler below can depend on it and
@@ -3588,7 +3571,7 @@ export default function App() {
                 <button
                   type="button"
                   className="btn-primary quick-action"
-                  onClick={openSend}
+                  onClick={tourActive ? undefined : openSend}
                   disabled={!account.nimiqAddress}
                   data-tour="quick-send"
                 >
@@ -3613,7 +3596,8 @@ export default function App() {
                 <button
                   type="button"
                   className="btn-secondary quick-action"
-                  onClick={() => setReceiveOpen(true)}
+                  onClick={tourActive ? undefined : () => setReceiveOpen(true)}
+                  data-tour="quick-receive"
                 >
                   <svg
                     width="16"
@@ -5213,7 +5197,6 @@ export default function App() {
             role="dialog"
             aria-modal="true"
             aria-label="Send NIM"
-            data-tour="send-sheet"
             ref={dialogFocus}
             tabIndex={-1}
             onClick={(e) => e.stopPropagation()}
