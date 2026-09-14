@@ -20,7 +20,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     version: '1.16.0',
     date: '2026-09-14',
     items: [
-      'A guided tour walks you through the app the first time: a small coach card points at your balance, sending, cashlinks, payment requests, history, receipts, staking and exports, and demo replays are one flag away',
+      'A guided tour walks you through the sample wallet: a small coach card points at your balance, sending, receiving, payment requests, history, receipts, staking and exports - and it offers itself again every time you open the sample wallet',
       'The dock gets its bearings: every tab in the bottom bar now carries a small line icon above its label, lit amber when active, so the app reads at a glance on a phone',
       'Opening NimBooks inside Nimiq Pay no longer asks you to sign in again on every open: a saved session comes back silently, the wallet is only asked once per visit, and a wallet that takes a moment to answer keeps your books on screen instead of sending you to the connect screen',
       'The cashlink shelf shows every link you have made, not just the newest five, and every row refreshes from the chain when the sheet opens',
