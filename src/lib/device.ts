@@ -30,6 +30,17 @@ export function isInNimiqPay(): boolean {
   return typeof window !== 'undefined' && !!window.nimiqPay
 }
 
+/**
+ * "Is this the Nimiq Pay WebView" by user agent — true from the first moment
+ * of page load, before the host has had a chance to inject `window.nimiqPay`.
+ * The injected provider can arrive late (or, on a flaky load, not at all),
+ * so the injection check alone misses the host that will answer in a moment.
+ * Only inside the Pay WebView does the UA carry "NimiqPay".
+ */
+export function isNimiqPayUserAgent(): boolean {
+  return typeof navigator !== 'undefined' && /NimiqPay/i.test(navigator.userAgent)
+}
+
 // Deep link that opens NimBooks inside Nimiq Pay. Hardcoded to the registered
 // host (not window.location) so preview/staging URLs can't produce a dead link.
 export const NIMIQ_PAY_APP_URL = 'https://nimpay.app/miniapps/open/nimbooks.subimpact.net'

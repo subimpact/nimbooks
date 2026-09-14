@@ -15,7 +15,7 @@ import type { CreateCashlinkRequest } from '@nimiq/hub-api'
 import type { SignedReceipt } from './receipt'
 import { canonicalPayload } from './receipt'
 import { broadcastRawTransaction, getNimiqBlockNumber } from './chain'
-import { isInNimiqPay, isMobileDevice } from './device'
+import { isInNimiqPay, isMobileDevice, isNimiqPayUserAgent } from './device'
 
 export interface WalletAccount {
   nimiqAddress?: string
@@ -195,7 +195,7 @@ export function getSavedSessionView(): string | null {
  * user. A desktop browser keeps its Hub login flow exactly as it is.
  */
 export function hasRestorableSession(): boolean {
-  return isInNimiqPay() && readSavedSession() !== null
+  return isOrWillBeInNimiqPay() && readSavedSession() !== null
 }
 
 function bytesToHex(bytes: Uint8Array): string {
@@ -284,12 +284,13 @@ export async function connectWallet(): Promise<WalletAccount> {
  * the provider, so a wallet switched inside Pay restores as the new wallet
  * rather than a stale address.
  *
- * Returns the account on success, `null` when there is nothing to restore or
- * the provider can no longer name one (the stale record is dropped, so a
- * failure is never retried in a loop).
+ * Returns the account on success, `null` when there is nothing to restore (no
+ * Pay host and no Pay user agent, or no saved session). A saved record
+ * survives a failed host answer — the session is never dropped over a
+ * transient hiccup, so the next boot can still restore.
  */
 export async function restoreWalletSession(): Promise<WalletAccount | null> {
-  if (!isInNimiqPay()) return null
+  if (!isInNimiqPay() && !isNimiqPayUserAgent()) return null
   const saved = readSavedSession()
   if (!saved) return null
 
@@ -300,29 +301,76 @@ export async function restoreWalletSession(): Promise<WalletAccount | null> {
     return connectDemoAccount(saved.nimiqAddress)
   }
 
-  const account = await readPayAccount()
-  if (!account.nimiqAddress) {
-    clearSavedSession()
-    return null
+  // Silent restore, no wallet prompt: the host's account list is a native
+  // confirmation dialog, so asking for it again on a page the user only just
+  // pressed back onto is exactly the repeated sign-in prompt this path exists
+  // to kill. The saved address is on chain anyway (public data), so NimBooks
+  // can read it directly: it starts a read-only session for that address,
+  // then refreshes to the live provider when the app is ready to ask (which
+  // only ever happens on an explicit user action). A wallet switched inside
+  // Pay is picked up by that refresh — connectWallet re-reads the provider.
+  const account: WalletAccount = {
+    nimiqAddress: saved.nimiqAddress,
+    ...(saved.remoteAddress ? { remoteAddress: saved.remoteAddress } : {}),
+    provider: 'pay',
+    consensus: null,
   }
-  // EVM side, silently: `eth_accounts` returns what the user has already
-  // authorised, where `eth_requestAccounts` would raise a permission prompt on
-  // a page the user only just pressed back onto.
-  try {
-    if (window.ethereum) {
-      const evmAccounts = await window.ethereum.request({ method: 'eth_accounts' })
-      if (Array.isArray(evmAccounts) && evmAccounts.length > 0) {
-        account.evmAddress = evmAccounts[0]
-      }
-    }
-  } catch (e) {
-    console.warn('EVM provider unavailable on restore:', e)
-  }
-
   currentAccount = account
-  // Re-save with the live addresses: the restored wallet is the current one.
-  saveSession(account)
+  // Note: deliberately NOT connectDemoAccount — that helper flips the active
+  // provider to demo and rewrites the saved record, which would destroy the
+  // Pay session this path exists to bring back.
+  // Wake the provider in the background so the restored session can sign
+  // without a fresh sign-in: `init()` polls for the injection itself (50ms
+  // ticks, up to 10s) and shows NO confirmation dialog (only the
+  // account-listing call does). The restore returns immediately with the
+  // read-only account; when init resolves, canSend() flips true on its own.
+  void reviveProviderSilently()
   return account
+}
+
+// --- Silent provider revive (restore path) ---
+
+/**
+ * Bring the in-memory provider back on a silent restore — `init()` polls for
+ * the injected `window.nimiq` itself (50ms ticks, up to 10s) and shows NO
+ * confirmation dialog (only the account-listing call does). That is what
+ * makes the restored session able to sign again without a fresh sign-in.
+ * Never throws to the caller: a flaky load just keeps the session read-only.
+ *
+ * The account list is deliberately not re-read here: `listAccounts()` is a
+ * native confirmation dialog, so calling it on a page the user only just
+ * pressed back onto is the exact repeated sign-in prompt being fixed. The
+ * saved address is the wallet this device was last signed in with; if the
+ * wallet was switched inside Pay, the first explicit user action (connect)
+ * re-reads the provider and corrects the session.
+ */
+async function reviveProviderSilently(): Promise<void> {
+  try {
+    nimiqProvider = await init({ timeout: 10000 })
+  } catch {
+    /* host not ready — the session stays read-only, record untouched */
+  }
+}
+
+/**
+ * Wait (bounded) for the in-memory provider to wake after a silent restore.
+ * Lets a caller render the signed-in UI only once `canSend()` is true, so a
+ * restored session never parks on the cannot-send affordance that shows while
+ * `init()` is still polling. `true` when the provider is ready.
+ */
+export async function waitForProviderReady(timeoutMs: number): Promise<boolean> {
+  if (nimiqProvider) return true
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 50))
+    if (nimiqProvider) return true
+  }
+  return false
+}
+
+/** True when this load is (or is about to be) the Nimiq Pay WebView. */
+export function isOrWillBeInNimiqPay(): boolean {
+  return isInNimiqPay() || isNimiqPayUserAgent()
 }
 
 // --- Nimiq Hub redirect login (mobile browsers) ---
