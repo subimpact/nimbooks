@@ -22,6 +22,9 @@ export const CHANGELOG: ChangelogEntry[] = [
     items: [
       'The dock gets its bearings: every tab in the bottom bar now carries a small line icon above its label, lit amber when active, so the app reads at a glance on a phone',
       'Opening NimBooks inside Nimiq Pay no longer asks you to sign in again on every open: a saved session comes back silently, the wallet is only asked once per visit, and a wallet that takes a moment to answer keeps your books on screen instead of sending you to the connect screen',
+      'The cashlink shelf shows every link you have made, not just the newest five, and every row refreshes from the chain when the sheet opens',
+      'Your statements and CSV exports now carry a shape check at the door: a shared export link can only be minted from one, so the short-link server is never a file host',
+      'Unstaking that repeats a withdrawn leg waits for the chain to confirm the balance moved before offering it again — no double signatures in the settling window',
     ],
   },
   {

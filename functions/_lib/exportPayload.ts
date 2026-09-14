@@ -76,7 +76,33 @@ export async function decodeExportPayload(payload: string): Promise<DecodedPaylo
     body.set(chunk, at)
     at += chunk.byteLength
   }
+
+  // The decompressed bytes are only trustworthy if they look like a real
+  // NimBooks CSV. Proving gzip alone would make this a bounded arbitrary-blob
+  // host, so check the shape of the first non-empty line after any UTF-8 BOM:
+  // it must carry a comma and one of the known header tokens. This runs here so
+  // both the mint and /s/<slug>.csv share it.
+  if (!looksLikeExportCsv(body)) return { ok: false, reason: 'malformed' }
+
   return { ok: true, body }
+}
+
+/** True when the first non-empty line (after a leading UTF-8 BOM) is a header
+ *  carrying a comma and a known NimBooks token. Tolerant by design: it only
+ *  needs a comma and one header keyword, so real exports pass untouched while
+ *  arbitrary gzip blobs fail the shape check. */
+function looksLikeExportCsv(body: Uint8Array): boolean {
+  let offset = 0
+  // Drop a leading UTF-8 BOM (EF BB BF) if present.
+  if (body[0] === 0xef && body[1] === 0xbb && body[2] === 0xbf) offset = 3
+
+  const text = new TextDecoder('utf-8').decode(body.subarray(offset))
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue // empty or whitespace-only
+    if (!line.includes(',')) return false
+    return line.includes('txHash') || line.includes('receivedNIM')
+  }
+  return false
 }
 
 /** The CSV, as a file the browser saves rather than a page it renders. */
