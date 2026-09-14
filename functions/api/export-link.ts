@@ -83,7 +83,8 @@ export const onRequestPost = async ({ request, env }: Ctx): Promise<Response> =>
     return json({ error: 'invalid payload' }, 400)
   }
 
-  // Decoded, then thrown away: this proves the body really is a gzipped CSV
+  // Decoded, then thrown away: decodeExportPayload proves the body really is a
+  // gzipped CSV — gzip plus a CSV-shape check on the decompressed first line —
   // before a slug gets spent on it, and it is the same check /s/<slug>.csv will
   // run on the way out. What gets stored is the compressed form, exactly as it
   // arrived — decompressing into KV would multiply the ledger sitting at rest.
