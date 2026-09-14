@@ -557,7 +557,7 @@ export async function getCurrentBlock(): Promise<number | null> {
 /** Human-readable text for a signing failure. Pay's SDK rejects with an
  * ErrorResponse object ({ error: { type, message } }) rather than an Error,
  * and String() of that is "[object Object]" — extract the real message. */
-function signErrorText(e: unknown): string {
+export function errorText(e: unknown): string {
   if (e instanceof Error) return e.message
   if (e && typeof e === 'object') {
     const maybe = e as { error?: { message?: unknown }; message?: unknown }
@@ -586,7 +586,7 @@ export async function signMessage(
       }
     } catch (e) {
       console.error('Hub signMessage failed:', e)
-      throw new Error(signErrorText(e) || 'The Nimiq Hub signing request failed.')
+      throw new Error(errorText(e) || 'The Nimiq Hub signing request failed.')
     }
   }
   if (!nimiqProvider) return null
@@ -605,7 +605,7 @@ export async function signMessage(
     return null
   } catch (e) {
     console.error('Nimiq Pay sign failed:', e)
-    const text = signErrorText(e)
+    const text = errorText(e)
     throw new Error(text || 'The Nimiq Pay request failed.')
   }
 }
@@ -638,6 +638,10 @@ export function canSend(): boolean {
   return !!nimiqProvider
 }
 
+// Nimiq Pay's SDK answers failures as { error: { type, message } } objects;
+// the shape is not exported by the package, so mirror it for narrowing.
+type PayErrorResponse = { error: { type: string; message: string } }
+
 export async function sendNim({
   recipient,
   amountLuna,
@@ -658,28 +662,39 @@ export async function sendNim({
   if (activeProvider === 'hub') {
     // Nimiq Hub: the checkout flow signs and sends. `forceSender` keeps the
     // payment on the address the user connected with.
-    const result = await getHub().checkout({
-      appName: 'NimBooks',
-      recipient: to,
-      value,
-      fee,
-      // Raw bytes win when the caller supplied them (cashlink funding needs
-      // the Hub's exact FUNDING tag, which is not text); otherwise the memo
-      // rides as UTF-8 like every other payment.
-      ...(extraData ? { extraData } : memo ? { extraData: new TextEncoder().encode(memo) } : {}),
-      ...(from ? { sender: from.replace(/\s+/g, ''), forceSender: true } : {}),
-    })
+    // Structural type — HubApi's checkout conditional return is too gnarly to
+    // index; this is the shape every non-redirect checkout actually resolves.
+    let result: { hash: string; serializedTx?: string } | undefined
+    try {
+      result = await getHub().checkout({
+        appName: 'NimBooks',
+        recipient: to,
+        value,
+        fee,
+        // Raw bytes win when the caller supplied them (cashlink funding needs
+        // the Hub's exact FUNDING tag, which is not text); otherwise the memo
+        // rides as UTF-8 like every other payment.
+        ...(extraData ? { extraData } : memo ? { extraData: new TextEncoder().encode(memo) } : {}),
+        ...(from ? { sender: from.replace(/\s+/g, ''), forceSender: true } : {}),
+      })
+    } catch (e) {
+      console.error('Hub checkout failed:', e)
+      throw new Error(errorText(e) || 'The Nimiq Hub payment was rejected.')
+    }
     if (!result || !('hash' in result)) {
       throw new Error('Nimiq Hub did not return a signed transaction.')
     }
-    // Re-broadcast defensively: harmless when the Hub already sent it (same
-    // hash ⇒ applied at most once), decisive when it only signed.
-    try {
-      await broadcastRawTransaction(result.serializedTx)
-    } catch (e) {
-      console.warn('Re-broadcast after Hub checkout skipped:', e)
+    // Re-broadcast defensively when the Hub returned the bytes: harmless when
+    // the Hub already sent it (same hash ⇒ applied at most once), decisive
+    // when it only signed.
+    if (result.serializedTx) {
+      try {
+        await broadcastRawTransaction(result.serializedTx)
+      } catch (e) {
+        console.warn('Re-broadcast after Hub checkout skipped:', e)
+      }
     }
-    return { hash: result.hash, serializedTx: result.serializedTx }
+    return { hash: result.hash, serializedTx: result.serializedTx ?? undefined }
   }
 
   if (!nimiqProvider) throw new Error('No Nimiq wallet connected.')
@@ -690,9 +705,15 @@ export async function sendNim({
   //
   // `extraData` has no route here by the shape of the API: Pay takes a string,
   // so a binary tag (a cashlink's FUNDING bytes) cannot ride this rail at all.
-  const res = memo
-    ? await nimiqProvider.sendBasicTransactionWithData({ recipient: to, value, fee, data: memo })
-    : await nimiqProvider.sendBasicTransaction({ recipient: to, value, fee })
+  let res: string | PayErrorResponse
+  try {
+    res = memo
+      ? await nimiqProvider.sendBasicTransactionWithData({ recipient: to, value, fee, data: memo })
+      : await nimiqProvider.sendBasicTransaction({ recipient: to, value, fee })
+  } catch (e) {
+    console.error('Nimiq Pay send failed:', e)
+    throw new Error(errorText(e) || 'The Nimiq Pay payment was rejected.')
+  }
   if (typeof res !== 'string') {
     const message = res && typeof res === 'object' && 'error' in res ? res.error?.message : null
     throw new Error(message || 'Transaction was rejected.')
