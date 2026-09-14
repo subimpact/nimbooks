@@ -95,7 +95,7 @@ export const TOUR_STEPS: readonly TourStepDef[] = [
   {
     id: 'done',
     title: "That's it!",
-    body: 'The books keep themselves. Reach out on X or Telegram if you have feedback.',
+    body: 'The books keep themselves. Reach out at nimbooks@subimpact.net if you have feedback.',
     spotlights: [],
     primaryLabel: 'Done',
   },
