@@ -113,7 +113,14 @@ import {
 } from './lib/invoice'
 import { seedDemoData } from './lib/demoData'
 import { getRestakeRewardTxs, restakeWindow } from './lib/stakingEvents'
-import { isInNimiqPay, isMobileDevice, isPhoneOrTablet, NIMIQ_PAY_APP_URL, siteLink } from './lib/device'
+import {
+  isInNimiqPay,
+  isMobileDevice,
+  isNimiqPayUserAgent,
+  isPhoneOrTablet,
+  NIMIQ_PAY_APP_URL,
+  siteLink,
+} from './lib/device'
 import { dialogFocus } from './lib/dialogFocus'
 import { shortenUrl } from './lib/shorten'
 import { buildDownloadLink, buildShortExportLink } from './lib/downloadLink'
@@ -1188,7 +1195,9 @@ export default function App() {
       }
       if (!acc) {
         // Nothing (or nothing usable) to come back to: the connect screen, as
-        // before. wallet.restoreWalletSession has already dropped the record.
+        // before. (restoreWalletSession returns null only when there is no
+        // saved session or no Pay host at all — it never wipes a record on a
+        // transient provider failure, so the next boot can still restore.)
         setRestoring(false)
         return
       }
@@ -5276,14 +5285,29 @@ export default function App() {
                   <>
                     {/* Read-only: the button stays on screen so the flow is
                         visible, but nothing here can sign — and nothing is
-                        faked. wallet.sendNim refuses demo mode outright. */}
-                    <button className="btn-primary send-submit" disabled>
-                      Send NIM
-                    </button>
+                        faked. wallet.sendNim refuses demo mode outright. A
+                        restored Pay session the host did not answer on this
+                        load is not read-only by choice: offer the connect
+                        that wakes it. */}
+                    {!demoMode && (isInNimiqPay() || isNimiqPayUserAgent()) ? (
+                      <button
+                        className="btn-primary send-submit"
+                        onClick={() => void connect()}
+                        disabled={connecting}
+                      >
+                        {connecting ? 'Connecting…' : 'Connect wallet to send'}
+                      </button>
+                    ) : (
+                      <button className="btn-primary send-submit" disabled>
+                        Send NIM
+                      </button>
+                    )}
                     <p className="hint small">
                       {demoMode
                         ? 'Demo mode is read-only. Connect your wallet to send NIM.'
-                        : 'Sending needs a wallet that can sign. Open NimBooks in Nimiq Pay, or sign in with the Nimiq Hub.'}
+                        : inNimiqPay
+                          ? 'The wallet did not answer on this load. Connect again to send.'
+                          : 'Sending needs a wallet that can sign. Open NimBooks in Nimiq Pay, or sign in with the Nimiq Hub.'}
                     </p>
                     {!demoMode && !inNimiqPay && (
                       <a
