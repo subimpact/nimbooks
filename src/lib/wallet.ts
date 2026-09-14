@@ -88,6 +88,8 @@ interface SavedSession {
   provider: SavedProvider
   nimiqAddress: string
   remoteAddress?: string
+  /** EVM side of the same wallet, so a silent restore can keep the multi-chain panel. */
+  evmAddress?: string
   /** Which tab the user was on, so back-from-the-explorer lands where it left. */
   view?: string
 }
@@ -156,6 +158,7 @@ function saveSession(account: WalletAccount): void {
     provider,
     nimiqAddress: account.nimiqAddress,
     ...(account.remoteAddress ? { remoteAddress: account.remoteAddress } : {}),
+    ...(account.evmAddress ? { evmAddress: account.evmAddress } : {}),
     // A restore re-saves the live account; the view it restored to rides along
     // rather than being reset to the dashboard under the user.
     ...(previous?.provider === provider && previous.view ? { view: previous.view } : {}),
@@ -312,6 +315,7 @@ export async function restoreWalletSession(): Promise<WalletAccount | null> {
   const account: WalletAccount = {
     nimiqAddress: saved.nimiqAddress,
     ...(saved.remoteAddress ? { remoteAddress: saved.remoteAddress } : {}),
+    ...(saved.evmAddress ? { evmAddress: saved.evmAddress } : {}),
     provider: 'pay',
     consensus: null,
   }
