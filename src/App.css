@@ -2262,3 +2262,146 @@ a.btn-ghost.btn-link {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ── Tour overlay ────────────────────────────────────────────────────────
+   Sits above every other layer (sheets 40, dialogs 50); z-index 100. The
+   scrim never intercepts taps — only the cards do. */
+.tour-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  pointer-events: none;
+}
+
+.tour-dim {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+/* Transparent cutout around a spotlighted element, with the 9999px box-shadow
+   doing the dimming and a layered accent ring sitting on top. pointer-events
+   none so the spotlighted element keeps receiving clicks. */
+.tour-cutout {
+  position: fixed;
+  border: 2px solid var(--accent);
+  border-radius: 14px;
+  box-shadow:
+    0 0 0 9999px rgba(0, 0, 0, 0.45),
+    0 0 18px 2px var(--accent);
+  pointer-events: none;
+}
+
+/* Coach card — frosted surface matching .modal. */
+.tour-coach {
+  position: fixed;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  padding: 0 0.85rem;
+  pointer-events: none;
+}
+.tour-coach--top {
+  top: 1rem;
+}
+.tour-coach--bottom {
+  bottom: calc(6.5rem + env(safe-area-inset-bottom, 0px));
+}
+.tour-coach--center {
+  inset: 0;
+  align-items: center;
+}
+.tour-coach-card {
+  width: min(100%, 24rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.9rem 1rem 1rem;
+  background: var(--bg-elev);
+  background: color-mix(in srgb, var(--bg-elev) 92%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  pointer-events: auto;
+}
+.tour-coach-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.tour-coach-step {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.tour-coach-skip {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.tour-coach-card h3 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+.tour-coach-card p {
+  margin: 0 0 0.25rem;
+  font-size: 0.88rem;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+.tour-coach-action {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--accent-2) !important;
+}
+
+/* Centered offer / done cards. */
+.tour-centered {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  pointer-events: none;
+}
+.tour-offer-card {
+  width: min(100%, 22rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1.35rem 1.25rem 1.2rem;
+  text-align: center;
+  background: var(--bg-elev);
+  background: color-mix(in srgb, var(--bg-elev) 92%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  pointer-events: auto;
+}
+.tour-offer-card h2 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+.tour-offer-card p {
+  margin: 0 0 0.35rem;
+  font-size: 0.92rem;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
