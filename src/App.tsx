@@ -130,6 +130,20 @@ import QrCode from './QrCode'
 import Analytics, { type AnalyticsPeriod } from './Analytics'
 import InfoIcon from './InfoIcon'
 import Confetti from './Confetti'
+import TourHost from './TourHost'
+import {
+  advanceNext,
+  consumeForceTour,
+  dismissOffer,
+  loadTourStatus,
+  offerTour,
+  reportTourAction,
+  saveTourStatus,
+  shouldOfferTour,
+  skipTour,
+  startTour,
+  type TourRuntimeState,
+} from './lib/tour'
 import {
   availableStatementYears,
   buildStatementCsv,
@@ -147,6 +161,10 @@ function isView(value: string | null): value is View {
 }
 
 const RATES_KEY = 'nimbooks:rates'
+// The demo account's public mainnet address — used to scope the tour's
+// persisted status for the demo wallet, which has no real key of its own.
+// Must match the seeded wallet in connectDemoAccount.
+const DEMO_ADDRESS = 'NQ43 Y1RH P1K7 JH78 LRTS 95RY GAUU UBDK FFGX'
 // The Nimiq Pay host's device identifier, cached so the prompt is asked once.
 // chain.ts reads the same key to scope per-device preferences.
 const DEVICE_ID_KEY = 'nimbooks:deviceId'
@@ -697,6 +715,44 @@ export default function App() {
   // exactly like the send sheet.
   const [stakeCelebrate, setStakeCelebrate] = useState<string | null>(null)
   const stakeCelebrateTimer = useRef<number | null>(null)
+
+  // Onboarding tour state machine (see lib/tour.ts). The App owns setView, so
+  // TourHost asks it to navigate via onNavigate when a route step is entered.
+  const [tour, setTour] = useState<TourRuntimeState>({ phase: 'idle', stepIndex: 0 })
+  const tourNext = useCallback(() => {
+    const addr = account?.nimiqAddress ?? (isDemoMode() ? DEMO_ADDRESS : '')
+    setTour((t) => {
+      const next = advanceNext(t)
+      // Persist 'completed' the moment the tour finishes (Done on step 9, or
+      // advancing past the last step).
+      if (next.phase === 'completed' && addr) saveTourStatus(addr, 'completed')
+      return next
+    })
+  }, [account?.nimiqAddress])
+  const tourStart = useCallback(() => setTour((t) => startTour(t)), [])
+  const tourSkip = useCallback(() => setTour((t) => skipTour(t)), [])
+  const tourDismiss = useCallback(() => {
+    const addr = account?.nimiqAddress ?? (isDemoMode() ? DEMO_ADDRESS : '')
+    if (addr) saveTourStatus(addr, 'dismissed')
+    setTour((t) => dismissOffer(t))
+  }, [account?.nimiqAddress])
+
+  // Auto-offer once per address: runs when an account (real or demo) is ready
+  // and the screen is clean. Never offers while a sheet/dialog is open — the
+  // tour is for a fresh screen.
+  useEffect(() => {
+    if (loading) return
+    if (!account && !isDemoMode()) return
+    if (tour.phase !== 'idle') return
+    if (sendOpen || stakeOpen || cashlinkOpen || changelogOpen) return
+    const addr = account?.nimiqAddress ?? DEMO_ADDRESS
+    if (!addr) return
+    const forceArmed = consumeForceTour()
+    const status = loadTourStatus(addr)
+    if (!shouldOfferTour({ status, forceArmed })) return
+    setTour((t) => offerTour(t))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [account?.nimiqAddress, loading, sendOpen, stakeOpen, cashlinkOpen, changelogOpen])
 
   const toggleTheme = useCallback(() => {
     setTheme((t) => {
@@ -1638,6 +1694,9 @@ export default function App() {
     clearSendCelebration()
     setSendState('idle')
     setSendOpen(true)
+    // Onboarding tour step 2 is an 'action' step: opening the send sheet is
+    // the action that advances it to step 3 (a no-op on any other step).
+    setTour((t) => reportTourAction(t, 'open-send'))
   }
 
   // Memoised on `sendState` so the Escape handler below can depend on it and
@@ -3320,6 +3379,7 @@ export default function App() {
           onClick={openStake}
           title={demoMode ? 'Stake (read-only in demo mode)' : 'Stake'}
           aria-label="Stake"
+          data-tour="stake"
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.52-4.48 10-10 10Z" />
@@ -3383,6 +3443,7 @@ export default function App() {
           className={view === 'history' ? 'tab active' : 'tab'}
           aria-current={view === 'history' ? 'page' : undefined}
           onClick={() => setView('history')}
+          data-tour="history-tab"
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
             <circle cx="12" cy="12" r="9" />
@@ -3394,6 +3455,7 @@ export default function App() {
           className={view === 'receipts' ? 'tab active' : 'tab'}
           aria-current={view === 'receipts' ? 'page' : undefined}
           onClick={() => setView('receipts')}
+          data-tour="receipts-tab"
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
             <path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z" />
@@ -3406,6 +3468,7 @@ export default function App() {
           className={view === 'request' ? 'tab active' : 'tab'}
           aria-current={view === 'request' ? 'page' : undefined}
           onClick={() => setView('request')}
+          data-tour="request-tab"
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
             <path d="m22 2-7 20-4-9-9-4Z" />
@@ -3417,6 +3480,7 @@ export default function App() {
           className={view === 'export' ? 'tab active' : 'tab'}
           aria-current={view === 'export' ? 'page' : undefined}
           onClick={() => setView('export')}
+          data-tour="export-tab"
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -3476,7 +3540,7 @@ export default function App() {
                 <span className="value">{formatFiat(totalFiat, currency)}</span>
               </div>
 
-              <div className="card nim-tile">
+              <div className="card nim-tile" data-tour="balance">
                 <span className="label label-with-info">
                   NIM balance
                   <InfoIcon text="Your NIM on the Nimiq chain: available, staked, unstaking, and funds held in HTLC swap contracts (shown as in transit)." />
@@ -3520,6 +3584,7 @@ export default function App() {
                   className="btn-primary quick-action"
                   onClick={openSend}
                   disabled={!account.nimiqAddress}
+                  data-tour="quick-send"
                 >
                   {/* Inline SVG like every other icon here — a Unicode arrow
                       tofus on some Android builds. */}
@@ -5142,6 +5207,7 @@ export default function App() {
             role="dialog"
             aria-modal="true"
             aria-label="Send NIM"
+            data-tour="send-sheet"
             ref={dialogFocus}
             tabIndex={-1}
             onClick={(e) => e.stopPropagation()}
@@ -5717,6 +5783,14 @@ export default function App() {
           </div>
         </div>
       )}
+      <TourHost
+        tour={tour}
+        onStart={tourStart}
+        onNext={tourNext}
+        onSkip={tourSkip}
+        onDismiss={tourDismiss}
+        onNavigate={setView}
+      />
     </div>
   )
 }
