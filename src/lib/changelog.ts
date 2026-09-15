@@ -7,7 +7,7 @@
 // Badge text. Spelled out rather than built from a version constant so the exact
 // label ships as one string in the bundle (JSX would emit "v" as a separate node).
 // package.json carries the machine-readable version.
-export const APP_VERSION_LABEL = 'v1.16.0'
+export const APP_VERSION_LABEL = 'v1.17.0'
 
 export interface ChangelogEntry {
   version: string
@@ -17,10 +17,18 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.17.0',
+    date: '2026-09-15',
+    items: [
+      'Report a bug or send feedback at nimbooks.subimpact.net',
+      'A quiet reopen inside Nimiq Pay keeps the multi-chain panel too: the silently restored session now brings the EVM balances back with it',
+    ],
+  },
+  {
     version: '1.16.0',
     date: '2026-09-14',
     items: [
-      'A guided tour walks you through the sample wallet: a small coach card points at your balance, sending, receiving, payment requests, history, receipts, staking and exports - and it offers itself again every time you open the sample wallet. Feedback can go to nimbooks@subimpact.net',
+      'A guided tour walks you through the sample wallet: a small coach card points at your balance, sending, receiving, payment requests, history, receipts, staking and exports - and it offers itself again every time you open the sample wallet',
       'Signing failures now say what actually happened: if the wallet declines a receipt signature, the message from the wallet is shown instead of a raw error code - found by Harley NSpace, who was also the one to hit a payment failure while trying to pay a request (20B NIM, declined)',
       'Payment failures get the same treatment: when a wallet declines a payment, its own reason appears in the banner instead of a raw error code',
       'The MCP kit got a trust pass after Harsh Yadav\'s review: payment checks now say when the request amount could not be verified, validator rewards are folded into summaries and statements the way the books do, and the fence page names every host the server talks to',
