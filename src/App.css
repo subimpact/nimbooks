@@ -1634,6 +1634,19 @@ a.btn-ghost.btn-link {
 }
 
 /* Changelog modal */
+.changelog-feedback {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+  margin: 0 0 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.changelog-feedback a {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 600;
+}
 .changelog-entry {
   margin-bottom: 14px;
 }
