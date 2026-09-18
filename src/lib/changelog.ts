@@ -7,7 +7,9 @@
 // Badge text. Spelled out rather than built from a version constant so the exact
 // label ships as one string in the bundle (JSX would emit "v" as a separate node).
 // package.json carries the machine-readable version.
-export const APP_VERSION_LABEL = 'v1.17.0'
+export const APP_VERSION_LABEL = 'v1.18.0'
+
+export const FEEDBACK_LINE = 'Report a bug or send feedback at nimbooks.subimpact.net'
 
 export interface ChangelogEntry {
   version: string
@@ -17,10 +19,16 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.18.0',
+    date: '2026-09-18',
+    items: [
+      'The feedback line moves out of the release notes and into its own spot: it now sits at the very top of the changelog, above every version, so it is always there no matter which release you are reading',
+    ],
+  },
+  {
     version: '1.17.0',
     date: '2026-09-15',
     items: [
-      'Report a bug or send feedback at nimbooks.subimpact.net',
       'A quiet reopen inside Nimiq Pay keeps the multi-chain panel too: the silently restored session now brings the EVM balances back with it',
     ],
   },
