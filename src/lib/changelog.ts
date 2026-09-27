@@ -7,9 +7,7 @@
 // Badge text. Spelled out rather than built from a version constant so the exact
 // label ships as one string in the bundle (JSX would emit "v" as a separate node).
 // package.json carries the machine-readable version.
-export const APP_VERSION_LABEL = 'v1.19.0'
-
-export const FEEDBACK_LINE = 'Report a bug or send feedback at nimbooks.subimpact.net'
+export const APP_VERSION_LABEL = 'v1.20.0'
 
 export interface ChangelogEntry {
   version: string
@@ -18,6 +16,13 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '1.20.0',
+    date: '2026-09-28',
+    items: [
+      'The feedback line at the top of the changelog now points at the inbox directly: a tap on nimbooks@subimpact.net opens a fresh email, so a bug report never has to leave the page to start',
+    ],
+  },
   {
     version: '1.19.0',
     date: '2026-09-25',

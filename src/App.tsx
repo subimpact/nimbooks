@@ -3104,7 +3104,7 @@ export default function App() {
           </button>
         </div>
         <p className="changelog-feedback">
-          Report a bug or send feedback at <a href="https://nimbooks.subimpact.net" target="_blank" rel="noopener">nimbooks.subimpact.net</a>
+          Report a bug or send feedback at <a href="mailto:nimbooks@subimpact.net">nimbooks@subimpact.net</a>
         </p>
         {CHANGELOG.map((entry) => (
           <div key={entry.version} className="changelog-entry">
