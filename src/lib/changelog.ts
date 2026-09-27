@@ -7,7 +7,7 @@
 // Badge text. Spelled out rather than built from a version constant so the exact
 // label ships as one string in the bundle (JSX would emit "v" as a separate node).
 // package.json carries the machine-readable version.
-export const APP_VERSION_LABEL = 'v1.18.0'
+export const APP_VERSION_LABEL = 'v1.19.0'
 
 export const FEEDBACK_LINE = 'Report a bug or send feedback at nimbooks.subimpact.net'
 
@@ -18,6 +18,14 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '1.19.0',
+    date: '2026-09-25',
+    items: [
+      'The send sheet in demo mode now says so before you type: a small "Demo preview: sending is disabled" banner sits at the top of the form, so nobody fills in a recipient and amount before noticing the flow is read-only - found by Faadil Boussari, who tested the demo on a phone and told us exactly where the confusion set in',
+      'A small punctuation tidy in the hero line: the tagline now reads cleanly with a plain dash everywhere it appears',
+    ],
+  },
   {
     version: '1.18.0',
     date: '2026-09-18',
