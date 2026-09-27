@@ -20,10 +20,13 @@ const { firefox } = require('playwright');
   await page.goto(base, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(2500);
 
-  // 1. Cold open renders + current badge
+  // 1. Cold open renders + current badge (label derived from package.json
+  // so the gate can never go stale on a version bump)
+  const pkgVersion = require('path').join(__dirname, '..', 'package.json');
+  const expected = 'v' + require(pkgVersion).version;
   const body = await page.locator('body').innerText();
   t('cold open renders', body.length > 200);
-  t('version badge visible', await page.getByText('v1.19.0', { exact: true }).count() > 0);
+  t('version badge visible (' + expected + ')', await page.getByText(expected, { exact: true }).count() > 0);
 
   // 2. Demo journey: sample wallet -> dashboard
   const demo = page.locator('button:has-text("sample wallet"), button:has-text("demo"), a:has-text("demo")').first();
@@ -49,6 +52,8 @@ const { firefox } = require('playwright');
   if (await badge.count() > 0) {
     await badge.click(); await page.waitForTimeout(800);
     t('changelog feedback line', await page.locator('.changelog-feedback').count() > 0);
+    const fbText = await page.locator('.changelog-feedback').first().innerText().catch(() => '');
+    t('feedback line is the email', fbText.includes('nimbooks@subimpact.net') && !fbText.includes('at nimbooks.subimpact.net'), JSON.stringify(fbText.trim().slice(0, 60)));
     t('changelog has entries', await page.locator('.changelog-entry').count() >= 3);
     const close = page.locator('[aria-label="Close"]').first();
     if (await close.count() > 0) await close.click();
