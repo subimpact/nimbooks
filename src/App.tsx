@@ -3159,7 +3159,7 @@ export default function App() {
         <header className="hero">
           <div className="logo">📒</div>
           <h1>NimBooks</h1>
-          <p className="tagline">The books for your Nimiq wallet — and the world's first in-Pay staking.</p>
+          <p className="tagline">The books for your Nimiq wallet - and the world's first in-Pay staking.</p>
         </header>
         <main className="connect-panel">
           <div className="stake-progress" role="status" aria-live="polite">
@@ -3195,7 +3195,7 @@ export default function App() {
           </div>
           <div className="logo">📒</div>
           <h1>NimBooks</h1>
-          <p className="tagline">The books for your Nimiq wallet — and the world's first in-Pay staking.</p>
+          <p className="tagline">The books for your Nimiq wallet - and the world's first in-Pay staking.</p>
         </header>
         <main className="connect-panel">
           {inNimiqPay ? (
@@ -5237,6 +5237,13 @@ export default function App() {
                 ✕
               </button>
             </div>
+
+            {/* Demo mode can fill the form but never sign it - say so up
+                front, before the fields invite entry (tester feedback:
+                the read-only notice sat below the disabled button). */}
+            {demoMode && sendState !== 'sent' && (
+              <p className="demo-banner">Demo preview: sending is disabled.</p>
+            )}
 
             {sendState === 'sent' ? (
               <div className="invoice-sent">
