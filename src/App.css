@@ -1633,6 +1633,20 @@ a.btn-ghost.btn-link {
   margin: 8px 0;
 }
 
+/* Read-only demo notice, pinned above forms that look editable but can
+   never sign. Amber tint, not red: it is a preview note, not an error. */
+.demo-banner {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 0 0 12px;
+}
+
 /* Changelog modal */
 .changelog-feedback {
   font-size: 13px;
