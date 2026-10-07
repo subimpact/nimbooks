@@ -147,6 +147,8 @@ import {
   getDailyNimPrices,
   type Statement,
 } from './lib/statement'
+import { computeFifoGains, getAllDailyNimPrices, type TaxReport } from './lib/tax'
+import { buildTaxTransactionsCsv, buildTaxSummaryCsv, TAX_FORMAT_LABELS, type TaxFormat } from './lib/taxCsv'
 
 type View = 'dashboard' | 'history' | 'receipts' | 'request' | 'export'
 
@@ -550,6 +552,9 @@ export default function App() {
   const [statementYear, setStatementYear] = useState<string>('all')
   const [statement, setStatement] = useState<Statement | null>(null)
   const [statementLoading, setStatementLoading] = useState(false)
+  const [taxReport, setTaxReport] = useState<TaxReport | null>(null)
+  const [taxBusy, setTaxBusy] = useState(false)
+  const [taxFormat, setTaxFormat] = useState<TaxFormat>('koinly')
   // Real-HTTPS download link for WebViews that can't save files (see downloadLink.ts).
   const [downloadLink, setDownloadLink] = useState<string | null>(null)
   // Is the link above the short /s/ form (payload in our KV, gone in 48h) or
@@ -2838,13 +2843,37 @@ export default function App() {
     )
   }
 
+  // Tax-card USD: two decimals normally, but a small-cap coin's daily
+  // figures are often cents - render those with four so $0.0045 does not
+  // display as $0.00, and a negative epsilon never reads as -0.00.
+  const formatTaxUsd = (n: number): string => {
+    if (!Number.isFinite(n) || Math.abs(n) < 0.005) return '$0.00'
+    return `$${n.toFixed(Math.abs(n) < 1 ? 4 : 2)}`
+  }
+
   // One source of truth for what each export is called and what it holds, so
   // the download, copy, and link paths can never drift apart.
-  const csvExport = (kind: 'history' | 'statement'): { filename: string; csv: string } | null => {
+  const csvExport = (
+    kind: 'history' | 'statement' | 'tax' | 'tax-summary'
+  ): { filename: string; csv: string } | null => {
     if (!account?.nimiqAddress) return null
     const tag = account.nimiqAddress.replace(/\s+/g, '').slice(0, 8)
     if (kind === 'history') {
       return { filename: `nimbooks-${tag}.csv`, csv: buildCsv() }
+    }
+    if (kind === 'tax') {
+      if (!taxReport) return null
+      return {
+        filename: `nimbooks-tax-${taxFormat}-${tag}.csv`,
+        csv: buildTaxTransactionsCsv(taxFormat, taxReport.rows, taxReport.incomeRows, account.nimiqAddress),
+      }
+    }
+    if (kind === 'tax-summary') {
+      if (!taxReport) return null
+      return {
+        filename: `nimbooks-tax-summary-${tag}.csv`,
+        csv: buildTaxSummaryCsv(taxReport, account.nimiqAddress),
+      }
     }
     if (!statement) return null
     const label = statementYear === 'all' ? 'all-time' : statementYear
@@ -2908,7 +2937,7 @@ export default function App() {
   // Nimiq Pay's WebView cannot save files at all, so hand the user a real
   // HTTPS link (plus a QR for a second device) they can open in a browser
   // that does honour Content-Disposition.
-  const getDownloadLink = async (kind: 'history' | 'statement') => {
+  const getDownloadLink = async (kind: 'history' | 'statement' | 'tax' | 'tax-summary') => {
     const e = csvExport(kind)
     if (!e || !e.csv) {
       setError('Nothing to export yet.')
@@ -3020,6 +3049,23 @@ export default function App() {
       cancelled = true
     }
   }, [account?.nimiqAddress, allTxs, statementYear, reportSoftFailure])
+
+  // Tax figures recompute once per connect; Recalculate clears and re-runs
+  // (chain state moves while the tab sits open).
+  useEffect(() => {
+    if (view !== 'export') return
+    const own = account?.nimiqAddress
+    if (!own || taxReport || taxBusy) return
+    setTaxBusy(true)
+    getAllDailyNimPrices()
+      .then((prices) => {
+        setTaxReport(computeFifoGains(allTxs, own, prices))
+      })
+      .catch(() => {
+        setError('Tax figures unavailable. Check your connection and recalculate.')
+      })
+      .finally(() => setTaxBusy(false))
+  }, [view, account?.nimiqAddress, allTxs, taxReport, taxBusy])
 
   const exportStatementCsv = () => {
     const e = csvExport('statement')
@@ -4474,6 +4520,104 @@ export default function App() {
               )}
               {!statementLoading && !statement && allTxs.length === 0 && (
                 <p className="hint small">No transactions loaded yet. Statements appear here.</p>
+              )}
+            </div>
+
+            <div className="card tax-card">
+              <span className="label">Crypto tax (FIFO)</span>
+              <p className="hint small">
+                Realized gains on a first-in-first-out basis, priced at each day's USD close
+                (DefiLlama history, CoinGecko recent). Figures for your records, not tax advice - confirm
+                with your professional.
+              </p>
+              {taxBusy && <p className="empty">Computing gains…</p>}
+              {!taxBusy && !taxReport && (
+                <p className="empty">No tax figures yet - they load with the dashboard data.</p>
+              )}
+              {taxReport && (
+                <>
+                  <div className="statement-summary">
+                    {taxReport.years.length === 0 && (
+                      <div className="row">
+                        <span>Disposals</span>
+                        <span>None in this history</span>
+                      </div>
+                    )}
+                    {taxReport.years.map((y) => (
+                      <div key={y.year} className="row">
+                        <span>
+                          {y.year}
+                          {y.incomplete && <span className="badge">incomplete price coverage</span>}
+                        </span>
+                        <span>
+                          {/* gain + income, both USD */}
+                          {`Gain ${formatTaxUsd(y.gainUsd)} · Income ${formatTaxUsd(y.incomeUsd)}`}
+                          {y.incomplete && ' (incomplete)'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="statement-controls">
+                    <label className="hint small" htmlFor="taxFormat">
+                      Format
+                    </label>
+                    <select
+                      id="taxFormat"
+                      className="select"
+                      value={taxFormat}
+                      onChange={(e) => setTaxFormat(e.target.value as TaxFormat)}
+                    >
+                      {(Object.keys(TAX_FORMAT_LABELS) as TaxFormat[]).map((f) => (
+                        <option key={f} value={f}>
+                          {TAX_FORMAT_LABELS[f]}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="statement-actions">
+                    <button
+                      className="btn-primary"
+                      onClick={() => {
+                        const e = csvExport('tax')
+                        if (e) void downloadCsv(e.filename, e.csv)
+                      }}
+                      disabled={!taxReport}
+                    >
+                      Download tax ledger CSV ({TAX_FORMAT_LABELS[taxFormat]})
+                    </button>
+                    <button
+                      className="btn-secondary"
+                      onClick={() => {
+                        const e = csvExport('tax-summary')
+                        if (e) void downloadCsv(e.filename, e.csv)
+                      }}
+                      disabled={!taxReport}
+                    >
+                      Download gains summary CSV
+                    </button>
+                    <button
+                      className="btn-ghost"
+                      onClick={() => {
+                        setTaxReport(null)
+                      }}
+                      disabled={taxBusy}
+                    >
+                      Recalculate
+                    </button>
+                  </div>
+                  {taxReport.missingPriceDays > 0 && (
+                    <p className="hint small">
+                      {taxReport.missingPriceDays} days had no USD price - affected transactions are
+                      excluded from gains.
+                    </p>
+                  )}
+                  {taxReport.unmatchedDisposals > 0 && (
+                    <p className="hint small">
+                      {taxReport.unmatchedDisposals} sales had no cost basis in the loaded history
+                      (coins bought before tracking). Their gain is not computed.
+                    </p>
+                  )}
+                </>
               )}
             </div>
 
