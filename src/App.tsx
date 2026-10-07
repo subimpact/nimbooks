@@ -4544,16 +4544,12 @@ export default function App() {
                       </div>
                     )}
                     {taxReport.years.map((y) => (
-                      <div key={y.year} className="row">
-                        <span>
-                          {y.year}
+                      <div key={y.year} className="tax-year-row">
+                        <div className="tax-year-head">
+                          <span className="tax-year">{y.year}</span>
                           {y.incomplete && <span className="badge">incomplete price coverage</span>}
-                        </span>
-                        <span>
-                          {/* gain + income, both USD */}
-                          {`Gain ${formatTaxUsd(y.gainUsd)} · Income ${formatTaxUsd(y.incomeUsd)}`}
-                          {y.incomplete && ' (incomplete)'}
-                        </span>
+                        </div>
+                        <div className="tax-year-figures">{`Gain ${formatTaxUsd(y.gainUsd)} · Income ${formatTaxUsd(y.incomeUsd)}`}</div>
                       </div>
                     ))}
                   </div>
@@ -4601,8 +4597,14 @@ export default function App() {
                         setTaxReport(null)
                       }}
                       disabled={taxBusy}
+                      aria-label="Recalculate tax figures"
+                      title="Recalculate tax figures"
                     >
-                      Recalculate
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+                        {/* rotate-ccw: recompute from the same books */}
+                        <path d="M1 4v6h6" />
+                        <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+                      </svg>
                     </button>
                   </div>
                   {taxReport.missingPriceDays > 0 && (

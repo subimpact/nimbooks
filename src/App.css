@@ -1368,6 +1368,31 @@ a.btn-ghost.btn-link {
   padding: 4px 12px;
   background: var(--bg-elev);
 }
+/* Tax years break the shared .row layout on purpose: year + badge above,
+   figures below, so the long coverage badge never squeezes the numbers
+   into a mid-phrase wrap on a phone-width card. */
+.tax-year-row {
+  padding: 6px 0;
+  font-size: 14px;
+}
+.tax-year-row + .tax-year-row {
+  border-top: 1px solid var(--border);
+}
+.tax-year-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.tax-year {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.tax-year-figures {
+  margin-top: 2px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
 .statement-summary .row {
   border-bottom: 1px solid var(--border);
   padding: 8px 0;
