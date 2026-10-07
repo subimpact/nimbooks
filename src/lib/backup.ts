@@ -31,7 +31,7 @@ const MAX_KEYS = 100
 // rebuilt from the chain or CoinGecko on the next load — and the tx cache
 // alone can run to megabytes, which would blow past what anyone can paste
 // into a textarea. Excluded so a backup stays small enough to actually move.
-const CACHE_KEYS = ['nimbooks:txs', 'nimbooks:rates', 'nimbooks:prices365', 'nimbooks:validators']
+const CACHE_KEYS = ['nimbooks:txs', 'nimbooks:rates', 'nimbooks:prices365', 'nimbooks:pricestax', 'nimbooks:validators']
 // `nimbooks:txs:<address>` — the history cache is one slot per address, and
 // those slots are the megabytes: the bare `nimbooks:txs` above matches none of
 // them, so the prefix is what actually keeps a backup pasteable.
