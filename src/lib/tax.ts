@@ -1,5 +1,5 @@
 // FIFO tax engine, adapted from nimiqtoolbox/nimiq-tax-dashboard (MIT).
-import { classifyTx, txLabel } from './chain'
+import { classifyTx, timestampToMs, txLabel } from './chain'
 import type { NimiqTx } from './chain'
 import { getDailyNimPrices } from './statement'
 
@@ -142,8 +142,9 @@ function normAddr(a: string): string {
   return String(a ?? '').replace(/\s+/g, '').toUpperCase()
 }
 
-function dayOf(ms: number): string {
-  return new Date(ms).toISOString().slice(0, 10)
+function dayOf(ts: number): string {
+  // tx.timestamp may predate normalization: Nimiq 1.0 values are seconds.
+  return new Date(timestampToMs(ts)).toISOString().slice(0, 10)
 }
 
 interface Lot {
@@ -214,7 +215,9 @@ function computeFifoGainsInner(
     firstTxDay !== null && (coverageStart === null || coverageStart > firstTxDay)
 
   // Sort oldest -> newest: FIFO needs acquisition order.
-  const sorted = [...valid].sort((a, b) => (a.timestamp as number) - (b.timestamp as number))
+  const sorted = [...valid].sort(
+    (a, b) => timestampToMs(a.timestamp as number) - timestampToMs(b.timestamp as number)
+  )
 
   // Pre-pass over contract legs (HTLC / swap / vesting): per-contract running
   // balance. A fund leg (own -> contract) raises it; a resolve leg FROM the

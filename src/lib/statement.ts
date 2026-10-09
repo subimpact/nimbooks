@@ -9,7 +9,7 @@
 //   this is a daily-close basis, not a "value today" basis.
 // - Rewards (validator payouts) are split out of received for stakers.
 
-import { classifyTx } from './chain'
+import { classifyTx, timestampToMs } from './chain'
 import type { NimiqTx } from './chain'
 
 export interface DailyRow {
@@ -119,7 +119,7 @@ export function availableStatementYears(txs: NimiqTx[]): string[] {
   const years = new Set<string>()
   for (const t of txs) {
     if (typeof t.timestamp !== 'number' || !Number.isFinite(t.timestamp)) continue
-    years.add(new Date(t.timestamp).getUTCFullYear().toString())
+    years.add(new Date(timestampToMs(t.timestamp)).getUTCFullYear().toString())
   }
   return [...years].sort().reverse()
 }
@@ -168,7 +168,7 @@ export function computeStatement(
     for (const t of txs) {
       if (t.executionResult === false) continue
       if (typeof t.timestamp !== 'number' || !Number.isFinite(t.timestamp)) continue
-      if (t.timestamp < periodStartMs) {
+      if (timestampToMs(t.timestamp) < periodStartMs) {
         priorNet += netTxNim(t, own)
       }
     }
@@ -206,7 +206,7 @@ export function computeStatement(
   for (const t of txs) {
     if (t.executionResult === false) continue
     if (typeof t.timestamp !== 'number' || !Number.isFinite(t.timestamp)) continue
-    const day = new Date(t.timestamp).toISOString().slice(0, 10)
+    const day = new Date(timestampToMs(t.timestamp)).toISOString().slice(0, 10)
     if (period !== 'all' && !day.startsWith(period)) continue
 
     let row = dayMap.get(day)
