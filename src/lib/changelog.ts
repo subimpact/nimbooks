@@ -22,6 +22,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     items: [
       'Standard Nimiq Design System makeover: typography upgraded to Mulish and Fira Code, signature pill-shaped buttons with radial gold gradients and cubic-bezier lift, Nimiq Darkerblue theme alignment, and live identicons (Iqons) across all wallet addresses',
       'Tax-year statements now separate internal staking and unstaking from real payments to others, preventing staking deposits from inflating sent amounts, and show opening (Jan 1) and closing (Dec 31) balances for each year directly',
+      'Historical PoW transaction timestamps normalized: pre-2025 transactions recorded in Unix seconds are safely converted to milliseconds across History, Statements, and Tax views so early chain history renders its true date instead of January 1970 - found by Wool',
     ],
   },
   {
