@@ -7,7 +7,7 @@
 // Badge text. Spelled out rather than built from a version constant so the exact
 // label ships as one string in the bundle (JSX would emit "v" as a separate node).
 // package.json carries the machine-readable version.
-export const APP_VERSION_LABEL = 'v1.22.0'
+export const APP_VERSION_LABEL = 'v1.23.0'
 
 export interface ChangelogEntry {
   version: string
@@ -16,6 +16,13 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '1.23.0',
+    date: '2026-10-10',
+    items: [
+      'Analytics gains an HTLC rollover filter: a "No HTLC" toggle in Analytics lets Nimiq Pay users filter out the app\'s recurring internal balance maintenance transfers from Received, Sent, and net flow charts so volume reflects real payments instead of multi-million contract churn - suggested by Paul Gertz',
+    ],
+  },
   {
     version: '1.22.0',
     date: '2026-10-09',
