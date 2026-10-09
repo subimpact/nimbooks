@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import HeroBackground from './HeroBackground'
+import Iqon from './Iqon'
 import { applyTheme, getInitialTheme, type Theme } from './lib/theme'
 import {
   connectWallet,
@@ -3855,7 +3856,7 @@ export default function App() {
                 return (
                   <button
                     type="button"
-                    className="addr"
+                    className="addr addr-with-iqon"
                     title="Tap to copy full address"
                     onClick={async () => {
                       try {
@@ -3879,7 +3880,8 @@ export default function App() {
                       }
                     }}
                   >
-                    NIM: {addr}
+                    <Iqon address={addr} size={28} />
+                    <span className="addr-text">NIM: {addr}</span>
                   </button>
                 )
               })()}
@@ -4120,92 +4122,96 @@ export default function App() {
               // the row must not claim more than "handed to the network".
               const stakingUnconfirmed =
                 !!stakingAction && stakingLog.some((a) => a.hash === tx.hash && !a.confirmed)
+              const counterparty = isOut ? tx.recipient : tx.sender
               return (
-                <div key={tx.hash} className="tx">
-                  <div className="tx-main">
-                    <span className={isOut ? 'out' : 'in'}>
-                      {stakingAction ? `▼ ${stakingAction}` : isOut ? '▼ sent' : '▲ received'}
-                      {stakingAction ? (
-                        <span className={`tx-kind ${tx.synthetic}`}> · {tx.synthetic}</span>
-                      ) : (
-                        isLabelledTxKind(label) && (
-                          <span className={`tx-kind ${label}`}> · {label}</span>
-                        )
-                      )}
-                    </span>
-                    <span className="tx-amount">{formatLuna(tx.value, lang)} NIM</span>
-                  </div>
-                  <div className="tx-sub">
-                    {tx.timestamp ? new Date(tx.timestamp).toLocaleString(lang) : '…'} ·{' '}
-                    {isReward ? (
-                      <span className="tx-synthetic">{validator} · restaked, daily total</span>
-                    ) : (
-                      <a
-                        className="tx-hash-link"
-                        href={explorerTxUrl(tx.hash)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        {tx.hash.slice(0, 10)}…
-                      </a>
-                    )}
-                    {stakingAction && (
-                      <span className="tx-synthetic">
-                        {' '}
-                        · staking{stakingUnconfirmed ? ', confirming…' : ''}
+                <div key={tx.hash} className="tx tx-with-iqon">
+                  <Iqon address={counterparty} size={28} className="tx-iqon" />
+                  <div className="tx-body">
+                    <div className="tx-main">
+                      <span className={isOut ? 'out' : 'in'}>
+                        {stakingAction ? `▼ ${stakingAction}` : isOut ? '▼ sent' : '▲ received'}
+                        {stakingAction ? (
+                          <span className={`tx-kind ${tx.synthetic}`}> · {tx.synthetic}</span>
+                        ) : (
+                          isLabelledTxKind(label) && (
+                            <span className={`tx-kind ${label}`}> · {label}</span>
+                          )
+                        )}
                       </span>
+                      <span className="tx-amount">{formatLuna(tx.value, lang)} NIM</span>
+                    </div>
+                    <div className="tx-sub">
+                      {tx.timestamp ? new Date(tx.timestamp).toLocaleString(lang) : '…'} ·{' '}
+                      {isReward ? (
+                        <span className="tx-synthetic">{validator} · restaked, daily total</span>
+                      ) : (
+                        <a
+                          className="tx-hash-link"
+                          href={explorerTxUrl(tx.hash)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          {tx.hash.slice(0, 10)}…
+                        </a>
+                      )}
+                      {stakingAction && (
+                        <span className="tx-synthetic">
+                          {' '}
+                          · staking{stakingUnconfirmed ? ', confirming…' : ''}
+                        </span>
+                      )}
+                      {tx.executionResult === false && <span className="tx-failed"> · failed</span>}
+                    </div>
+                    {/* A staking transaction's data field is a signalling
+                        payload, not a note anyone wrote: rendering that hex blob
+                        as "memo:" is noise on screen and in the export. The
+                        cashlink funding and claiming tags are the same kind of
+                        furniture, so the row names the thing instead. */}
+                    {cashlinkTag ? (
+                      <div className="tx-memo">Cashlink</div>
+                    ) : (
+                      memo &&
+                      label !== 'stake' &&
+                      label !== 'unstake' && (
+                        <div className="tx-memo">
+                          memo:{' '}
+                          {(() => {
+                            // The on-chain memo is the invoice reference
+                            // (nimbooks:invoice:<id>); the human description
+                            // travels in the share link. When this tx settled a
+                            // request we know locally, show the friendly name.
+                            const invId = parseInvoiceMemo(memo)
+                            const inv = invId ? invoices.find((i) => i.id === invId) : undefined
+                            return inv?.memo ? `${inv.memo} (${memo})` : memo
+                          })()}
+                        </div>
+                      )
                     )}
-                    {tx.executionResult === false && <span className="tx-failed"> · failed</span>}
+                    {/* A deposit into the staking contract (toType 3) is not a
+                        receipt candidate either — see lib/chain: the wallet
+                        can't prove a payment it didn't make to a counterparty,
+                        so the signature would verify and prove nothing. */}
+                    {!tx.synthetic && !tx.remote && tx.toType !== 3 && (
+                      <button
+                        className="btn-small"
+                        onClick={() => makeReceipt(tx)}
+                        disabled={
+                          demo ||
+                          receipts.some((r) => r.txHash === tx.hash) ||
+                          signingHash === tx.hash
+                        }
+                        title={demo ? 'Demo mode is read-only. Connect your wallet to sign receipts.' : undefined}
+                      >
+                        {signingHash === tx.hash
+                          ? 'Signing…'
+                          : receipts.some((r) => r.txHash === tx.hash)
+                            ? '✓ Signed'
+                            : demo
+                              ? 'Sign receipt (demo)'
+                              : 'Sign receipt'}
+                      </button>
+                    )}
                   </div>
-                  {/* A staking transaction's data field is a signalling
-                      payload, not a note anyone wrote: rendering that hex blob
-                      as "memo:" is noise on screen and in the export. The
-                      cashlink funding and claiming tags are the same kind of
-                      furniture, so the row names the thing instead. */}
-                  {cashlinkTag ? (
-                    <div className="tx-memo">Cashlink</div>
-                  ) : (
-                    memo &&
-                    label !== 'stake' &&
-                    label !== 'unstake' && (
-                      <div className="tx-memo">
-                        memo:{' '}
-                        {(() => {
-                          // The on-chain memo is the invoice reference
-                          // (nimbooks:invoice:<id>); the human description
-                          // travels in the share link. When this tx settled a
-                          // request we know locally, show the friendly name.
-                          const invId = parseInvoiceMemo(memo)
-                          const inv = invId ? invoices.find((i) => i.id === invId) : undefined
-                          return inv?.memo ? `${inv.memo} (${memo})` : memo
-                        })()}
-                      </div>
-                    )
-                  )}
-                  {/* A deposit into the staking contract (toType 3) is not a
-                      receipt candidate either — see lib/chain: the wallet
-                      can't prove a payment it didn't make to a counterparty,
-                      so the signature would verify and prove nothing. */}
-                  {!tx.synthetic && !tx.remote && tx.toType !== 3 && (
-                    <button
-                      className="btn-small"
-                      onClick={() => makeReceipt(tx)}
-                      disabled={
-                        demo ||
-                        receipts.some((r) => r.txHash === tx.hash) ||
-                        signingHash === tx.hash
-                      }
-                      title={demo ? 'Demo mode is read-only. Connect your wallet to sign receipts.' : undefined}
-                    >
-                      {signingHash === tx.hash
-                        ? 'Signing…'
-                        : receipts.some((r) => r.txHash === tx.hash)
-                          ? '✓ Signed'
-                          : demo
-                            ? 'Sign receipt (demo)'
-                            : 'Sign receipt'}
-                    </button>
-                  )}
                 </div>
               )
             })}
@@ -5476,6 +5482,12 @@ export default function App() {
                   value={sendTo}
                   onChange={(e) => setSendTo(e.target.value)}
                 />
+                {sendToValid && (
+                  <div className="send-recipient-preview">
+                    <Iqon address={sendToClean} size={24} />
+                    <span className="send-recipient-text mono">{sendToClean}</span>
+                  </div>
+                )}
                 {sendTo.trim() !== '' && !sendToValid && (
                   <span className="hint small warn">
                     That isn't a valid Nimiq address. It starts with NQ and has 36 characters —
