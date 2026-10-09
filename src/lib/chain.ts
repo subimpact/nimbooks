@@ -1144,8 +1144,8 @@ export function classifyTx(tx: NimiqTx, ownAddress: string): TxKind {
   const recipient = cleanAddress(tx.recipient).toUpperCase()
   const staking = cleanAddress(STAKING_CONTRACT).toUpperCase()
 
-  if (recipient === staking) return 'stake'
   if (sender === staking) return 'unstake'
+  if (recipient === staking || tx.toType === 3) return 'stake'
   if (sender.startsWith(cleanAddress(VALIDATOR_REWARD_PREFIX).toUpperCase())) return 'reward'
   if (sender === own || recipient === own) return 'payment'
   return 'unknown'
