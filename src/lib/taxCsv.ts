@@ -11,7 +11,7 @@ export const TAX_FORMAT_LABELS: Record<TaxFormat, string> = {
 }
 
 const NIM = 'NIM'
-const USD = 'USD'
+const DEFAULT_FIAT = 'USD'
 
 // --- helpers ported from export.js --------------------------------------
 
@@ -60,6 +60,12 @@ function usdStr(u: number | null): string {
   return u != null ? u.toFixed(2) : ''
 }
 
+// Same two-decimal rendering under its (kept) legacy name: every fiat field in
+// the report - whatever the reporting currency - formats identically.
+function fiatStr(u: number | null): string {
+  return usdStr(u)
+}
+
 // Tax category the three builders key off. Staking rewards are income; the
 // disposal/acquisition rows carry their own direction.
 function taxCat(r: TaxLotRow): 'income' | 'in' | 'out' {
@@ -82,12 +88,21 @@ function describe(r: TaxLotRow): string {
   return cat === 'in' ? 'Received NIM' : 'Sent NIM'
 }
 
-// For formats without a dedicated fiat-value column, fold the USD value into
-// the description so "value in USD" is present in every export.
-function descWithUsd(r: TaxLotRow): string {
+// For formats without a dedicated fiat-value column, fold the fiat value into
+// the description so "value in the reporting currency" is present in every
+// export, e.g. "£12.34 GBP" or "$12.34 USD".
+function descWithUsd(r: TaxLotRow, currency: string): string {
   const base = describe(r)
-  const usd = rowUsd(r)
-  return usd != null ? `${base} · $${usd.toFixed(2)} USD` : base
+  const fiat = rowUsd(r)
+  const sym = FIAT_SYMBOLS[currency.toUpperCase()] ?? ''
+  const amount = fiat != null ? fiat.toFixed(2) : null
+  return amount != null ? `${base} · ${sym}${amount} ${currency.toUpperCase()}` : base
+}
+
+// Common symbols for the folded description; a code outside the map simply
+// renders code-only ("KRW 1234.00"), which every tax tool parses the same.
+const FIAT_SYMBOLS: Record<string, string> = {
+  USD: '$', GBP: '£', EUR: '€', JPY: '¥', CNY: '¥', KRW: '₩', INR: '₹',
 }
 
 // Lot rows carry no fee leg, so fee columns stay blank (only a sender pays,
@@ -108,12 +123,12 @@ const KOINLY_HEADERS = [
   'Fee Amount', 'Fee Currency', 'Net Worth Amount', 'Net Worth Currency', 'Label', 'Description', 'TxHash',
 ]
 
-function koinlyCsv(feed: TaxLotRow[]): string {
+function koinlyCsv(feed: TaxLotRow[], currency: string): string {
   return toCsv(
     feed.map((r) => {
       const inn = taxCat(r) !== 'out'
       const fee = feeIfSent()
-      const usd = rowUsd(r)
+      const fiat = rowUsd(r)
       return {
         'Date': dateUTC(r.date, ' UTC'),
         'Sent Amount': inn ? '' : fmtNim(r.nim),
@@ -122,8 +137,8 @@ function koinlyCsv(feed: TaxLotRow[]): string {
         'Received Currency': inn ? NIM : '',
         'Fee Amount': fee,
         'Fee Currency': fee ? NIM : '',
-        'Net Worth Amount': usdStr(usd),
-        'Net Worth Currency': usd != null ? USD : '',
+        'Net Worth Amount': fiatStr(fiat),
+        'Net Worth Currency': fiat != null ? currency : '',
         'Label': taxCat(r) === 'income' ? 'staking' : '',
         'Description': describe(r),
         'TxHash': r.txHash || '',
@@ -145,7 +160,7 @@ function cointrackingCsv(feed: TaxLotRow[]): string {
     feed.map((r) => {
       const inn = taxCat(r) !== 'out'
       const fee = feeIfSent()
-      const usd = rowUsd(r)
+      const fiat = rowUsd(r)
       return {
         'Type': taxCat(r) === 'income' ? 'Staking' : inn ? 'Deposit' : 'Withdrawal',
         'Buy Amount': inn ? fmtNim(r.nim) : '',
@@ -159,8 +174,8 @@ function cointrackingCsv(feed: TaxLotRow[]): string {
         'Comment': describe(r),
         'Date': dateUTC(r.date),
         'Tx-ID': r.txHash || '',
-        'Buy Value in Account Currency': inn ? usdStr(usd) : '',
-        'Sell Value in Account Currency': inn ? '' : usdStr(usd),
+        'Buy Value in Account Currency': inn ? fiatStr(fiat) : '',
+        'Sell Value in Account Currency': inn ? '' : fiatStr(fiat),
       }
     }),
     CT_HEADERS
@@ -175,7 +190,7 @@ const CALC_HEADERS = [
   'From (Optional)', 'To (Optional)', 'ID (Optional)', 'Description (Optional)',
 ]
 
-function calculatorCsv(feed: TaxLotRow[], ownAddress: string): string {
+function calculatorCsv(feed: TaxLotRow[], ownAddress: string, currency: string): string {
   return toCsv(
     feed.map((r) => {
       const inn = taxCat(r) !== 'out'
@@ -192,7 +207,7 @@ function calculatorCsv(feed: TaxLotRow[], ownAddress: string): string {
         'From (Optional)': inn ? '' : ownAddress,
         'To (Optional)': inn ? ownAddress : '',
         'ID (Optional)': r.txHash || '',
-        'Description (Optional)': descWithUsd(r),
+        'Description (Optional)': descWithUsd(r, currency),
       }
     }),
     CALC_HEADERS
@@ -205,25 +220,29 @@ export function buildTaxTransactionsCsv(
   format: TaxFormat,
   rows: TaxLotRow[],
   incomeRows: TaxLotRow[],
-  address: string
+  address: string,
+  currency: string = DEFAULT_FIAT
 ): string {
   const feed = txFeed(rows, incomeRows)
+  const cur = (currency || DEFAULT_FIAT).toUpperCase()
   const csv =
     format === 'koinly'
-      ? koinlyCsv(feed)
+      ? koinlyCsv(feed, cur)
       : format === 'cointracking'
         ? cointrackingCsv(feed)
-        : calculatorCsv(feed, address)
+        : calculatorCsv(feed, address, cur)
   return '\uFEFF' + csv
 }
 
-export function buildTaxSummaryCsv(report: TaxReport, address: string): string {
+export function buildTaxSummaryCsv(report: TaxReport, address: string, currency: string = DEFAULT_FIAT): string {
   const generatedAt = new Date().toISOString()
+  const curUpper = (currency || DEFAULT_FIAT).toUpperCase()
   const years = [...report.years].sort((a, b) => a.year.localeCompare(b.year))
   const escape = (c: string | number): string => `"${String(c).replace(/"/g, '""')}"`
   const body: (string | number)[][] = [
     [
-      'Year', 'Proceeds USD', 'Cost Basis USD', 'Capital Gain USD', 'Staking Income USD',
+      `Year`, `Proceeds (${curUpper})`, `Cost Basis (${curUpper})`, `Net Gain (${curUpper})`,
+      `Staking Income (${curUpper})`,
       'Disposals', 'Incomplete', 'Address', 'Generated (UTC)',
     ],
     ...years.map((y: TaxYearSummary) => [
