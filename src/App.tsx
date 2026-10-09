@@ -719,6 +719,34 @@ export default function App() {
   // Onboarding tour state machine (see lib/tour.ts). The App owns setView, so
   // TourHost asks it to navigate via onNavigate when a route step is entered.
   const [tour, setTour] = useState<TourRuntimeState>({ phase: 'idle', stepIndex: 0 })
+
+  // Public metrics (live connected wallets) for the landing hero
+  const [publicStats, setPublicStats] = useState<{ uniqueWallets: number } | null>(null)
+  useEffect(() => {
+    fetch('/api/stats')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data && typeof data.uniqueWallets === 'number') {
+          setPublicStats({ uniqueWallets: data.uniqueWallets })
+        }
+      })
+      .catch(() => {})
+  }, [])
+
+  // Auto-track wallet sign-ins (once per wallet session)
+  const trackedWalletRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!account) return
+    const addr = account.nimiqAddress || (account.provider === 'demo' ? 'demo' : '')
+    if (!addr || trackedWalletRef.current === addr) return
+    trackedWalletRef.current = addr
+    const platform = isInNimiqPay() ? 'pay' : isMobileDevice() ? 'mobile' : 'desktop'
+    fetch('/api/track-connect', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ address: addr, provider: account.provider, platform }),
+    }).catch(() => {})
+  }, [account])
   // While the walkthrough runs, the dashboard is a passive showroom: none of
   // its controls should open anything under the spotlight.
   const tourActive = tour.phase === 'active'
@@ -3266,6 +3294,14 @@ export default function App() {
           <div className="logo">📒</div>
           <h1>NimBooks</h1>
           <p className="tagline">The books for your Nimiq wallet - and the world's first in-Pay staking.</p>
+          {publicStats && publicStats.uniqueWallets > 0 && (
+            <div className="hero-metric-pill" role="status" title="Unique wallets connected to NimBooks">
+              <span className="live-dot" aria-hidden="true" />
+              <span className="metric-text">
+                <strong>{publicStats.uniqueWallets.toLocaleString(lang)}</strong> {publicStats.uniqueWallets === 1 ? 'wallet' : 'wallets'} connected
+              </span>
+            </div>
+          )}
         </header>
         <main className="connect-panel">
           {inNimiqPay ? (

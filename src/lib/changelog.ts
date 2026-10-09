@@ -21,6 +21,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     date: '2026-10-10',
     items: [
       'Analytics gains an HTLC rollover filter: a "No HTLC" toggle in Analytics lets Nimiq Pay users filter out the app\'s recurring internal balance maintenance transfers from Received, Sent, and net flow charts so volume reflects real payments instead of multi-million contract churn - suggested by Paul Gertz',
+      'Live community metric on the landing page: a public metric badge in the hero displays unique connected wallets and real-time books kept across Nimiq Pay and Nimiq Hub',
     ],
   },
   {
