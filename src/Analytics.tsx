@@ -254,6 +254,21 @@ export default function Analytics({
   // index shifts when the period switch changes the bucket span.
   const [selectedDay, setSelectedDay] = useState<string | null>(null)
   const [statSheet, setStatSheet] = useState<StatSheet | null>(null)
+  const [excludeHtlc, setExcludeHtlc] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('nimbooks:analytics:filterHtlc') === 'true'
+    } catch {
+      return false
+    }
+  })
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('nimbooks:analytics:filterHtlc', String(excludeHtlc))
+    } catch {
+      /* storage unavailable */
+    }
+  }, [excludeHtlc])
   // Keyboard cursor into the flow chart's slots; -1 until a key or a tap puts
   // it somewhere. An index is right here (unlike `selectedDay`) because it is
   // pure focus state — it is clamped to the new range on a period switch, not
@@ -315,6 +330,16 @@ export default function Analytics({
       if (tx.executionResult === false) continue
       const ts = tx.timestamp ? timestampToMs(tx.timestamp) : now
       if (ts < cutoff) continue
+      if (excludeHtlc) {
+        const isHtlc =
+          tx.remote ||
+          tx.toType === 2 ||
+          (() => {
+            const l = txLabel(tx, ownAddress ?? '')
+            return l === 'swap' || l === 'htlc'
+          })()
+        if (isHtlc) continue
+      }
       const v = Number(tx.value) / 100000
       if (!Number.isFinite(v) || v <= 0) continue
       const isOut = tx.sender.replace(/\s+/g, '').toUpperCase() === ownNorm
@@ -368,7 +393,7 @@ export default function Analytics({
     // `cutoff` travels with the data: the trajectory and the trend window are
     // the same window as the bars, or they are lying about the same period.
     return { points, stats, cutoff }
-  }, [txs, period, ownNorm, now])
+  }, [txs, period, ownNorm, now, excludeHtlc, ownAddress])
 
   const trajectory = useMemo(
     () => {
@@ -556,6 +581,16 @@ export default function Analytics({
         const v = Number(tx.value) / 100000
         if (!Number.isFinite(v) || v <= 0) continue
         if (isSelf(tx)) continue // net-zero, same as the current window
+        if (excludeHtlc) {
+          const isHtlc =
+            tx.remote ||
+            tx.toType === 2 ||
+            (() => {
+              const l = txLabel(tx, ownAddress ?? '')
+              return l === 'swap' || l === 'htlc'
+            })()
+          if (isHtlc) continue
+        }
         prevNet += isOut(tx) ? -v : v
         prevCount++
       }
@@ -585,7 +620,7 @@ export default function Analytics({
       best: best && best.in - best.out > 0 ? best : null,
       worst: worst && worst.in - worst.out < 0 ? worst : null,
     }
-  }, [statSheet, data, txs, ownAddress, ownNorm, period, now])
+  }, [statSheet, data, txs, ownAddress, ownNorm, period, now, excludeHtlc])
 
   // "All" truncates at 90 days of buckets — never call any of this all-time.
   const scopeLabel = period === 0 ? 'the loaded history (capped at 90 days)' : `the last ${period} days`
@@ -628,6 +663,16 @@ export default function Analytics({
               {p === 0 ? 'All' : `${p}d`}
             </button>
           ))}
+          <div className="period-sep" aria-hidden="true" />
+          <button
+            type="button"
+            className={excludeHtlc ? 'period active htlc-toggle' : 'period htlc-toggle'}
+            onClick={() => setExcludeHtlc((prev) => !prev)}
+            title="Filter out Nimiq Pay internal HTLC balance maintenance transfers"
+            aria-pressed={excludeHtlc}
+          >
+            No HTLC
+          </button>
         </div>
       </div>
 

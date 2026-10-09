@@ -1156,6 +1156,15 @@ a.btn-ghost.btn-link {
   background: var(--accent);
   color: var(--on-accent);
 }
+.period-sep {
+  width: 1px;
+  background: var(--border);
+  margin: 3px 2px;
+}
+.period.htlc-toggle {
+  font-size: 11px;
+  padding: 5px 8px;
+}
 .stat-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
