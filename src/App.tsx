@@ -79,6 +79,7 @@ import {
   saveCurrency,
   CURRENCIES,
   STAKING_CONTRACT,
+  timestampToMs,
   type CurrencyCode,
   type FiatRates,
   type NimiqTx,
@@ -2746,7 +2747,7 @@ export default function App() {
           recipient: tx.recipient,
           amount: tx.value,
           asset: 'NIM',
-          timestamp: Math.floor((tx.timestamp ?? Date.now()) / 1000), // seconds in the signed payload
+          timestamp: Math.floor(timestampToMs(tx.timestamp ?? Date.now()) / 1000), // seconds in the signed payload
           memo: tx.data,
         },
         account.nimiqAddress // sign with the connected address — no address-selector step
@@ -2812,7 +2813,7 @@ export default function App() {
           const kind = txLabel(t, own)
           const memo = decodeMemo(t.data) ?? ''
           return [
-            new Date(t.timestamp ?? Date.now()).toISOString(),
+            new Date(timestampToMs(t.timestamp ?? Date.now())).toISOString(),
             t.hash,
             isOut ? 'sent' : 'received',
             kind,
@@ -4141,7 +4142,9 @@ export default function App() {
                       <span className="tx-amount">{formatLuna(tx.value, lang)} NIM</span>
                     </div>
                     <div className="tx-sub">
-                      {tx.timestamp ? new Date(tx.timestamp).toLocaleString(lang) : '…'} ·{' '}
+                      {tx.timestamp
+                        ? new Date(timestampToMs(tx.timestamp)).toLocaleString(lang)
+                        : '…'} ·{' '}
                       {isReward ? (
                         <span className="tx-synthetic">{validator} · restaked, daily total</span>
                       ) : (

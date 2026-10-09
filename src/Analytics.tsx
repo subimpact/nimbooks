@@ -11,6 +11,7 @@ import {
   formatFiat,
   formatLuna,
   isLabelledTxKind,
+  timestampToMs,
   txLabel,
 } from './lib/chain'
 import { isCashlinkMemo } from './lib/cashlink'
@@ -193,12 +194,14 @@ function buildTrajectory(
   ownAddressNorm: string,
   now: number
 ): { ts: number; balance: number }[] {
-  const sorted = [...txs].sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
+  const sorted = [...txs].sort(
+    (a, b) => timestampToMs(b.timestamp ?? 0) - timestampToMs(a.timestamp ?? 0)
+  )
   let bal = currentBalanceNim
   const pts: { ts: number; balance: number }[] = [{ ts: now, balance: bal }]
   let dayKeyOpen = ''
   for (const tx of sorted) {
-    const ts = tx.timestamp ?? 0
+    const ts = timestampToMs(tx.timestamp ?? 0)
     if (ts) {
       const k = dayKey(ts)
       if (k !== dayKeyOpen) {
@@ -279,7 +282,13 @@ export default function Analytics({
     // actually covers the full history instead of truncating to 30 days.
     let seedDays: number = period
     if (period === 0) {
-      const earliest = txs.reduce((min, tx) => (tx.timestamp && tx.timestamp < min ? tx.timestamp : min), now)
+      const earliest = txs.reduce(
+        (min, tx) => {
+          const ms = tx.timestamp ? timestampToMs(tx.timestamp) : Infinity
+          return ms < min ? ms : min
+        },
+        now
+      )
       seedDays = Math.min(90, Math.max(1, Math.ceil((now - earliest) / 86400000)))
     }
     let oldestSeeded = now
@@ -304,7 +313,7 @@ export default function Analytics({
     for (const tx of txs) {
       // Failed/reverted txs are not real transfers — exclude from analytics
       if (tx.executionResult === false) continue
-      const ts = tx.timestamp ?? now
+      const ts = tx.timestamp ? timestampToMs(tx.timestamp) : now
       if (ts < cutoff) continue
       const v = Number(tx.value) / 100000
       if (!Number.isFinite(v) || v <= 0) continue
@@ -341,7 +350,7 @@ export default function Analytics({
         ts: b.ts,
         in: b.in,
         out: b.out,
-        txs: b.txs.sort((x, z) => (z.timestamp ?? 0) - (x.timestamp ?? 0)),
+        txs: b.txs.sort((x, z) => timestampToMs(z.timestamp ?? 0) - timestampToMs(x.timestamp ?? 0)),
       }))
       .sort((a, b) => a.key.localeCompare(b.key))
     const stats: Stats = {
@@ -367,7 +376,7 @@ export default function Analytics({
       const filtered = txs.filter(
         // A reverted tx moved no NIM — walking the balance back through one
         // rewrites every point before it (same guard as the bucket loop).
-        (tx) => tx.executionResult !== false && (tx.timestamp ?? 0) >= data.cutoff
+        (tx) => tx.executionResult !== false && timestampToMs(tx.timestamp ?? 0) >= data.cutoff
       )
       return buildTrajectory(filtered, Number(currentBalanceNim) / 100000, ownNorm, now)
     },
@@ -542,7 +551,7 @@ export default function Analytics({
       const start = startDate.getTime()
       for (const tx of txs) {
         if (tx.executionResult === false) continue
-        const ts = tx.timestamp ?? now
+        const ts = tx.timestamp ? timestampToMs(tx.timestamp) : now
         if (ts < start || ts >= cutoff) continue
         const v = Number(tx.value) / 100000
         if (!Number.isFinite(v) || v <= 0) continue
@@ -887,7 +896,9 @@ export default function Analytics({
                     <span className="tx-amount">{formatLuna(tx.value, lang)} NIM</span>
                   </div>
                   <div className="tx-sub">
-                    {tx.timestamp ? new Date(tx.timestamp).toLocaleTimeString(lang) : '…'} ·{' '}
+                    {tx.timestamp
+                      ? new Date(timestampToMs(tx.timestamp)).toLocaleTimeString(lang)
+                      : '…'} ·{' '}
                     {/* Reward rollups carry a synthetic key, not a chain hash — never link one */}
                     {tx.synthetic ? (
                       <span className="tx-synthetic">{tx.hash.slice(0, 10)}…</span>

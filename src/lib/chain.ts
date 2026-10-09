@@ -288,6 +288,28 @@ export async function getVestingHoldings(
   return holdings
 }
 
+/**
+ * Defensive conversion for a timestamp whose unit is not guaranteed: Nimiq 1.0
+ * (PoW) RPC values are seconds, Nimiq 2.0 (PoS) values are milliseconds. Call
+ * this at every `new Date(tx.timestamp)` site so a legacy seconds value
+ * (< 100_000_000_000) renders the real historical year instead of 1970. Pure
+ * passthrough for milliseconds and for 0/negative sentinels.
+ */
+export function timestampToMs(ts: number): number {
+  return ts > 0 && ts < 100_000_000_000 ? ts * 1000 : ts
+}
+
+export function normalizeTimestamp(raw: any): number | undefined {
+  if (raw == null) return undefined
+  const n = Number(raw)
+  if (!Number.isFinite(n) || n <= 0) return undefined
+  // Nimiq 1.0 (PoW) blocks stored Unix timestamps in seconds (10 digits, e.g. 1.6e9).
+  // Nimiq 2.0 (PoS Albatross) blocks store Unix timestamps in milliseconds (13 digits, ~1.7e12).
+  // When a timestamp is in seconds (< 100_000_000_000, i.e. < Sep 1973 in ms), multiply by 1000
+  // so new Date(timestamp) renders the real historical year (e.g. 2020-2024) instead of 1970.
+  return n < 100_000_000_000 ? Math.round(n * 1000) : Math.round(n)
+}
+
 export async function getNimiqTransactions(
   address: string,
   max = 50,
@@ -303,7 +325,7 @@ export async function getNimiqTransactions(
       recipient: t.to ?? t.toAddress ?? '',
       value: String(t.value ?? '0'),
       fee: String(t.fee ?? '0'),
-      timestamp: t.timestamp ? Number(t.timestamp) : undefined,
+      timestamp: normalizeTimestamp(t.timestamp),
       data: t.recipientData || t.senderData || undefined,
       blockNumber: t.blockNumber ?? t.blockHeight,
       proof: t.proof ?? undefined,
@@ -349,7 +371,10 @@ function readTxCache(address: string): NimiqTx[] | null {
     // Entries cached before HTLC support carry no `toType`; serving them would
     // hide swap labels and locked balances until the TTL expired.
     if (entry.txs.some((t) => t.toType === undefined)) return null
-    return entry.txs
+    return entry.txs.map((t) => ({
+      ...t,
+      timestamp: normalizeTimestamp(t.timestamp),
+    }))
   } catch {
     return null
   }
@@ -447,7 +472,7 @@ export async function getNimiqTransactionByHash(hash: string): Promise<NimiqTx |
       recipient: t.to ?? t.toAddress ?? '',
       value: String(t.value ?? '0'),
       fee: String(t.fee ?? '0'),
-      timestamp: t.timestamp ? Number(t.timestamp) : undefined,
+      timestamp: normalizeTimestamp(t.timestamp),
       data: t.recipientData || t.senderData || undefined,
       blockNumber: t.blockNumber ?? t.blockHeight,
       proof: t.proof ?? undefined,
