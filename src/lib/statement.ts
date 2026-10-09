@@ -18,6 +18,8 @@ export interface DailyRow {
   sentNim: number
   rewardsNim: number
   feeNim: number
+  stakedNim: number
+  unstakedNim: number
   netNim: number
   closeUsd: number | null
   receivedUsd: number | null
@@ -32,6 +34,8 @@ export interface StatementTotals {
   sentNim: number
   rewardsNim: number
   feeNim: number
+  stakedNim: number
+  unstakedNim: number
   netNim: number
   receivedUsd: number | null
   sentUsd: number | null
@@ -41,6 +45,8 @@ export interface StatementTotals {
   netUsd: number | null
   txCount: number
   daysActive: number
+  openingBalanceNim: number | null
+  closingBalanceNim: number | null
 }
 
 export interface Statement {
@@ -118,6 +124,33 @@ export function availableStatementYears(txs: NimiqTx[]): string[] {
   return [...years].sort().reverse()
 }
 
+/**
+ * Net change to total wealth (liquid + staked) for an address caused by a transaction.
+ * Staking and unstaking are internal transfers (wealth only changes by the network fee).
+ * Self-transfers only change wealth by the network fee.
+ */
+function netTxNim(t: NimiqTx, own: string): number {
+  if (t.executionResult === false) return 0
+  const sender = t.sender.replace(/\s+/g, '').toUpperCase()
+  const recipient = t.recipient.replace(/\s+/g, '').toUpperCase()
+  const value = Number(t.value) / 100000
+  const fee = Number(t.fee) / 100000
+  const kind = classifyTx(t, own)
+
+  let net = 0
+  if (sender === own && Number.isFinite(fee)) net -= fee
+
+  if (kind === 'stake' || kind === 'unstake') return net
+  if (sender === own && recipient === own) return net
+
+  if (sender === own) {
+    if (Number.isFinite(value)) net -= value
+  } else if (recipient === own) {
+    if (Number.isFinite(value)) net += value
+  }
+  return net
+}
+
 export function computeStatement(
   txs: NimiqTx[],
   ownAddress: string,
@@ -126,6 +159,23 @@ export function computeStatement(
 ): Statement {
   const own = ownAddress.replace(/\s+/g, '').toUpperCase()
   const dayMap = new Map<string, DailyRow>()
+
+  // Calculate opening balance before the selected period
+  let openingBalanceNim: number | null = null
+  if (period !== 'all') {
+    const periodStartMs = Date.parse(`${period}-01-01T00:00:00.000Z`)
+    let priorNet = 0
+    for (const t of txs) {
+      if (t.executionResult === false) continue
+      if (typeof t.timestamp !== 'number' || !Number.isFinite(t.timestamp)) continue
+      if (t.timestamp < periodStartMs) {
+        priorNet += netTxNim(t, own)
+      }
+    }
+    openingBalanceNim = priorNet
+  } else {
+    openingBalanceNim = 0
+  }
 
   const ensure = (day: string): DailyRow => {
     let row = dayMap.get(day)
@@ -136,6 +186,8 @@ export function computeStatement(
         sentNim: 0,
         rewardsNim: 0,
         feeNim: 0,
+        stakedNim: 0,
+        unstakedNim: 0,
         netNim: 0,
         closeUsd: null,
         receivedUsd: null,
@@ -164,15 +216,25 @@ export function computeStatement(
     }
     row.txCount += 1
 
-    const isOut = t.sender.replace(/\s+/g, '').toUpperCase() === own
+    const sender = t.sender.replace(/\s+/g, '').toUpperCase()
+    const recipient = t.recipient.replace(/\s+/g, '').toUpperCase()
     const value = Number(t.value) / 100000
     const fee = Number(t.fee) / 100000
     const kind = classifyTx(t, own)
 
-    if (isOut) {
+    if (sender === own && Number.isFinite(fee)) {
+      row.feeNim += fee
+    }
+
+    if (kind === 'stake') {
+      row.stakedNim += Number.isFinite(value) ? value : 0
+    } else if (kind === 'unstake') {
+      row.unstakedNim += Number.isFinite(value) ? value : 0
+    } else if (sender === own && recipient === own) {
+      // Self-transfer: only network fee paid
+    } else if (sender === own) {
       row.sentNim += Number.isFinite(value) ? value : 0
-      row.feeNim += Number.isFinite(fee) ? fee : 0
-    } else {
+    } else if (recipient === own) {
       row.receivedNim += Number.isFinite(value) ? value : 0
       if (kind === 'reward') row.rewardsNim += Number.isFinite(value) ? value : 0
     }
@@ -183,6 +245,8 @@ export function computeStatement(
     sentNim: 0,
     rewardsNim: 0,
     feeNim: 0,
+    stakedNim: 0,
+    unstakedNim: 0,
     netNim: 0,
     receivedUsd: null,
     sentUsd: null,
@@ -190,6 +254,8 @@ export function computeStatement(
     netUsd: null,
     txCount: 0,
     daysActive: 0,
+    openingBalanceNim,
+    closingBalanceNim: null,
   }
   let usdAvailable = true
 
@@ -209,6 +275,8 @@ export function computeStatement(
     totals.sentNim += row.sentNim
     totals.rewardsNim += row.rewardsNim
     totals.feeNim += row.feeNim
+    totals.stakedNim += row.stakedNim
+    totals.unstakedNim += row.unstakedNim
     totals.netNim += row.netNim
     totals.receivedUsd =
       totals.receivedUsd !== null && row.receivedUsd !== null
@@ -227,6 +295,9 @@ export function computeStatement(
     totals.netUsd = null
   }
 
+  totals.closingBalanceNim =
+    openingBalanceNim !== null ? openingBalanceNim + totals.netNim : null
+
   return {
     period: period === 'all' ? 'All time' : `Year ${period}`,
     generatedAt: new Date().toISOString(),
@@ -240,10 +311,17 @@ export function buildStatementCsv(s: Statement, address: string): string {
     if (n === null) return ''
     return n.toFixed(digits)
   }
+  const isCurrentYear = s.period.includes(new Date().getUTCFullYear().toString())
   const rows: (string | number)[][] = [
     ['NimBooks statement'],
     [`Address`, address],
     [`Period`, s.period],
+    ...(s.totals.openingBalanceNim !== null
+      ? [[`Opening balance (Jan 1, UTC)`, `${s.totals.openingBalanceNim.toFixed(5)} NIM`]]
+      : []),
+    ...(s.totals.closingBalanceNim !== null
+      ? [[`Closing balance (${isCurrentYear ? 'Current' : 'Dec 31'}, UTC)`, `${s.totals.closingBalanceNim.toFixed(5)} NIM`]]
+      : []),
     [`Generated (UTC)`, s.generatedAt],
     [`Basis`, 'Daily CoinGecko close (UTC), USD'],
     [],
@@ -253,6 +331,8 @@ export function buildStatementCsv(s: Statement, address: string): string {
       'sentNIM',
       'rewardsNIM',
       'feeNIM',
+      'stakedNIM',
+      'unstakedNIM',
       'netNIM',
       'closeUSD',
       'receivedUSD',
@@ -267,6 +347,8 @@ export function buildStatementCsv(s: Statement, address: string): string {
       r.sentNim.toFixed(5),
       r.rewardsNim.toFixed(5),
       r.feeNim.toFixed(5),
+      r.stakedNim.toFixed(5),
+      r.unstakedNim.toFixed(5),
       r.netNim.toFixed(5),
       fmt(r.closeUsd, 8),
       fmt(r.receivedUsd),
@@ -282,6 +364,8 @@ export function buildStatementCsv(s: Statement, address: string): string {
       s.totals.sentNim.toFixed(5),
       s.totals.rewardsNim.toFixed(5),
       s.totals.feeNim.toFixed(5),
+      s.totals.stakedNim.toFixed(5),
+      s.totals.unstakedNim.toFixed(5),
       s.totals.netNim.toFixed(5),
       '',
       fmt(s.totals.receivedUsd),

@@ -53,6 +53,8 @@ export interface DailyRow {
   inNim: number
   outNim: number
   feeNim: number
+  stakedNim: number
+  unstakedNim: number
   rewardsNim: number
   netNim: number
   closeUsd: number | null
@@ -68,6 +70,8 @@ export interface StatementResult {
     inNim: number
     outNim: number
     feeNim: number
+    stakedNim: number
+    unstakedNim: number
     rewardsNim: number
     netNim: number
     inUsd: number | null
@@ -157,6 +161,8 @@ export function computeStatement(
         inNim: 0,
         outNim: 0,
         feeNim: 0,
+        stakedNim: 0,
+        unstakedNim: 0,
         rewardsNim: 0,
         netNim: 0,
         closeUsd: null,
@@ -169,15 +175,25 @@ export function computeStatement(
     }
     row.txCount += 1
 
-    const isOut = t.sender.replace(/\s+/g, '').toUpperCase() === own
+    const sender = t.sender.replace(/\s+/g, '').toUpperCase()
+    const recipient = t.recipient.replace(/\s+/g, '').toUpperCase()
     const value = Number(t.value) / 100000
     const fee = Number(t.fee) / 100000
     const kind = classifyTx(t, own)
 
-    if (isOut) {
+    if (sender === own && Number.isFinite(fee)) {
+      row.feeNim += fee
+    }
+
+    if (kind === 'stake') {
+      row.stakedNim += Number.isFinite(value) ? value : 0
+    } else if (kind === 'unstake') {
+      row.unstakedNim += Number.isFinite(value) ? value : 0
+    } else if (sender === own && recipient === own) {
+      // Self-transfer: only network fee paid
+    } else if (sender === own) {
       row.outNim += Number.isFinite(value) ? value : 0
-      row.feeNim += Number.isFinite(fee) ? fee : 0
-    } else {
+    } else if (recipient === own) {
       row.inNim += Number.isFinite(value) ? value : 0
       if (kind === 'reward') row.rewardsNim += Number.isFinite(value) ? value : 0
     }
@@ -187,6 +203,8 @@ export function computeStatement(
     inNim: 0,
     outNim: 0,
     feeNim: 0,
+    stakedNim: 0,
+    unstakedNim: 0,
     rewardsNim: 0,
     netNim: 0,
     inUsd: null as number | null,
@@ -211,6 +229,8 @@ export function computeStatement(
     totals.inNim += row.inNim
     totals.outNim += row.outNim
     totals.feeNim += row.feeNim
+    totals.stakedNim += row.stakedNim
+    totals.unstakedNim += row.unstakedNim
     totals.rewardsNim += row.rewardsNim
     totals.netNim += row.netNim
     totals.inUsd = totals.inUsd !== null && row.inUsd !== null ? totals.inUsd + row.inUsd : row.inUsd

@@ -4450,6 +4450,12 @@ export default function App() {
               {!statementLoading && statement && (
                 <>
                   <div className="statement-summary">
+                    {statement.totals.openingBalanceNim !== null && (
+                      <div className="row">
+                        <span>Opening balance (Jan 1)</span>
+                        <span>{statement.totals.openingBalanceNim.toFixed(5)} NIM</span>
+                      </div>
+                    )}
                     <div className="row">
                       <span>Received</span>
                       <span>
@@ -4459,27 +4465,54 @@ export default function App() {
                       </span>
                     </div>
                     <div className="row">
-                      <span>Sent + fees</span>
+                      <span>Sent to others</span>
                       <span>
-                        {(statement.totals.sentNim + statement.totals.feeNim).toFixed(5)} NIM
-                        {/* feeUsd is accumulated per day at that day's close,
-                            like sentUsd — so Received − (Sent + fees) is
-                            exactly the Net below, to the cent. */}
+                        {statement.totals.sentNim.toFixed(5)} NIM
                         {statement.totals.sentUsd !== null &&
-                          ` · $${(statement.totals.sentUsd + (statement.totals.feeUsd ?? 0)).toFixed(2)}`}
+                          ` · $${statement.totals.sentUsd.toFixed(2)}`}
                       </span>
                     </div>
+                    <div className="row">
+                      <span>Network fees</span>
+                      <span>
+                        {statement.totals.feeNim.toFixed(5)} NIM
+                        {statement.totals.feeUsd !== null &&
+                          ` · $${statement.totals.feeUsd.toFixed(2)}`}
+                      </span>
+                    </div>
+                    {statement.totals.stakedNim > 0 && (
+                      <div className="row">
+                        <span>Staked (internal)</span>
+                        <span>{statement.totals.stakedNim.toFixed(5)} NIM</span>
+                      </div>
+                    )}
+                    {statement.totals.unstakedNim > 0 && (
+                      <div className="row">
+                        <span>Unstaked (internal)</span>
+                        <span>{statement.totals.unstakedNim.toFixed(5)} NIM</span>
+                      </div>
+                    )}
                     <div className="row">
                       <span>Rewards</span>
                       <span>{statement.totals.rewardsNim.toFixed(5)} NIM</span>
                     </div>
-                    <div className="row strong">
-                      <span>Net</span>
+                    <div className="row">
+                      <span>Net change</span>
                       <span>
                         {statement.totals.netNim.toFixed(5)} NIM
                         {statement.totals.netUsd !== null && ` · $${statement.totals.netUsd.toFixed(2)}`}
                       </span>
                     </div>
+                    {statement.totals.closingBalanceNim !== null && (
+                      <div className="row strong">
+                        <span>
+                          {statementYear === new Date().getUTCFullYear().toString()
+                            ? 'Current balance'
+                            : 'Closing balance (Dec 31)'}
+                        </span>
+                        <span>{statement.totals.closingBalanceNim.toFixed(5)} NIM</span>
+                      </div>
+                    )}
                     <div className="row">
                       <span>Transactions</span>
                       <span>{statement.totals.txCount}</span>

@@ -10,12 +10,12 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import { computeStatement, periodBounds, priceCoverageNote } from '../src/statement.ts'
-import { ToolError, type NimiqTx } from '../src/chain.ts'
+import { ToolError, type NimiqTx, STAKING_CONTRACT } from '../src/chain.ts'
 import * as app from '../../src/lib/statement.ts'
 
 const OWN = 'NQ43Y1RHP1K7JH78LRTS95RYGAUUUBDKFFGX'
 const OTHER = 'NQ08ACT8T0FEPTG8P5RLH2S3QGXHV15RNVXY'
-const STAKING = 'NQ770000000000000000000000000000000001'
+const STAKING = STAKING_CONTRACT
 const VALIDATOR = 'NQ81C01NBASE00000000000000000000000000'
 
 const day = (d: string, h = 12) => Date.parse(`${d}T${String(h).padStart(2, '0')}:00:00Z`)
@@ -61,8 +61,9 @@ test('days, amounts and counts are what the fixtures say', () => {
   // A reward is received income, and also reported separately for stakers.
   assert.equal(second.inNim, 0.04321)
   assert.equal(second.rewardsNim, 0.04321)
-  // A stake is money leaving the basic account.
-  assert.equal(second.outNim, 50)
+  // A stake is an internal transfer into the staking contract (stakedNim), not an outgoing payment to a third party.
+  assert.equal(second.stakedNim, 50)
+  assert.equal(second.outNim, 0)
   assert.equal(s.totals.txCount, 4, 'the failed and undated transactions are excluded')
 })
 
