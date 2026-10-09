@@ -24,6 +24,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       'Statement and history exports gain tax-software formats: the same books export as Koinly, CoinTracking or CryptoTaxCalculator CSVs, and a gains summary CSV sits beside them',
       'A year whose price coverage has gaps says so on its row, and sales whose cost basis is missing (coins bought before tracking began) are disclosed instead of silently counted',
       'Tax-year statements now separate internal staking and unstaking from real payments to others, preventing staking deposits from inflating sent amounts, and show opening (Jan 1) and closing (Dec 31) balances for each year directly',
+      'Standard Nimiq Design System makeover: typography upgraded to Mulish and Fira Code, signature pill-shaped buttons with radial gold gradients and cubic-bezier lift, Nimiq Darkerblue theme alignment, and live identicons (Iqons) across all wallet addresses',
     ],
   },
   {

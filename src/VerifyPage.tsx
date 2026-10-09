@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import './App.css'
+import Iqon from './Iqon'
 import { decodeReceipt, verifyReceiptFull, type SignedReceipt } from './lib/receipt'
 import { formatLuna, decodeMemo, explorerTxUrl } from './lib/chain'
 import { applyTheme, getInitialTheme, type Theme } from './lib/theme'
@@ -234,11 +235,17 @@ export default function VerifyPage() {
           </div>
           <div>
             <span className="label">Sender</span>
-            <span className="value mono">{receipt.sender}</span>
+            <div className="addr-with-iqon">
+              <Iqon address={receipt.sender} size={20} />
+              <span className="value mono">{receipt.sender}</span>
+            </div>
           </div>
           <div>
             <span className="label">Recipient</span>
-            <span className="value mono">{receipt.recipient}</span>
+            <div className="addr-with-iqon">
+              <Iqon address={receipt.recipient} size={20} />
+              <span className="value mono">{receipt.recipient}</span>
+            </div>
           </div>
           <div>
             <span className="label">Transaction</span>

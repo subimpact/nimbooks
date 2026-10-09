@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import './App.css'
+import Iqon from './Iqon'
 import QrCode from './QrCode'
 import { applyTheme, getInitialTheme, type Theme } from './lib/theme'
 import { isInNimiqPay, isMobileDevice, NIMIQ_PAY_APP_URL, payDeepLink, siteLink } from './lib/device'
@@ -385,7 +386,10 @@ export default function InvoicePage() {
         <div className="verify-grid">
           <div>
             <span className="label">Pay to</span>
-            <span className="value mono">{spacedAddr(invoice.payee)}</span>
+            <div className="addr-with-iqon">
+              <Iqon address={invoice.payee} size={22} />
+              <span className="value mono">{spacedAddr(invoice.payee)}</span>
+            </div>
           </div>
           {invoice.memo && (
             <div>
