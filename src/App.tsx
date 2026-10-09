@@ -67,6 +67,7 @@ import {
   formatLuna,
   formatUnits,
   formatFiat,
+  currencySymbol,
   formatValidatorFee,
   formatValidatorReward,
   formatValidatorReliability,
@@ -2845,12 +2846,14 @@ export default function App() {
     )
   }
 
-  // Tax-card USD: two decimals normally, but a small-cap coin's daily
-  // figures are often cents - render those with four so $0.0045 does not
-  // display as $0.00, and a negative epsilon never reads as -0.00.
-  const formatTaxUsd = (n: number): string => {
-    if (!Number.isFinite(n) || Math.abs(n) < 0.005) return '$0.00'
-    return `$${n.toFixed(Math.abs(n) < 1 ? 4 : 2)}`
+  // Tax-card fiat: two decimals normally, but a small-cap coin's daily
+  // figures are often cents - render those with four so 0.0045 does not
+  // display as 0.00, and a negative epsilon never reads as -0.00. Amounts are
+  // in the reporting currency the tax report was computed for.
+  const formatTaxFiat = (n: number): string => {
+    const sym = currencySymbol(currency)
+    if (!Number.isFinite(n) || Math.abs(n) < 0.005) return `${sym}0.00`
+    return `${sym}${n.toFixed(Math.abs(n) < 1 ? 4 : 2)}`
   }
 
   // One source of truth for what each export is called and what it holds, so
@@ -2866,15 +2869,17 @@ export default function App() {
     if (kind === 'tax') {
       if (!taxReport) return null
       return {
-        filename: `nimbooks-tax-${taxFormat}-${tag}.csv`,
-        csv: buildTaxTransactionsCsv(taxFormat, taxReport.rows, taxReport.incomeRows, account.nimiqAddress),
+        filename: `nimbooks-tax-${taxFormat}-${currency}-${tag}.csv`,
+        csv: buildTaxTransactionsCsv(
+          taxFormat, taxReport.rows, taxReport.incomeRows, account.nimiqAddress, currency.toUpperCase()
+        ),
       }
     }
     if (kind === 'tax-summary') {
       if (!taxReport) return null
       return {
-        filename: `nimbooks-tax-summary-${tag}.csv`,
-        csv: buildTaxSummaryCsv(taxReport, account.nimiqAddress),
+        filename: `nimbooks-tax-summary-${currency}-${tag}.csv`,
+        csv: buildTaxSummaryCsv(taxReport, account.nimiqAddress, currency.toUpperCase()),
       }
     }
     if (!statement) return null
@@ -3053,21 +3058,38 @@ export default function App() {
   }, [account?.nimiqAddress, allTxs, statementYear, reportSoftFailure])
 
   // Tax figures recompute once per connect; Recalculate clears and re-runs
-  // (chain state moves while the tab sits open).
+  // (chain state moves while the tab sits open). Switching the reporting
+  // currency re-runs too, so the report always matches what it labels.
+  // FX rate: how many units of the chosen currency one USD buys. The USDT
+  // table carries most codes directly; anything else derives from NIM's two
+  // price legs, and USD itself is identity.
+  const taxFxRate = useMemo(() => {
+    if (currency === 'usd') return 1.0
+    const direct = fiat.usdt[currency]
+    if (Number.isFinite(direct) && direct > 0) return direct
+    const nim = fiat.nim[currency]
+    const nimUsd = fiat.nim['usd']
+    if (Number.isFinite(nim) && nim > 0 && Number.isFinite(nimUsd) && nimUsd > 0) {
+      return nim / nimUsd
+    }
+    return 1.0
+  }, [fiat, currency])
+
   useEffect(() => {
     if (view !== 'export') return
     const own = account?.nimiqAddress
-    if (!own || taxReport || taxBusy) return
+    if (!own || taxBusy) return
+    if (taxReport && taxReport.currency === currency) return
     setTaxBusy(true)
     getAllDailyNimPrices()
       .then((prices) => {
-        setTaxReport(computeFifoGains(allTxs, own, prices))
+        setTaxReport(computeFifoGains(allTxs, own, prices, currency, taxFxRate))
       })
       .catch(() => {
         setError('Tax figures unavailable. Check your connection and recalculate.')
       })
       .finally(() => setTaxBusy(false))
-  }, [view, account?.nimiqAddress, allTxs, taxReport, taxBusy])
+  }, [view, account?.nimiqAddress, allTxs, taxReport, taxBusy, currency, taxFxRate])
 
   const exportStatementCsv = () => {
     const e = csvExport('statement')
@@ -4568,10 +4590,12 @@ export default function App() {
             <div className="card tax-card">
               <span className="label">Crypto tax (FIFO)</span>
               <p className="hint small">
-                Realized gains on a first-in-first-out basis, priced at each day's USD close
-                (DefiLlama history, CoinGecko recent). Figures for your records, not tax advice - confirm
+                Realized gains on a first-in-first-out basis, priced at each day's close and
+                reported in {CURRENCIES.find((c) => c.code === currency)?.label ?? currency.toUpperCase()}.
+                History: DefiLlama, recent: CoinGecko. Figures for your records, not tax advice - confirm
                 with your professional.
               </p>
+              <p className="hint small">Reporting in {currency.toUpperCase()} · change in Overview</p>
               {taxBusy && <p className="empty">Computing gains…</p>}
               {!taxBusy && !taxReport && (
                 <p className="empty">No tax figures yet - they load with the dashboard data.</p>
@@ -4591,7 +4615,7 @@ export default function App() {
                           <span className="tax-year">{y.year}</span>
                           {y.incomplete && <span className="badge">incomplete price coverage</span>}
                         </div>
-                        <div className="tax-year-figures">{`Gain ${formatTaxUsd(y.gainUsd)} · Income ${formatTaxUsd(y.incomeUsd)}`}</div>
+                        <div className="tax-year-figures">{`Gain ${formatTaxFiat(y.gainUsd)} · Income ${formatTaxFiat(y.incomeUsd)}`}</div>
                       </div>
                     ))}
                   </div>
@@ -4651,7 +4675,7 @@ export default function App() {
                   </div>
                   {taxReport.missingPriceDays > 0 && (
                     <p className="hint small">
-                      {taxReport.missingPriceDays} days had no USD price - affected transactions are
+                      {taxReport.missingPriceDays} days had no historical price - affected transactions are
                       excluded from gains.
                     </p>
                   )}

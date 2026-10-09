@@ -106,12 +106,18 @@ export async function getAllDailyNimPrices(): Promise<Record<string, number>> {
   return merged
 }
 
+// The fiat fields keep their legacy *Usd names for backward compatibility,
+// but they hold amounts in the report's reporting currency (report.currency):
+// every raw USD price is converted once, at priceAt, by the fxRate passed in.
 export interface TaxLotRow {
   txHash: string
   date: string
   nim: number
+  /** Fiat in report.currency (legacy name kept; alias of proceedsFiat). */
   proceedsUsd: number | null
+  /** Fiat in report.currency (legacy name kept; alias of costBasisFiat). */
   costBasisUsd: number | null
+  /** Fiat in report.currency (legacy name kept; alias of gainFiat). */
   gainUsd: number | null
   direction: 'in' | 'out'
   synthetic?: string
@@ -119,6 +125,7 @@ export interface TaxLotRow {
 
 export interface TaxYearSummary {
   year: string
+  /** Fiat in report.currency (legacy name kept; alias of proceedsFiat). */
   proceedsUsd: number
   costUsd: number
   gainUsd: number
@@ -136,6 +143,8 @@ export interface TaxReport {
   completeHistoryDays: number
   neutralAmbiguous: number
   unmatchedDisposals: number
+  /** Lowercase fiat code the *Usd fields are denominated in, e.g. 'gbp'. */
+  currency: string
 }
 
 function normAddr(a: string): string {
@@ -167,14 +176,17 @@ const CONTRACT_LABELS = new Set<string>(['swap', 'htlc', 'vesting'])
 export function computeFifoGains(
   txs: NimiqTx[],
   ownAddress: string,
-  prices: Record<string, number>
+  prices: Record<string, number>,
+  currency: string = 'usd',
+  fxRate: number = 1.0
 ): TaxReport {
   const empty: TaxReport = {
     rows: [], incomeRows: [], years: [], coverageStart: null, missingPriceDays: 0,
     completeHistoryDays: 0, neutralAmbiguous: 0, unmatchedDisposals: 0,
+    currency,
   }
   try {
-    return computeFifoGainsInner(txs, ownAddress, prices)
+    return computeFifoGainsInner(txs, ownAddress, prices, currency, fxRate)
   } catch {
     // Pathological input never throws - degrade to the empty shape. The
     // guard itself must not throw: prices may be the pathological input.
@@ -189,8 +201,12 @@ export function computeFifoGains(
 function computeFifoGainsInner(
   txs: NimiqTx[],
   ownAddress: string,
-  prices: Record<string, number>
+  prices: Record<string, number>,
+  currency: string = 'usd',
+  fxRate: number = 1.0
 ): TaxReport {
+  // A nonsensical rate never wipes out the figures; fall back to raw USD.
+  const rate = Number.isFinite(fxRate) && fxRate > 0 ? fxRate : 1.0
   const own = normAddr(ownAddress)
   const ownSet = new Set<string>([own])
   const isOwn = (a: string) => ownSet.has(normAddr(a))
@@ -257,9 +273,12 @@ function computeFifoGainsInner(
   let neutralAmbiguous = 0
   let unmatchedDisposals = 0
 
+  // Day's close in the reporting currency: raw USD price times the FX rate.
   const priceAt = (day: string): number | null => {
-    const p = prices[day]
-    return typeof p === 'number' && Number.isFinite(p) ? p : null
+    const rawPrice = prices[day]
+    const dayPrice =
+      typeof rawPrice === 'number' && Number.isFinite(rawPrice) ? rawPrice * rate : null
+    return dayPrice
   }
 
   const ensureYear = (day: string): YearAcc => {
@@ -423,5 +442,6 @@ function computeFifoGainsInner(
     completeHistoryDays: Object.keys(prices).length,
     neutralAmbiguous,
     unmatchedDisposals,
+    currency,
   }
 }
