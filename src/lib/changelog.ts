@@ -7,7 +7,7 @@
 // Badge text. Spelled out rather than built from a version constant so the exact
 // label ships as one string in the bundle (JSX would emit "v" as a separate node).
 // package.json carries the machine-readable version.
-export const APP_VERSION_LABEL = 'v1.21.0'
+export const APP_VERSION_LABEL = 'v1.22.0'
 
 export interface ChangelogEntry {
   version: string
@@ -17,14 +17,20 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.22.0',
+    date: '2026-10-09',
+    items: [
+      'Standard Nimiq Design System makeover: typography upgraded to Mulish and Fira Code, signature pill-shaped buttons with radial gold gradients and cubic-bezier lift, Nimiq Darkerblue theme alignment, and live identicons (Iqons) across all wallet addresses',
+      'Tax-year statements now separate internal staking and unstaking from real payments to others, preventing staking deposits from inflating sent amounts, and show opening (Jan 1) and closing (Dec 31) balances for each year directly',
+    ],
+  },
+  {
     version: '1.21.0',
     date: '2026-10-07',
     items: [
       'The books do taxes now: the Export tab carries a FIFO crypto-tax card that pairs every historical transaction with its day\'s USD price and computes realized gains per calendar year, staking rewards read as income in the same view, and swap or escrow flows stay neutral so they never pose as sales',
       'Statement and history exports gain tax-software formats: the same books export as Koinly, CoinTracking or CryptoTaxCalculator CSVs, and a gains summary CSV sits beside them',
       'A year whose price coverage has gaps says so on its row, and sales whose cost basis is missing (coins bought before tracking began) are disclosed instead of silently counted',
-      'Tax-year statements now separate internal staking and unstaking from real payments to others, preventing staking deposits from inflating sent amounts, and show opening (Jan 1) and closing (Dec 31) balances for each year directly',
-      'Standard Nimiq Design System makeover: typography upgraded to Mulish and Fira Code, signature pill-shaped buttons with radial gold gradients and cubic-bezier lift, Nimiq Darkerblue theme alignment, and live identicons (Iqons) across all wallet addresses',
     ],
   },
   {
