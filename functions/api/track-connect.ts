@@ -1,4 +1,4 @@
-// POST /api/track-connect — records wallet sign-ins and alerts Discord.
+// POST /api/track-connect — records wallet sign-ins and alerts Matrix.
 
 interface KVNamespace {
   get(key: string): Promise<string | null>
@@ -9,8 +9,9 @@ interface Ctx {
   request: Request
   env: {
     EXPORT_KV?: KVNamespace
-    DISCORD_BOT_TOKEN?: string
-    DISCORD_CHANNEL_ID?: string
+    MATRIX_ACCESS_TOKEN?: string
+    MATRIX_ROOM_ID?: string
+    MATRIX_HOMESERVER?: string
   }
 }
 
@@ -112,22 +113,35 @@ export const onRequestPost = async ({ request, env }: Ctx): Promise<Response> =>
       await env.EXPORT_KV.put('stats:summary', JSON.stringify(currentStats))
     }
 
-    // Send Discord alert for real wallet sign-ins (and rate-limit demo pings)
-    if (env.DISCORD_BOT_TOKEN && env.DISCORD_CHANNEL_ID && (!isDemo || isNew)) {
-      const icon = isNew ? '🎉 **New Sign-in**' : '⚡ **Wallet Active**'
-      const providerLabel = provider === 'pay' ? 'Nimiq Pay' : provider === 'hub' ? 'Nimiq Hub' : 'Demo'
-      const content = `${icon} | \`${maskedAddr}\` via **${providerLabel}** (${platform}) • Unique wallets: **${currentStats.uniqueWallets}** (total visits: ${currentStats.totalConnections})`
+    // Send Matrix alert for real wallet sign-ins (and rate-limit demo pings)
+    if (env.MATRIX_ACCESS_TOKEN && env.MATRIX_ROOM_ID && (!isDemo || isNew)) {
+      const server = (env.MATRIX_HOMESERVER || 'https://matrix.subimpact.net').replace(/\/+$/, '')
+      const roomId = encodeURIComponent(env.MATRIX_ROOM_ID)
+      const txnId = `connect_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+      const url = `${server}/_matrix/client/v3/rooms/${roomId}/send/m.room.message/${txnId}`
 
-      // Fire and forget fetch to Discord
-      fetch(`https://discord.com/api/v10/channels/${env.DISCORD_CHANNEL_ID}/messages`, {
-        method: 'POST',
+      const icon = isNew ? '🎉 New Sign-in' : '⚡ Wallet Active'
+      const providerLabel = provider === 'pay' ? 'Nimiq Pay' : provider === 'hub' ? 'Nimiq Hub' : 'Demo'
+      const plainText = `${icon} | ${maskedAddr} via ${providerLabel} (${platform}) • Unique wallets: ${currentStats.uniqueWallets} (total visits: ${currentStats.totalConnections})`
+      const htmlText = `${isNew ? '🎉' : '⚡'} <b>${isNew ? 'New Sign-in' : 'Wallet Active'}</b> | <code>${maskedAddr}</code> via <b>${providerLabel}</b> (${platform})<br>Unique wallets: <b>${currentStats.uniqueWallets}</b> • Total visits: <b>${currentStats.totalConnections}</b>`
+
+      const payload = {
+        msgtype: 'm.text',
+        body: plainText,
+        format: 'org.matrix.custom.html',
+        formatted_body: htmlText,
+      }
+
+      // Fire and forget fetch to Matrix
+      fetch(url, {
+        method: 'PUT',
         headers: {
-          Authorization: `Bot ${env.DISCORD_BOT_TOKEN}`,
+          Authorization: `Bearer ${env.MATRIX_ACCESS_TOKEN}`,
           'Content-Type': 'application/json',
-          'User-Agent': 'DiscordBot (https://nimbooks.subimpact.net, 1.0)',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
         },
-        body: JSON.stringify({ content }),
-      }).catch((e) => console.error('Discord ping error:', e))
+        body: JSON.stringify(payload),
+      }).catch((e) => console.error('Matrix ping error:', e))
     }
 
     return new Response(
