@@ -1,5 +1,1 @@
-feat: anchor current-year statement balance to live on-chain state (xFatta)
-
-Current-year and all-time closing balances now come from getNimiqBalance +
-getStakingHolding instead of replayed tx history, so genesis-seeded pre-PoS
-funds are included. Past years carry a disclosure note. Regression 11/11.
+fix: correct tester name in changelog (xFatta -> xFratta)
