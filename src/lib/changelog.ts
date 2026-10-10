@@ -23,6 +23,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       'Analytics gains an HTLC rollover filter: a "No HTLC" toggle in Analytics lets Nimiq Pay users filter out the app\'s recurring internal balance maintenance transfers from Received, Sent, and net flow charts so volume reflects real payments instead of multi-million contract churn - suggested by Paul Gertz',
       'Live community metric on the landing page: a public metric badge in the hero displays unique connected wallets and real-time books kept across Nimiq Pay and Nimiq Hub',
       'Statement balances you can trust: the current-year and all-time closing balance now comes straight from your live on-chain state (liquid + staked) instead of replayed transaction history, so funds that predate the November 2024 proof-of-stake migration are finally included, and past-year statements carry an honest note about what visible history can and cannot show - reported by xFratta',
+      'Load older history: wallets with more than 1000 transactions gain a button in the statement view that pages back through the full chain history (in slow, rate-friendly batches with a progress readout) so the year picker, statements, tax FIFO and analytics can reach years the first load never showed, with a heads-up that very active wallets take a minute - asked for by xFratta after his pool wallet hid every year before 2026',
     ],
   },
   {

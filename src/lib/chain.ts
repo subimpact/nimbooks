@@ -462,6 +462,137 @@ export async function getNimiqTransactionHistory(address: string, maxTotal = 100
   return all
 }
 
+// --- Older-history loader (on-demand extension of the capped window) ---
+
+// The 1000-tx history cap keeps the every-refresh walk cheap, but active
+// wallets blow past it in a year, and the statement's year picker, tax FIFO
+// and analytics then silently miss everything older. This loader walks further
+// back on demand, one user-initiated call per session: 10,000-tx pages at a
+// slow pace (the 250ms pacing above is only enough for 50-tx pages; bursts
+// here measured 429s), a wall-clock budget and a tx ceiling so a 44k-tx pool
+// wallet can't pin the tab, and a graceful partial return when the limiter
+// wins anyway.
+
+export interface ExtendedHistoryResult {
+  txs: NimiqTx[]
+  totalFetched: number
+  partial: boolean
+  earliestTsMs: number | null
+  hitBudget: boolean
+}
+
+export interface ExtendedHistoryOptions {
+  // Stop once the window reaches back past this timestamp (ms). Omitted, the
+  // walk runs until the caps below say stop.
+  oldestMs?: number
+  // Ceiling on the merged, deduped list (default 50000).
+  maxTotal?: number
+  // Per-page progress: merged, deduped count so far.
+  onProgress?: (fetched: number) => void
+}
+
+const EXTENDED_PAGE_SIZE = 10000
+const EXTENDED_PAGE_PACE_MS = 2000
+const EXTENDED_RATE_LIMIT_WAIT_MS = 20000
+const EXTENDED_RATE_LIMIT_RETRIES = 3
+const EXTENDED_DEFAULT_MAX_TOTAL = 50000
+const EXTENDED_BUDGET_MS = 180000
+
+function isRateLimitError(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message : String(e)
+  return /rate limit|HTTP 429/i.test(msg)
+}
+
+// The plain history loader self-caps at 1000 txs; anything that long is
+// almost certainly truncated, which is what makes the older-history button
+// worth showing.
+export function historyHitCap(txs: NimiqTx[]): boolean {
+  return txs.length >= 1000
+}
+
+export async function getNimiqExtendedTransactionHistory(
+  address: string,
+  opts: ExtendedHistoryOptions = {}
+): Promise<ExtendedHistoryResult> {
+  const maxTotal = opts.maxTotal ?? EXTENDED_DEFAULT_MAX_TOTAL
+  const startedAt = Date.now()
+  const pace = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+
+  // The capped cache window is the base: it is already fetched, already
+  // written, and its oldest hash is exactly where back-pagination starts. The
+  // result is deliberately NOT written back here — a 44k-tx list would blow
+  // the 5MB quota every other cache slot shares.
+  const base = readTxCache(address) ?? []
+  const seen = new Set<string>()
+  const merged: NimiqTx[] = []
+  let earliestTsMs: number | null = null
+  let oldestBase: NimiqTx | null = null
+  for (const t of base) {
+    if (!t.hash || seen.has(t.hash)) continue
+    seen.add(t.hash)
+    merged.push(t)
+    if (t.timestamp != null && (earliestTsMs === null || t.timestamp < earliestTsMs))
+      earliestTsMs = t.timestamp
+    if (oldestBase === null || (t.timestamp ?? 0) < (oldestBase.timestamp ?? 0)) oldestBase = t
+  }
+  // Cursor for the walk: the base window's oldest hash, or null to start from
+  // the chain head when the cache came back expired/empty.
+  let cursor: string | null = oldestBase?.hash ?? null
+
+  let partial = false
+  let hitBudget = false
+  let retriesLeft = EXTENDED_RATE_LIMIT_RETRIES
+
+  for (;;) {
+    if (Date.now() - startedAt >= EXTENDED_BUDGET_MS) {
+      hitBudget = true
+      break
+    }
+    if (merged.length >= maxTotal) break
+
+    let page: NimiqTx[]
+    try {
+      page = await getNimiqTransactions(address, EXTENDED_PAGE_SIZE, cursor)
+    } catch (e) {
+      // A limited page is retried on the same cursor after a long cool-off;
+      // three of those, or any other mid-walk failure, ends the walk with
+      // whatever was collected — a partial older window still beats none.
+      if (isRateLimitError(e) && retriesLeft > 0) {
+        retriesLeft--
+        await pace(EXTENDED_RATE_LIMIT_WAIT_MS)
+        continue
+      }
+      partial = true
+      break
+    }
+    if (page.length === 0) break
+    retriesLeft = EXTENDED_RATE_LIMIT_RETRIES
+
+    // Pages arrive newest→oldest, but hashes can repeat across overlapping
+    // walks (the base window especially); dedupe before counting anything.
+    let pageOldestTs: number | null = null
+    for (const t of page) {
+      if (!t.hash || seen.has(t.hash)) continue
+      seen.add(t.hash)
+      merged.push(t)
+      if (t.timestamp == null) continue
+      if (earliestTsMs === null || t.timestamp < earliestTsMs) earliestTsMs = t.timestamp
+      if (pageOldestTs === null || t.timestamp < pageOldestTs) pageOldestTs = t.timestamp
+    }
+    opts.onProgress?.(merged.length)
+
+    if (pageOldestTs !== null && opts.oldestMs !== undefined && pageOldestTs < opts.oldestMs) break
+    if (merged.length >= maxTotal) break
+    const next = page[page.length - 1]?.hash ?? null
+    if (!next || next === cursor) break
+    cursor = next
+    await pace(EXTENDED_PAGE_PACE_MS)
+  }
+
+  merged.sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
+  return { txs: merged, totalFetched: merged.length, partial, earliestTsMs, hitBudget }
+}
+
 export async function getNimiqTransactionByHash(hash: string): Promise<NimiqTx | null> {
   try {
     const t = await rpcCall('getTransactionByHash', [hash])

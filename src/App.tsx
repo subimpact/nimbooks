@@ -57,6 +57,8 @@ import {
   getStakingHolding,
   getVestingHoldings,
   getNimiqTransactionHistory,
+  getNimiqExtendedTransactionHistory,
+  historyHitCap,
   findSentTx,
   encodeMemo,
   waitForTxMined,
@@ -556,6 +558,13 @@ export default function App() {
   const [statementYear, setStatementYear] = useState<string>('all')
   const [statement, setStatement] = useState<Statement | null>(null)
   const [statementLoading, setStatementLoading] = useState(false)
+  // On-demand older-history walk. Session-only on purpose: the chain loader
+  // deliberately keeps the capped list out of localStorage (a 44k-tx window
+  // would blow the 5MB quota), so this does not survive a reload either.
+  const [extendedLoading, setExtendedLoading] = useState(false)
+  const [extendedProgress, setExtendedProgress] = useState<{ fetched: number; elapsedSec: number } | null>(null)
+  const [extendedHistory, setExtendedHistory] = useState<NimiqTx[] | null>(null)
+  const [extendedConfirmOpen, setExtendedConfirmOpen] = useState(false)
   const [taxReport, setTaxReport] = useState<TaxReport | null>(null)
   const [taxBusy, setTaxBusy] = useState(false)
   const [taxFormat, setTaxFormat] = useState<TaxFormat>('koinly')
@@ -1334,9 +1343,16 @@ export default function App() {
     // statement. The basic-address row wins; the relay copy is the same tx.
     const seen = new Set(nimTxs.map((t) => t.hash))
     const base = [...nimTxs, ...remoteTxs.filter((t) => !seen.has(t.hash))]
+    // The on-demand older-history window rides in here, deduped against the
+    // base rows — the loader dedupes against the localStorage cache, but that
+    // cache is behind a TTL and can drift from the lists actually on screen.
+    if (extendedHistory) {
+      const extendedSeen = new Set(base.map((t) => t.hash))
+      base.push(...extendedHistory.filter((t) => !extendedSeen.has(t.hash)))
+    }
     if (rewardTxs.length === 0) return base
     return [...base, ...rewardTxs].sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
-  }, [nimTxs, remoteTxs, rewardTxs])
+  }, [nimTxs, remoteTxs, rewardTxs, extendedHistory])
 
   // History adds one more source on top: the staking actions this wallet sent.
   // They are real mined transactions, but no address list returns them (see
@@ -3034,6 +3050,11 @@ export default function App() {
     setVisibleTxCount(50)
     setStatement(null)
     setStatementYear('all')
+    // The older-history window belongs to the old wallet, session-only.
+    setExtendedHistory(null)
+    setExtendedProgress(null)
+    setExtendedLoading(false)
+    setExtendedConfirmOpen(false)
     setDownloadLink(null)
     setInvoices([])
     setAmountInput('')
@@ -3059,6 +3080,44 @@ export default function App() {
   // Tax-year statement: recompute when txs / account / period change.
   // Prices load once (12h cache); the statement itself computes instantly.
   const statementYears = useMemo(() => availableStatementYears(allTxs), [allTxs])
+
+  // The older-history offer only makes sense while the plain loader actually
+  // capped out, and only until the extended window is already in for the
+  // session. One wallet per load: the walk keys off the connected address.
+  const showExtendedButton =
+    !!account?.nimiqAddress && !extendedHistory && !extendedLoading && historyHitCap(allTxs)
+
+  // Runs after the confirmation modal says go. The loader already merged and
+  // deduped its result, so this only has to hand the window to allTxs (via
+  // extendedHistory) and stand down. A partial return stays quiet for the
+  // user — the year picker simply reflects what loaded; one console.warn for
+  // support instead.
+  const startExtendedHistory = useCallback(() => {
+    const own = account?.nimiqAddress
+    if (!own || extendedLoading) return
+    setExtendedLoading(true)
+    setExtendedProgress({ fetched: 0, elapsedSec: 0 })
+    const startedAt = Date.now()
+    getNimiqExtendedTransactionHistory(own, {
+      onProgress: (fetched) =>
+        setExtendedProgress({ fetched, elapsedSec: Math.round((Date.now() - startedAt) / 1000) }),
+    })
+      .then((res) => {
+        if (res.partial) {
+          console.warn('Extended history load stopped early by the RPC rate limiter')
+        }
+        setExtendedHistory(res.txs)
+      })
+      .catch((e) => {
+        console.warn('Extended history load failed:', e)
+        // extendedHistory stays null, so the button remains for a retry.
+      })
+      .finally(() => {
+        setExtendedLoading(false)
+        setExtendedProgress(null)
+        setExtendedConfirmOpen(false)
+      })
+  }, [account?.nimiqAddress, extendedLoading])
   useEffect(() => {
     if (!account?.nimiqAddress || allTxs.length === 0) {
       setStatement(null)
@@ -4549,6 +4608,18 @@ export default function App() {
                   </select>
                 </div>
               )}
+              {showExtendedButton && (
+                <div className="statement-controls">
+                  <button className="btn-secondary" onClick={() => setExtendedConfirmOpen(true)}>
+                    Load older history
+                  </button>
+                </div>
+              )}
+              {extendedLoading && extendedProgress && (
+                <p className="hint small">
+                  Loading older history… Loaded {extendedProgress.fetched} transactions…
+                </p>
+              )}
               {statementLoading && <p className="empty">Building statement…</p>}
               {!statementLoading && statement && (
                 <>
@@ -4805,6 +4876,54 @@ export default function App() {
       </main>
 
       {changelogModal}
+
+      {extendedConfirmOpen && (
+        <div className="modal-overlay" onClick={() => setExtendedConfirmOpen(false)}>
+          <div
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Load older history"
+            ref={dialogFocus}
+            tabIndex={-1}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-head">
+              <h2>Load older history</h2>
+              <button className="btn-ghost" onClick={() => setExtendedConfirmOpen(false)} aria-label="Close">
+                ✕
+              </button>
+            </div>
+            {extendedLoading ? (
+              <p className="hint">
+                Loading older history…
+                {extendedProgress ? ` Loaded ${extendedProgress.fetched} transactions…` : ''}
+              </p>
+            ) : (
+              <>
+                <p className="hint">
+                  NimBooks reads your latest 1000 transactions. Loading older history can take a
+                  minute on very active wallets. Continue?
+                </p>
+                <div className="statement-controls">
+                  <button className="btn-secondary" onClick={() => setExtendedConfirmOpen(false)}>
+                    Cancel
+                  </button>
+                  <button className="btn-primary" onClick={startExtendedHistory}>
+                    Load
+                  </button>
+                </div>
+                <p className="hint small">
+                  Like the books?{' '}
+                  <a href="https://hub.nimiq.com/#/staking" target="_blank" rel="noopener noreferrer">
+                    Stake with ImpactZero
+                  </a>
+                </p>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {downloadLink && (
         <div className="modal-overlay" onClick={() => setDownloadLink(null)}>
