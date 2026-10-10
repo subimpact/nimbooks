@@ -148,6 +148,7 @@ import {
   buildStatementCsv,
   computeStatement,
   getDailyNimPrices,
+  liveClosingBalanceNim,
   type Statement,
 } from './lib/statement'
 import { computeFifoGains, getAllDailyNimPrices, type TaxReport } from './lib/tax'
@@ -3070,7 +3071,42 @@ export default function App() {
       try {
         const prices = await getDailyNimPrices()
         if (cancelled) return
-        setStatement(computeStatement(allTxs, own, statementYear, prices))
+        const base = computeStatement(allTxs, own, statementYear, prices)
+        // Replay can only see events, so genesis-seeded pre-PoS funds and
+        // auto-compounded stake rewards are invisible to it and the closing
+        // balance comes out too low. For the current year — and for 'all'
+        // time, whose closing balance is the same "right now" figure — anchor
+        // the closing balance to live chain state instead. Past years stay
+        // reconstructed: the chain has long since moved on, so no truthful
+        // historical number exists there.
+        const currentYear = String(new Date().getUTCFullYear())
+        const anchorLive = statementYear === currentYear || statementYear === 'all'
+        let next: Statement = base
+        if (anchorLive) {
+          try {
+            const [liquid, holding] = await Promise.all([getNimiqBalance(own), getStakingHolding(own)])
+            if (cancelled) return
+            next = {
+              ...base,
+              totals: {
+                ...base.totals,
+                closingBalanceNim: liveClosingBalanceNim(
+                  Number(liquid),
+                  Number(holding?.active || 0),
+                  Number(holding?.inactive || 0),
+                  Number(holding?.retired || 0)
+                ),
+                closingBalanceSource: 'live',
+              },
+            }
+          } catch (e) {
+            // base already carries 'reconstructed' — fall back silently rather
+            // than nuking the whole statement over one lookup.
+            console.warn('Live balance lookup failed:', e)
+          }
+        }
+        if (cancelled) return
+        setStatement(next)
       } catch (e) {
         if (cancelled) return
         console.warn('Statement failed:', e)
@@ -4570,16 +4606,37 @@ export default function App() {
                         {statement.totals.netUsd !== null && ` · $${statement.totals.netUsd.toFixed(2)}`}
                       </span>
                     </div>
-                    {statement.totals.closingBalanceNim !== null && (
-                      <div className="row strong">
-                        <span>
-                          {statementYear === new Date().getUTCFullYear().toString()
-                            ? 'Current balance'
-                            : 'Closing balance (Dec 31)'}
-                        </span>
-                        <span>{statement.totals.closingBalanceNim.toFixed(5)} NIM</span>
-                      </div>
-                    )}
+                    {statement.totals.closingBalanceNim !== null && (() => {
+                      const currentYear = String(new Date().getUTCFullYear())
+                      const isCurrentPeriod =
+                        statementYear === currentYear ||
+                        // 'all' anchors its closing balance to the same live
+                        // "right now" figure, so it gets the live note too.
+                        statementYear === 'all'
+                      return (
+                        <>
+                          <div className="row strong">
+                            <span>
+                              {isCurrentPeriod ? 'Current balance' : 'Closing balance (Dec 31)'}
+                            </span>
+                            <span>{statement.totals.closingBalanceNim.toFixed(5)} NIM</span>
+                          </div>
+                          {statement.totals.closingBalanceSource === 'live' ? (
+                            <p className="hint small">
+                              This is your live on-chain balance (liquid + staked), so it includes
+                              funds that predate Nov 2024.
+                            </p>
+                          ) : (
+                            statementYear !== 'all' && (
+                              <p className="hint small">
+                                Rebuilt from visible chain history; funds predating Nov 2024 are not
+                                included.
+                              </p>
+                            )
+                          )}
+                        </>
+                      )
+                    })()}
                     <div className="row">
                       <span>Transactions</span>
                       <span>{statement.totals.txCount}</span>

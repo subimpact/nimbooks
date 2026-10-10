@@ -47,6 +47,29 @@ export interface StatementTotals {
   daysActive: number
   openingBalanceNim: number | null
   closingBalanceNim: number | null
+  // 'live' when the closing figure was anchored to on-chain state (balance RPC +
+  // staker contract) instead of replayed transaction history — see
+  // liveClosingBalanceNim below.
+  closingBalanceSource: 'reconstructed' | 'live'
+}
+
+/**
+ * Authoritative total wealth (liquid + staked, in NIM) for an address, straight
+ * from chain state. Transaction replay can only see events; genesis-seeded
+ * pre-PoS funds and auto-compounded stake rewards never appear as received
+ * transactions, so a replayed balance is a floor, not the truth.
+ *
+ * Pure and total: every input is defensively coerced (non-finite or negative
+ * counts as 0) so a partial or failed RPC answer can never poison the figure.
+ */
+export function liveClosingBalanceNim(
+  liquidLuna: number,
+  activeLuna: number,
+  inactiveLuna: number,
+  retiredLuna: number
+): number {
+  const safe = (luna: number) => (Number.isFinite(luna) && luna > 0 ? luna : 0)
+  return (safe(liquidLuna) + safe(activeLuna) + safe(inactiveLuna) + safe(retiredLuna)) / 100000
 }
 
 export interface Statement {
@@ -256,6 +279,9 @@ export function computeStatement(
     daysActive: 0,
     openingBalanceNim,
     closingBalanceNim: null,
+    // The replay starts from history; App.tsx upgrades this to a live anchor
+    // for the current year (or 'all') when the chain answers.
+    closingBalanceSource: 'reconstructed',
   }
   let usdAvailable = true
 
