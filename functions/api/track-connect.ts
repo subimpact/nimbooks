@@ -132,16 +132,20 @@ export const onRequestPost = async ({ request, env }: Ctx): Promise<Response> =>
         formatted_body: htmlText,
       }
 
-      // Fire and forget fetch to Matrix
-      fetch(url, {
-        method: 'PUT',
-        headers: {
-          Authorization: `Bearer ${env.MATRIX_ACCESS_TOKEN}`,
-          'Content-Type': 'application/json',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-        },
-        body: JSON.stringify(payload),
-      }).catch((e) => console.error('Matrix ping error:', e))
+      // Await fetch to Matrix so the edge worker does not terminate before delivery
+      try {
+        await fetch(url, {
+          method: 'PUT',
+          headers: {
+            Authorization: `Bearer ${env.MATRIX_ACCESS_TOKEN}`,
+            'Content-Type': 'application/json',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+          },
+          body: JSON.stringify(payload),
+        })
+      } catch (e) {
+        console.error('Matrix ping error:', e)
+      }
     }
 
     return new Response(
