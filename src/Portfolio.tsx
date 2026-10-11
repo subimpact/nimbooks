@@ -479,11 +479,11 @@ export function Portfolio({
             <h3>Support NimBooks to unlock</h3>
             <p className="hint">
               {gate.reason === 'not-staked' &&
-                'Portfolio reports unlock when you stake 1,000 NIM or more with ImpactZero, the validator that keeps NimBooks running. Your NIM stays yours, keeps earning staking rewards, and helps secure the Nimiq network.'}
+                "Portfolio reports unlock when you stake 1,000 NIM or more with ImpactZero, the validator that keeps NimBooks running. Stakes with other validators don't count. Your NIM stays yours, keeps earning staking rewards, and helps secure the Nimiq network."}
               {gate.reason === 'below-min' &&
                 `You have ${gate.activeNim.toLocaleString(lang, { maximumFractionDigits: 5 })} NIM staked with ImpactZero. Add ${Math.ceil(gate.missingNim).toLocaleString(lang)} NIM more to unlock portfolio reports. Thank you for supporting NimBooks.`}
               {gate.reason === 'other-validator' &&
-                'Your stake is delegated to another validator. Portfolio reports unlock for stakes of 1,000 NIM or more with ImpactZero, the validator that keeps NimBooks running. Moving a stake means unstaking first, which you can do from the Stake panel.'}
+                "Stakes with other validators don't unlock this. Only ImpactZero does. Portfolio reports need 1,000 NIM or more staked with ImpactZero, the validator that keeps NimBooks running. To switch, unstake from your current validator in the Stake panel, then restake with ImpactZero."}
             </p>
             <button className="btn-primary" onClick={onStake}>
               {gate.reason === 'other-validator' ? 'Open Stake panel' : 'Stake with ImpactZero'}

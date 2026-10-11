@@ -80,7 +80,7 @@ async function openExport(page) {
   for (const [name, result, copyRe, btnRe, unlocked] of [
     ['not-staked', { error: { code: 1, message: 'No staker with address: x' } }, /stake 1,000 NIM or more with ImpactZero/, /Stake with ImpactZero/, false],
     ['below-min', staker(50000000, 'NQ08 ACT8 T0FE PTG8 P5RL H2S3 QGXH V15R NVXY'), /You have 500 NIM staked with ImpactZero\. Add 500 NIM more/, /Stake with ImpactZero/, false],
-    ['other-validator', staker(900000000, 'NQ29 FBVT 0000 0000 0000 0000 0000 0000 0000'), /another validator/, /Open Stake panel/, false],
+    ['other-validator', staker(900000000, 'NQ29 FBVT 0000 0000 0000 0000 0000 0000 0000'), /other validators don't unlock this\. Only ImpactZero does/, /Open Stake panel/, false],
     ['staked-1000', staker(100000000, 'NQ08ACT8T0FEPTG8P5RLH2S3QGXHV15RNVXY'), /Unlocked by your ImpactZero stake/, null, true],
   ]) {
     const ctx = await browser.newContext({ viewport: { width: 360, height: 780 }, userAgent: PAY_UA })
