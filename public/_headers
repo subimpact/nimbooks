@@ -32,3 +32,11 @@
 # restricting ancestors would break the mini app it ships as.
 /*
   Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://cloudflareinsights.com https://rpc.nimiqwatch.com https://v2.nimiqwatch.com https://api.coingecko.com https://coins.llama.fi https://validators-api-main.je-cf9.workers.dev https://polygon.drpc.org https://mainnet.base.org https://arb1.arbitrum.io https://mainnet.optimism.io https://ethereum.reth.rs; frame-src https://hub.nimiq.com; object-src 'none'; base-uri 'self'
+
+# Throwaway /pdf-test/ diagnostic (PDF hand-off inside the Nimiq Pay WebView).
+# Same policy plus frame-src/object-src 'self' blob: so the inline-PDF test can
+# render. Remove with public/pdf-test/ and functions/api/pdf-probe.ts.
+/pdf-test/*
+  ! Content-Security-Policy
+  Content-Security-Policy: default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://cloudflareinsights.com; frame-src 'self' blob:; object-src 'self' blob:; base-uri 'self'
+  X-Robots-Tag: noindex
