@@ -4951,9 +4951,10 @@ export default function App() {
               </button>
             </div>
             <p className="hint">
-              Nimiq Pay can't save files directly. Open this link in your phone's browser
-              {downloadLink.length <= 1200 ? ' (or scan the QR with another device)' : ''} to
-              download the CSV.
+              Nimiq Pay can't save files directly. This link holds this wallet's export: open
+              it in any browser, on this phone or another device
+              {downloadLink.length <= 1200 ? ' (or scan the QR)' : ''}, to download the CSV. No
+              wallet needed.
             </p>
             <textarea
               className="input download-link"
@@ -4968,7 +4969,7 @@ export default function App() {
               onClick={async () => {
                 try {
                   await navigator.clipboard.writeText(downloadLink)
-                  setToast('Download link copied. Open it in your browser to save the file ✓')
+                  setToast('Download link copied. Open it in any browser to save the file ✓')
                 } catch {
                   setError('Could not copy the link. Select it above and copy manually.')
                 }
