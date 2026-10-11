@@ -81,6 +81,7 @@ import {
   loadCurrency,
   saveCurrency,
   CURRENCIES,
+  PINNED_VALIDATOR_ADDRESS,
   STAKING_CONTRACT,
   timestampToMs,
   type CurrencyCode,
@@ -93,6 +94,9 @@ import {
   type ValidatorInfo,
   type VestingHolding,
 } from './lib/chain'
+import { isValidNimiqAddress } from './lib/portfolio'
+import Portfolio from './Portfolio'
+import { stakeGateStatus } from './lib/stakeGate'
 import {
   appendStakingAction,
   loadStakingLog,
@@ -207,26 +211,6 @@ function mergeRates(base: FiatRates, cached?: Partial<FiatRates>): FiatRates {
 
 function cleanAddr(address: string): string {
   return address.replace(/\s+/g, '').toUpperCase()
-}
-
-// A send is irreversible, so a mistyped recipient has to be caught here rather
-// than on chain. Nimiq addresses are IBAN-shaped — NQ + two check digits + 32
-// base32 characters — and those digits are a MOD-97-10 checksum over the rest
-// (the same scheme receipt.ts derives an address with), so a single wrong
-// character fails this test.
-function isValidNimiqAddress(address: string): boolean {
-  const addr = cleanAddr(address)
-  if (!/^NQ[0-9A-Z]{34}$/.test(addr)) return false
-  // IBAN validation: move the first four characters to the end, map letters to
-  // their two-digit values (A=10 … Z=35), and the whole number must be ≡ 1.
-  const raw = addr.slice(4) + addr.slice(0, 4)
-  let remainder = 0
-  for (const ch of raw) {
-    const code = ch.charCodeAt(0)
-    const digits = code >= 48 && code <= 57 ? ch : String(code - 55)
-    for (const d of digits) remainder = (remainder * 10 + Number(d)) % 97
-  }
-  return remainder === 1
 }
 
 // Nimiq caps a basic transaction's data field at 64 bytes, and the memo travels
@@ -3341,6 +3325,17 @@ export default function App() {
     </a>
   )
 
+  const demoMode = isDemoMode()
+  const stakeGate = useMemo(
+    () => stakeGateStatus(stakingHolding, demoMode),
+    [stakingHolding, demoMode]
+  )
+
+  const handleStakeFromGate = () => {
+    setSelectedValidator(cleanAddr(PINNED_VALIDATOR_ADDRESS))
+    openStake()
+  }
+
   // Coming back from a link Nimiq Pay opened in this same WebView: the session
   // is being restored, so hold the hero and say so. Deliberately nothing to
   // press — the connect screen would invite a second connect for a wallet that
@@ -3563,7 +3558,6 @@ export default function App() {
     )
   }
 
-  const demoMode = isDemoMode()
   const inNimiqPay = isInNimiqPay()
 
   return (
@@ -4581,6 +4575,20 @@ export default function App() {
             <button className="btn-secondary" onClick={copyCsv} disabled={allTxs.length === 0}>
               Copy CSV to clipboard
             </button>
+
+            <Portfolio
+              account={account?.nimiqAddress ?? ''}
+              walletLiquidLuna={effectiveBalanceLuna}
+              walletStakedLuna={stakedLuna}
+              vestedLuna={vestedLuna}
+              nimPrice={shown.nim}
+              currency={currency}
+              lang={lang}
+              gate={stakeGate}
+              onStake={handleStakeFromGate}
+              inNimiqPay={inNimiqPay}
+              demo={demoMode}
+            />
 
             <div className="card statement-card">
               <span className="label">Tax-year statement</span>

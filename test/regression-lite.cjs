@@ -63,7 +63,37 @@ const { firefox } = require('playwright');
     t('changelog has entries', false, 'badge missing');
   }
 
-  // 6. Verify page stands alone (garbage invoice handled)
+  // 6. Export view: portfolio report card unlocked in demo
+  const exportTab = page.locator('[data-tour="export-tab"], button:has-text("Export")').first();
+  if (await exportTab.count() > 0) {
+    await exportTab.click();
+    await page.waitForTimeout(800);
+    const portfolioCard = page.locator('.portfolio-card');
+    const cardCount = await portfolioCard.count();
+    const cardText = cardCount > 0 ? await portfolioCard.first().innerText() : '';
+    // .label is text-transform: uppercase, and innerText reflects that.
+    const hasReportText = /portfolio report/i.test(cardText);
+    const isLocked = (await page.locator('.portfolio-card.locked, .portfolio-card .gate-locked').count()) > 0;
+    const savePdf = portfolioCard.locator('button:has-text("Save as PDF")').first();
+    const savePdfEnabled = (await savePdf.count()) > 0 && !(await savePdf.isDisabled());
+    t(
+      'portfolio report unlocked in demo',
+      cardCount > 0 && hasReportText && !isLocked && savePdfEnabled,
+      cardCount === 0
+        ? 'card missing'
+        : !hasReportText
+          ? 'title missing'
+          : isLocked
+            ? 'unexpectedly locked'
+            : !savePdfEnabled
+              ? 'save button disabled or missing'
+              : ''
+    );
+  } else {
+    t('portfolio report unlocked in demo', false, 'export tab missing');
+  }
+
+  // 7. Verify page stands alone (garbage invoice handled)
   await page.goto(base + '/verify/#garbage-not-a-receipt', { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(1500);
   const verifyBody = await page.locator('body').innerText();
