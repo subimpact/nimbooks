@@ -51,8 +51,8 @@ npx -y nimbooks-mcp --help
 Or from source, if you would rather build and audit it yourself:
 
 ```bash
-git clone https://github.com/subimpact/nimbooks
-cd nimbooks/mcp
+git clone https://github.com/subimpact/nimbooks-mcp
+cd nimbooks-mcp
 npm install
 npm run build     # → dist/index.js
 ```
@@ -159,37 +159,30 @@ List my saved payment requests and tell me which are still open.
 ## Parity with the app
 
 A link drafted here must be the same bytes the NimBooks app would have produced, or it
-won't open when someone taps it. The test suite imports the app's *real*
-`src/lib/invoice.ts` and compares the two encoders across every combination of amount
-(`1`, `0.5`, `12.5`, `100000`, and `0.000001` — which both sides must *refuse*, being
-finer than a Luna), memo (ASCII, emoji/CJK, none) and expiry (none, set), with and
-without a named payer, then round-trips each link back through the app's own decoder.
-
-Transaction classification is pinned the same way: against the app's `src/lib/chain.ts`,
-row for row, including the cashlink tag ("Cashlink", not raw bytes), the
-`nimbooks:invoice:<id>` reference, and the staking legs.
+won't open when someone taps it. Parity is enforced in the NimBooks app repository: its
+test suite imports the app's real invoice encoder and compares the two across every
+combination of amount (`1`, `0.5`, `12.5`, `100000`, and `0.000001`, which both sides
+must *refuse*, being finer than a Luna), memo (ASCII, emoji/CJK, none) and expiry (none,
+set), with and without a named payer, then round-trips each link back through the app's
+own decoder. Transaction classification and statement aggregation are pinned the same
+way, row for row, including the cashlink tag, the `nimbooks:invoice:<id>` reference, and
+the staking legs.
 
 ---
 
 ## Tests
 
 ```bash
-npm test       # 46 tests, no network
-npm run smoke  # opt-in: drives the built server against a live demo wallet
+npm test       # offline: backup parsing, including malformed entries and the cashlink-secret fence
+npm run smoke  # opt-in: drives the built server against a live demo wallet over stdio
 ```
 
-`npm test` covers invoice byte-parity, classification fixtures, statement aggregation
-(also compared against the app's own `computeStatement`), backup parsing — including
-malformed entries and the cashlink-secret fence — and a real stdio round trip through the
-MCP SDK's own client, which is also the proof that stdout carries nothing but the
-protocol, since a stray log line there would break the framing.
-
-`npm run typecheck` covers `src/`. The tests are compiled by esbuild and validated by
-running; they deliberately import the app's browser modules, which the app's own build
-owns.
+`npm run typecheck` covers `src/`. The cross-checks against the app's own modules
+(invoice byte-parity, classification fixtures, statement aggregation, stdio round trip)
+run in the app repository on every release.
 
 ---
 
 ## Licence
 
-MIT, same as NimBooks.
+MIT.

@@ -55,7 +55,7 @@ import {
 import { listBackupInvoices, readBackupFile, type BackupFile } from './backup.ts'
 import { computeStatement, getDailyCloses, periodBounds, priceCoverageNote } from './statement.ts'
 
-const VERSION = '1.0.2'
+const VERSION = '1.0.3'
 
 // How far back a tool will walk the transaction index. The RPC pages 50 at a
 // time and is rate-limited, so these are budgets, not guesses — every tool

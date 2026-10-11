@@ -1,14 +1,13 @@
 {
   "name": "nimbooks-mcp",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Read-only MCP server for your Nimiq books — balances, history, statements, and draft payment requests. Never signs.",
   "license": "MIT",
   "author": "Jeremy Lee",
   "homepage": "https://nimbooks.subimpact.net/mcp",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/subimpact/nimbooks.git",
-    "directory": "mcp"
+    "url": "git+https://github.com/subimpact/nimbooks-mcp.git"
   },
   "keywords": [
     "nimiq",
@@ -49,5 +48,8 @@
     "@types/node": "^24.13.3",
     "esbuild": "^0.28.2",
     "typescript": "~6.0.2"
+  },
+  "bugs": {
+    "url": "https://github.com/subimpact/nimbooks-mcp/issues"
   }
 }
