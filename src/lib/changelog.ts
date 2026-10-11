@@ -20,7 +20,8 @@ export const CHANGELOG: ChangelogEntry[] = [
     version: '1.24.0',
     date: '2026-10-11',
     items: [
-      'Portfolio report: combine your wallet with up to 10 more Nimiq addresses into one branded PDF with liquid and staked NIM, value in your display currency, a grand total and the time it was generated. Your Nimiq Pay balance is included. Unlocked for wallets staking 1,000 NIM or more with ImpactZero, the validator that keeps NimBooks running - asked for by Wool',
+      'Portfolio report: combine your wallet with up to 10 more Nimiq addresses into one branded PDF with liquid and staked NIM, value in your display currency, a grand total and the time it was generated. Your Nimiq Pay balance is included. Unlocked for wallets staking 1,000 NIM or more with ImpactZero, the validator that keeps NimBooks running. Works inside Nimiq Pay too, through your phone\'s print screen - asked for by Wool',
+      'Nimiq Pay CSV exports now say plainly that the download link holds this wallet\'s export, so it opens in any browser on any device without connecting a wallet',
     ],
   },
   {

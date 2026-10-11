@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal, flushSync } from 'react-dom'
 import Iqon from './Iqon'
 import { formatFiat, formatLuna, type CurrencyCode } from './lib/chain'
@@ -172,9 +172,21 @@ export function Portfolio({
     }
   }, [account, walletLiquidLuna, walletStakedLuna, walletTotalLuna, successfulExtraRows, nimPrice])
 
-  // PDF print routine
+  // PDF print routine. Browsers block inside window.print() until the dialog
+  // closes. Nimiq Pay's Android WebView returns at once, fires beforeprint and
+  // afterprint ~0.3 s later, and only then opens its own print screen (seen
+  // after up to ~4 s), which can lay the page out again on a paper-size
+  // change. So in Pay the report class stays on until the user is back on this
+  // page, and beforeprint is the "a print screen is coming" signal.
+  // Verified on Nimiq Pay / Android 16 (2026-10-11); iOS is unverified, hence
+  // the fallback hint when no beforeprint ever arrives.
+  const [printFallback, setPrintFallback] = useState(false)
+  const printCleanupRef = useRef<(() => void) | null>(null)
+  useEffect(() => () => printCleanupRef.current?.(), [])
   const handlePrint = useCallback(() => {
     if (!gate.unlocked) return
+    printCleanupRef.current?.()
+    setPrintFallback(false)
     const prevTitle = document.title
     const today = new Date().toISOString().slice(0, 10)
     document.title = `NimBooks portfolio ${today}`
@@ -182,22 +194,62 @@ export function Portfolio({
     document.body.classList.add('printing-portfolio')
 
     let cleanedUp = false
+    let sawPrint = false
+    let leftPage = false
+    const timers: number[] = []
+    const onBeforePrint = () => {
+      sawPrint = true
+    }
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') leftPage = true
+      else if (leftPage) cleanup()
+    }
     const cleanup = () => {
       if (cleanedUp) return
       cleanedUp = true
       document.body.classList.remove('printing-portfolio')
       document.title = prevTitle
       window.removeEventListener('afterprint', cleanup)
+      window.removeEventListener('beforeprint', onBeforePrint)
+      document.removeEventListener('visibilitychange', onVisibility)
+      timers.forEach((t) => window.clearTimeout(t))
+      if (printCleanupRef.current === cleanup) printCleanupRef.current = null
+    }
+    printCleanupRef.current = cleanup
+
+    if (inNimiqPay) {
+      window.addEventListener('beforeprint', onBeforePrint)
+      document.addEventListener('visibilitychange', onVisibility)
+    } else {
+      window.addEventListener('afterprint', cleanup)
     }
 
-    window.addEventListener('afterprint', cleanup)
-
+    const started = performance.now()
+    let threw = false
     try {
       window.print()
-    } finally {
-      setTimeout(cleanup, 1000)
+    } catch {
+      threw = true
     }
-  }, [gate.unlocked])
+    const blocked = performance.now() - started > 500
+
+    if (!inNimiqPay || blocked) {
+      // A normal browser, or a dialog that already ran to completion.
+      timers.push(window.setTimeout(cleanup, 1000))
+      return
+    }
+    // Pay: no beforeprint means no print screen on this phone.
+    timers.push(
+      window.setTimeout(() => {
+        if (!sawPrint && !cleanedUp) {
+          cleanup()
+          setPrintFallback(true)
+        }
+      }, threw ? 0 : 2500),
+    )
+    // Never leave report mode on if no "back on the page" event arrives.
+    timers.push(window.setTimeout(cleanup, 10 * 60 * 1000))
+  }, [gate.unlocked, inNimiqPay])
 
   // Printed report portal rendered into document.body
   const printReportPortal = typeof document !== 'undefined' ? createPortal(
@@ -440,18 +492,22 @@ export function Portfolio({
       </div>
 
       <div className="portfolio-actions">
-        {inNimiqPay ? (
+        <button
+          className="btn-primary"
+          onClick={handlePrint}
+          disabled={!gate.unlocked}
+        >
+          Save as PDF
+        </button>
+        {inNimiqPay && !printFallback && (
           <p className="hint small">
-            Saving a PDF needs a browser. Open nimbooks.subimpact.net on your phone or computer browser, connect the same wallet, and save it there.
+            Opens your phone's print screen. Choose Save as PDF as the printer.
           </p>
-        ) : (
-          <button
-            className="btn-primary"
-            onClick={handlePrint}
-            disabled={!gate.unlocked}
-          >
-            Save as PDF
-          </button>
+        )}
+        {printFallback && (
+          <p className="hint small" role="status">
+            Your phone did not open a print screen here. Take a screenshot of the totals above to keep a copy.
+          </p>
         )}
       </div>
 

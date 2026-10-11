@@ -132,21 +132,68 @@ async function openExport(page) {
     check(`${name}: no page errors`, errors.length === 0, errors.join(' | '))
     await ctx.close()
   }
-  // 3. Inside Nimiq Pay (provider injected): Save replaced by the browser hint.
-  {
+  // 3. Inside Nimiq Pay (provider injected), unlocked: Save as PDF works through
+  // the phone's print screen. window.print() is replaced with the behaviour
+  // measured in Pay on Android 16: returns at once, beforeprint/afterprint
+  // ~0.3 s later, then the print screen hides the page and returns later.
+  // A second mode models a phone with no print screen at all.
+  for (const mode of ['android', 'none']) {
     const ctx = await browser.newContext({ viewport: { width: 360, height: 780 }, userAgent: PAY_UA })
-    await ctx.addInitScript(([addr]) => {
+    await ctx.addInitScript(([addr, mode]) => {
       localStorage.setItem('nimbooks:session', JSON.stringify({ provider: 'pay', nimiqAddress: addr, view: 'export' }))
       window.nimiqPay = {}
-    }, [ADDR])
+      let vis = 'visible'
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => vis })
+      const setVis = (v) => { vis = v; document.dispatchEvent(new Event('visibilitychange')) }
+      window.__printCalls = 0
+      window.print = () => {
+        window.__printCalls++
+        if (mode !== 'android') return
+        setTimeout(() => window.dispatchEvent(new Event('beforeprint')), 300)
+        setTimeout(() => window.dispatchEvent(new Event('afterprint')), 340)
+        setTimeout(() => setVis('hidden'), 3000)
+        setTimeout(() => setVis('visible'), 5000)
+      }
+    }, [ADDR, mode])
     const page = await ctx.newPage()
+    await page.route('**/rpc.nimiqwatch.com/**', async (route) => {
+      const body = route.request().postData() || ''
+      if (body.includes('getStakerByAddress')) {
+        const id = JSON.parse(body).id
+        return route.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify({ jsonrpc: '2.0', id, ...staker(100000000, 'NQ08 ACT8 T0FE PTG8 P5RL H2S3 QGXH V15R NVXY') }) })
+      }
+      return route.continue()
+    })
     await page.goto(BASE, { waitUntil: 'domcontentloaded' })
     await page.waitForSelector('.topbar', { timeout: 20000 })
     try { await page.locator('.tab', { hasText: 'Export' }).click({ timeout: 5000 }) } catch {}
     await page.waitForSelector('.portfolio-card', { timeout: 10000 })
+    await page.waitForFunction(() => /Unlocked by your ImpactZero stake/.test(document.querySelector('.portfolio-card').innerText), null, { timeout: 20000 }).catch(() => {})
     const txt = await page.locator('.portfolio-card').innerText()
-    check('pay: browser hint replaces Save', /Saving a PDF needs a browser/.test(txt) && !/save as pdf/i.test(txt.replace(/Saving a PDF/g, '')), txt.replace(/\s+/g, ' ').slice(-260))
-    check('pay: wallet row says incl. Nimiq Pay balance', /incl\. Nimiq Pay balance/i.test(txt))
+    const save = page.locator('.portfolio-card button', { hasText: /save as pdf/i })
+    const has = (c) => page.evaluate((c) => document.body.classList.contains(c), c)
+    if (mode === 'android') {
+      check('pay: no "needs a browser" copy', !/needs a browser|connect the same wallet/i.test(txt))
+      check('pay: print-screen hint shown', /Opens your phone's print screen/.test(txt), txt.replace(/\s+/g, ' ').slice(-200))
+      check('pay: wallet row says incl. Nimiq Pay balance', /incl\. Nimiq Pay balance/i.test(txt))
+      check('pay: Save as PDF enabled', (await save.count()) === 1 && await save.isEnabled())
+      await save.click()
+      await page.waitForTimeout(1200)
+      check('pay/android: report mode kept after afterprint', await has('printing-portfolio'))
+      await page.waitForTimeout(2600)
+      check('pay/android: report mode kept while print screen is up', await has('printing-portfolio'))
+      check('pay/android: no fallback hint', !(await page.locator('.portfolio-card').innerText()).includes('did not open a print screen'))
+      await page.waitForTimeout(1800)
+      check('pay/android: report mode cleared on return', !(await has('printing-portfolio')))
+      check('pay/android: print called once', (await page.evaluate(() => window.__printCalls)) === 1)
+    } else {
+      await save.click()
+      await page.waitForTimeout(3200)
+      const after = await page.locator('.portfolio-card').innerText()
+      check('pay/no-print: fallback hint shown', /did not open a print screen here\. Take a screenshot/.test(after), after.replace(/\s+/g, ' ').slice(-200))
+      check('pay/no-print: report mode cleared', !(await has('printing-portfolio')))
+      check('pay/no-print: no em-dash', !after.includes('\u2014'))
+    }
     await ctx.close()
   }
   await browser.close()
