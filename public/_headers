@@ -40,3 +40,14 @@
   ! Content-Security-Policy
   Content-Security-Policy: default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://cloudflareinsights.com; frame-src 'self' blob:; object-src 'self' blob:; base-uri 'self'
   X-Robots-Tag: noindex
+
+# Same headers the real CSV export links send (functions/_lib/exportPayload.ts).
+/pdf-test/sample.csv
+  Content-Type: text/csv; charset=utf-8
+  Content-Disposition: attachment; filename="nimbooks-test.csv"
+  Cache-Control: no-store
+
+/pdf-test/sample-backup.json
+  Content-Type: application/json
+  Content-Disposition: attachment; filename="nimbooks-backup-test.json"
+  Cache-Control: no-store
