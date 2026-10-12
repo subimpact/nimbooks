@@ -100,7 +100,7 @@ import {
 } from './lib/chain'
 import { isValidNimiqAddress } from './lib/portfolio'
 import Portfolio from './Portfolio'
-import { stakeGateStatus } from './lib/stakeGate'
+import { isGrantedAddress, stakeGateStatus } from './lib/stakeGate'
 import {
   appendStakingAction,
   loadStakingLog,
@@ -551,6 +551,22 @@ export default function App() {
   // holdings below are still current and the sweeps can be skipped entirely.
   const contractSweepRef = useRef<string | null>(null)
   const [stakingHolding, setStakingHolding] = useState<StakingHolding | null>(null)
+  // Portfolio access grant for this wallet (see lib/stakeGate.ts). The cleanup
+  // runs on address change and on disconnect, so a late lookup for a previous
+  // wallet is dropped and the flag falls back to false.
+  const [grantedAccess, setGrantedAccess] = useState(false)
+  useEffect(() => {
+    const addr = account?.nimiqAddress
+    if (!addr) return
+    let live = true
+    isGrantedAddress(addr).then((ok) => {
+      if (live) setGrantedAccess(ok)
+    })
+    return () => {
+      live = false
+      setGrantedAccess(false)
+    }
+  }, [account?.nimiqAddress])
   // Chain head, refreshed alongside the balances. Unstake steps are gated on
   // block height, not wall clock — 0 means "not known yet".
   const [currentBlock, setCurrentBlock] = useState<number>(0)
@@ -3531,8 +3547,8 @@ export default function App() {
 
   const demoMode = isDemoMode()
   const stakeGate = useMemo(
-    () => stakeGateStatus(stakingHolding, demoMode),
-    [stakingHolding, demoMode]
+    () => stakeGateStatus(stakingHolding, demoMode, grantedAccess),
+    [stakingHolding, demoMode, grantedAccess]
   )
 
   const handleStakeFromGate = () => {
