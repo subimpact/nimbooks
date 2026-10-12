@@ -1,0 +1,394 @@
+// Landing + learn-page probe (firefox). Checks the interactive landing: the
+// connect panel above the fold, the feature cards and explainers on a phone, the
+// explorer on desktop, the #/learn and #/learn/<slug> links, and the two sample
+// wallet entries (the tour offer is skipped for a screen, kept for the tour).
+//
+// Usage: NODE_PATH=/root/projects/mykopi-my/node_modules node test/landing-probe.cjs <baseUrl> [shotDir]
+// Firefox only: Chromium's compositor crashes on some kernels (see regression-lite).
+const { firefox } = require('playwright')
+
+const BASE = (process.argv[2] || 'http://127.0.0.1:8099').replace(/\/$/, '')
+const SHOTS = process.argv[3] || ''
+const PAY_UA =
+  'Mozilla/5.0 (Linux; Android 16; SM-S928B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Mobile Safari/537.36 NimiqPay/2.0.3'
+const PHONE = { width: 360, height: 780 }
+const DESK = { width: 1280, height: 800 }
+const SLUGS = [
+  'balance', 'history', 'analytics', 'send-receive', 'staking', 'requests', 'receipts',
+  'cashlinks', 'statements', 'tax', 'exports', 'portfolio', 'mcp', 'privacy',
+]
+const EM_DASH = '\u2014'
+
+// Environment noise, not page errors: `vite preview` has no Pages Functions, so
+// /api/* answers 404, and CoinGecko rate-limits the sandbox (429, no CORS header).
+// Uncaught exceptions and any other console error still fail the probe.
+const ENV_NOISE = /Cross-Origin|CORS|429|404|Failed to load|XML Parsing Error|NS_ERROR|coingecko|status of 404/i
+const noise = []
+
+let pass = 0
+let fail = 0
+const check = (name, ok, info = '') => {
+  ok ? pass++ : fail++
+  console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}${ok || !info ? '' : `  :: ${info}`}`)
+}
+
+async function open(browser, viewport, { ua, initScript } = {}) {
+  const ctx = await browser.newContext({ viewport, ...(ua ? { userAgent: ua } : {}) })
+  if (initScript) await ctx.addInitScript(initScript)
+  const page = await ctx.newPage()
+  const errors = []
+  page.on('pageerror', (e) => errors.push(String(e)))
+  page.on('console', (m) => {
+    if (m.type() !== 'error') return
+    if (ENV_NOISE.test(m.text())) noise.push(m.text().slice(0, 80))
+    else errors.push('console: ' + m.text())
+  })
+  return { ctx, page, errors }
+}
+
+const overflow = (page) => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+
+// The tour offer only appears once the sample wallet has finished loading.
+async function waitSampleIdle(page) {
+  await page.waitForSelector('.refresh-btn:not([disabled])', { timeout: 60000 }).catch(() => {})
+  await page.waitForTimeout(2500)
+}
+
+// A full document load (a hash-only goto would stay in the same document).
+async function loadAt(page, url) {
+  await page.goto('about:blank')
+  await page.goto(url, { waitUntil: 'domcontentloaded' })
+}
+const hashNow = (page) => page.evaluate(() => window.location.hash)
+
+async function sheetFacts(page) {
+  return page.evaluate(() => {
+    const sheet = document.querySelector('.learn-sheet')
+    if (!sheet) return null
+    const lists = sheet.querySelectorAll('ul.learn-bullets')
+    return {
+      title: document.querySelector('#learn-sheet-title')?.textContent?.trim() ?? '',
+      steps: sheet.querySelectorAll('ol.learn-steps > li').length,
+      behind: lists[0]?.querySelectorAll('li').length ?? 0,
+      good: lists[1]?.querySelectorAll('li').length ?? 0,
+      heads: [...sheet.querySelectorAll('p.learn-h')].map((p) => p.textContent.trim()),
+      tryBtn: [...sheet.querySelectorAll('button')].some((b) => /try it in the sample wallet/i.test(b.textContent)),
+      tourBtn: [...sheet.querySelectorAll('button')].some((b) => /take the guided tour/i.test(b.textContent)),
+      text: sheet.innerText,
+    }
+  })
+}
+
+;(async () => {
+  const browser = await firefox.launch()
+  const allText = []
+
+  // ── 1. Phone (360x780), a browser ─────────────────────────────────────────
+  {
+    const { ctx, page, errors } = await open(browser, PHONE)
+    await page.goto(BASE + '/', { waitUntil: 'domcontentloaded' })
+    await page.waitForSelector('.learn-card', { timeout: 20000 })
+
+    const tryBtn = page.getByRole('button', { name: /try with a sample wallet/i })
+    const tryBox = await tryBtn.boundingBox()
+    check('phone: "Try with a sample wallet" visible without scrolling', !!tryBox && tryBox.y + tryBox.height <= PHONE.height, JSON.stringify(tryBox))
+    const connectBox = await page.getByRole('link', { name: /open in nimiq pay/i }).boundingBox()
+    check('phone: "Open in Nimiq Pay" visible without scrolling', !!connectBox && connectBox.y + connectBox.height <= PHONE.height, JSON.stringify(connectBox))
+    // regression-lite clicks the first button containing "sample wallet" in DOM order
+    check('phone: first DOM "sample wallet" button is the connect panel one',
+      await page.evaluate(() => /^Try with a sample wallet$/.test([...document.querySelectorAll('button')].find((b) => /sample wallet/i.test(b.textContent))?.textContent.trim() || '')))
+
+    const cards = await page.locator('.learn-card').count()
+    check('phone: 14 feature cards', cards === 14, `found ${cards}`)
+    check('phone: no horizontal overflow at 360px (landing)', (await overflow(page)) <= 1, `overflow=${await overflow(page)}`)
+    allText.push(await page.locator('body').innerText())
+
+    for (const slug of SLUGS) {
+      await page.locator(`.learn-card[data-feature="${slug}"]`).click()
+      await page.waitForSelector('.learn-sheet', { timeout: 5000 })
+      const f = await sheetFacts(page)
+      const okHeads = ['How to use it', 'Behind the scenes', 'Good to know'].every((h) => f.heads.includes(h))
+      check(
+        `phone sheet ${slug}: steps, behind the scenes, good to know, both buttons`,
+        !!f && f.steps >= 3 && f.steps <= 4 && f.behind >= 2 && f.behind <= 4 && f.good >= 1 && f.good <= 3 && okHeads && f.tryBtn && f.tourBtn && !!f.title,
+        f ? JSON.stringify({ title: f.title, steps: f.steps, behind: f.behind, good: f.good, heads: f.heads }) : 'no sheet'
+      )
+      check(`phone sheet ${slug}: hash is #/learn/${slug}`, (await hashNow(page)) === `#/learn/${slug}`, await hashNow(page))
+      allText.push(f.text)
+      await page.keyboard.press('Escape')
+      await page.waitForSelector('.learn-sheet', { state: 'detached', timeout: 5000 })
+      check(`phone sheet ${slug}: Escape closes it and clears the hash`, (await hashNow(page)) === '', await hashNow(page))
+    }
+
+    // Back gesture closes the sheet (the sheet has its own history entry).
+    await page.locator('.learn-card[data-feature="analytics"]').click()
+    await page.waitForSelector('.learn-sheet')
+    await page.goBack()
+    await page.waitForSelector('.learn-sheet', { state: 'detached', timeout: 5000 }).catch(() => {})
+    check('phone: Back gesture closes the sheet', (await page.locator('.learn-sheet').count()) === 0)
+    check('phone: Back leaves the plain landing URL', (await hashNow(page)) === '', await hashNow(page))
+
+    // Close button, and focus stays inside the sheet while Tab is pressed.
+    await page.locator('.learn-card[data-feature="privacy"]').click()
+    await page.waitForSelector('.learn-sheet')
+    const onOpen = await page.evaluate(() => !!document.querySelector('.learn-sheet')?.contains(document.activeElement))
+    check('phone: focus moves into the sheet on open', onOpen)
+    let escaped = false
+    for (let i = 0; i < 30; i++) {
+      await page.keyboard.press('Tab')
+      const inside = await page.evaluate(() => !!document.querySelector('.learn-sheet')?.contains(document.activeElement))
+      if (!inside) { escaped = true; break }
+    }
+    check('phone: Tab is trapped inside the sheet', !escaped)
+    await page.locator('.learn-sheet [aria-label="Close"]').click()
+    await page.waitForSelector('.learn-sheet', { state: 'detached', timeout: 5000 })
+    check('phone: the close button closes the sheet', (await hashNow(page)) === '', await hashNow(page))
+
+    // The sheet scrolls inside itself.
+    await page.locator('.learn-card[data-feature="tax"]').click()
+    await page.waitForSelector('.learn-sheet')
+    const scrolls = await page.evaluate(() => {
+      const o = document.querySelector('.learn-overlay')
+      const before = o.scrollTop
+      o.scrollTop = 400
+      return { canScroll: o.scrollHeight > o.clientHeight, moved: o.scrollTop > before }
+    })
+    check('phone sheet: scrolls inside (full-screen overlay)', scrolls.canScroll && scrolls.moved, JSON.stringify(scrolls))
+    check('phone sheet: no horizontal overflow at 360px', (await overflow(page)) <= 1, `overflow=${await overflow(page)}`)
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/phone-sheet-tax.png` })
+    await page.locator('.learn-sheet [aria-label="Close"]').click()
+    await page.waitForSelector('.learn-sheet', { state: 'detached', timeout: 5000 })
+
+    // Deep link: #/learn/tax opens that explainer directly; Back closes it.
+    await loadAt(page, BASE + '/#/learn/tax')
+    await page.waitForSelector('.learn-sheet', { timeout: 20000 })
+    const deep = await sheetFacts(page)
+    check('phone deep link #/learn/tax opens the Crypto tax explainer', !!deep && /crypto tax/i.test(deep.title), deep && deep.title)
+    await page.goBack()
+    await page.waitForSelector('.learn-sheet', { state: 'detached', timeout: 5000 }).catch(() => {})
+    check('phone deep link: Back closes it without leaving NimBooks', (await page.locator('.learn-sheet').count()) === 0 && (await page.url()).startsWith(BASE))
+
+    // #/learn scrolls the features into view.
+    await loadAt(page, BASE + '/#/learn')
+    await page.waitForSelector('#learn-features', { timeout: 20000 })
+    await page.waitForTimeout(600)
+    const featTop = await page.evaluate(() => document.getElementById('learn-features').getBoundingClientRect().top)
+    check('phone #/learn scrolls the features into view', featTop < PHONE.height * 0.6, `top=${featTop}`)
+
+    // Try it for tax: the sample wallet opens on Export, on the tax card, with no tour offer.
+    await loadAt(page, BASE + '/#/learn/tax')
+    await page.waitForSelector('.learn-sheet', { timeout: 20000 })
+    await page.locator('.learn-sheet button', { hasText: /try it in the sample wallet/i }).click()
+    await page.waitForSelector('.topbar', { timeout: 30000 })
+    await page.waitForSelector('[data-learn="tax"]', { timeout: 30000 })
+    await waitSampleIdle(page)
+    const exportActive = await page.locator('.tab[aria-current="page"]').innerText().catch(() => '')
+    check('phone Try it (tax): lands on the Export tab', /export/i.test(exportActive), exportActive)
+    const taxTop = await page.evaluate(() => {
+      const el = document.querySelector('[data-learn="tax"]')
+      return el ? el.getBoundingClientRect().top : null
+    })
+    check('phone Try it (tax): scrolls the tax card into view', taxTop !== null && taxTop < PHONE.height * 0.5, `top=${taxTop}`)
+    check('phone Try it (tax): no tour offer card', (await page.locator('#tour-offer-title').count()) === 0)
+    check('phone Try it (tax): the address is the plain landing (no learn hash)', (await hashNow(page)) === '', await hashNow(page))
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/phone-try-tax.png` })
+    check('phone Try it: no horizontal overflow', (await overflow(page)) <= 1, `overflow=${await overflow(page)}`)
+    check('phone Try it (tax): no page errors', errors.length === 0, errors.slice(0, 3).join(' | '))
+    await ctx.close()
+  }
+
+  // Every "Try it" lands on its screen, with no tour offer (phone).
+  // Expected view and anchor per feature, as lib/features.ts declares them.
+  const VIEW_TAB = { dashboard: 'Overview', history: 'History', receipts: 'Receipts', request: 'Request', export: 'Export' }
+  const TRY = {
+    balance: ['dashboard', 'total'],
+    history: ['history', null],
+    analytics: ['dashboard', 'analytics'],
+    'send-receive': ['dashboard', 'quick-actions'],
+    staking: ['dashboard', null],
+    requests: ['request', null],
+    receipts: ['receipts', null],
+    cashlinks: ['dashboard', 'quick-actions'],
+    statements: ['export', 'statement'],
+    tax: ['export', 'tax'],
+    exports: ['export', 'export'],
+    portfolio: ['export', 'portfolio'],
+    mcp: ['dashboard', 'mcp'],
+    privacy: ['export', 'backup'],
+  }
+  {
+    const { ctx, page, errors } = await open(browser, PHONE)
+    for (const [slug, [view, target]] of Object.entries(TRY)) {
+      await loadAt(page, `${BASE}/#/learn/${slug}`)
+      await page.waitForSelector('.learn-sheet', { timeout: 20000 })
+      await page.locator('.learn-sheet button', { hasText: /try it in the sample wallet/i }).click()
+      await page.waitForSelector('.topbar', { timeout: 30000 })
+      await waitSampleIdle(page)
+      const tab = await page.locator('.tab[aria-current="page"]').innerText().catch(() => '')
+      const r = await page.evaluate((t) => {
+        const el = t ? document.querySelector(`[data-learn="${t}"]`) : null
+        return { found: !!el, top: el ? Math.round(el.getBoundingClientRect().top) : null }
+      }, target)
+      const stakeOpen = slug === 'staking' ? await page.locator('[role="dialog"][aria-label="Stake NIM"]').count() > 0 : true
+      const offer = await page.locator('#tour-offer-title').count()
+      const landed = tab.toLowerCase().includes(VIEW_TAB[view].toLowerCase())
+      // In view: the anchor is on screen. A card at the foot of the page cannot scroll to the top.
+      const anchored = target === null || (r.found && r.top !== null && r.top >= -20 && r.top < PHONE.height - 120)
+      check(`phone Try it ${slug}: on ${VIEW_TAB[view]}${target ? `, anchor ${target}` : ''}${slug === 'staking' ? ', Stake panel open' : ''}, no tour offer`,
+        landed && anchored && stakeOpen && offer === 0,
+        JSON.stringify({ tab, anchor: r, stakeOpen, offer }))
+      if (slug === 'staking') {
+        // Closing the panel must not bring the tour offer back either.
+        await page.keyboard.press('Escape')
+        await page.waitForTimeout(2500)
+        check('phone Try it staking: closing the panel does not offer the tour', (await page.locator('#tour-offer-title').count()) === 0)
+      }
+      await page.evaluate(() => window.scrollTo(0, 0))
+    }
+    check('phone Try it (all 14): no page errors', errors.length === 0, errors.slice(0, 3).join(' | '))
+    await ctx.close()
+  }
+
+  // Take the guided tour (phone): the tour offer shows.
+  {
+    const { ctx, page, errors } = await open(browser, PHONE)
+    await loadAt(page, BASE + '/#/learn/balance')
+    await page.waitForSelector('.learn-sheet', { timeout: 20000 })
+    await page.locator('.learn-sheet button', { hasText: /take the guided tour/i }).click()
+    await page.waitForSelector('#tour-offer-title', { timeout: 30000 })
+    check('phone "Take the guided tour" shows the tour offer', true)
+    check('phone guided tour: sample wallet is on the Overview', (await page.locator('.tab[aria-current="page"]').innerText().catch(() => '')).match(/overview/i) !== null)
+    check('phone guided tour: no page errors', errors.length === 0, errors.slice(0, 3).join(' | '))
+    await ctx.close()
+  }
+
+  // Plain "Try with a sample wallet" keeps today's behaviour: the tour offer shows.
+  {
+    const { ctx, page, errors } = await open(browser, PHONE)
+    await page.goto(BASE + '/', { waitUntil: 'domcontentloaded' })
+    await page.waitForSelector('.learn-card', { timeout: 20000 })
+    await page.getByRole('button', { name: /try with a sample wallet/i }).click()
+    await page.waitForSelector('#tour-offer-title', { timeout: 30000 })
+    check('plain "Try with a sample wallet" still offers the tour', true)
+    check('plain sample wallet: no page errors', errors.length === 0, errors.slice(0, 3).join(' | '))
+    await ctx.close()
+  }
+
+  // Mocked Nimiq Pay (phone): "Connect Wallet" is above the fold.
+  {
+    const { ctx, page, errors } = await open(browser, PHONE, {
+      ua: PAY_UA,
+      initScript: () => {
+        window.nimiqPay = {}
+      },
+    })
+    await page.goto(BASE + '/', { waitUntil: 'domcontentloaded' })
+    await page.waitForSelector('.learn-card', { timeout: 20000 })
+    const box = await page.getByRole('button', { name: /connect wallet/i }).boundingBox()
+    check('Nimiq Pay (mocked): "Connect Wallet" visible without scrolling', !!box && box.y + box.height <= PHONE.height, JSON.stringify(box))
+    check('Nimiq Pay (mocked): "Try with a sample wallet" visible without scrolling', await page.evaluate(() => {
+      const b = [...document.querySelectorAll('button')].find((x) => /sample wallet/i.test(x.textContent))
+      return !!b && b.getBoundingClientRect().bottom <= window.innerHeight
+    }))
+    check('Nimiq Pay (mocked): 14 feature cards', (await page.locator('.learn-card').count()) === 14)
+    check('Nimiq Pay (mocked): no page errors', errors.length === 0, errors.slice(0, 3).join(' | '))
+    await ctx.close()
+  }
+
+  // Reduced motion: the illustrations do not animate.
+  {
+    const ctx = await browser.newContext({ viewport: PHONE, reducedMotion: 'reduce' })
+    const page = await ctx.newPage()
+    await page.goto(BASE + '/#/learn/analytics', { waitUntil: 'domcontentloaded' })
+    await page.waitForSelector('.learn-sheet', { timeout: 20000 })
+    const anim = await page.evaluate(() => [...document.querySelectorAll('.learn-sheet .la-grow')].map((el) => getComputedStyle(el).animationName))
+    check('reduced motion: illustrations have no animation', anim.length > 0 && anim.every((n) => n === 'none'), JSON.stringify(anim.slice(0, 3)))
+    await ctx.close()
+  }
+
+  // ── 2. Desktop (1280x800) ─────────────────────────────────────────────────
+  {
+    const { ctx, page, errors } = await open(browser, DESK)
+    await page.goto(BASE + '/', { waitUntil: 'domcontentloaded' })
+    await page.waitForSelector('.learn-list button', { timeout: 20000 })
+
+    const tryBox = await page.getByRole('button', { name: /try with a sample wallet/i }).boundingBox()
+    check('desktop: "Try with a sample wallet" visible without scrolling', !!tryBox && tryBox.y + tryBox.height <= DESK.height, JSON.stringify(tryBox))
+    check('desktop: 14 features in the list', (await page.locator('.learn-list button[data-feature]').count()) === 14)
+    check('desktop: no sheet (the explainer is in place)', (await page.locator('.learn-sheet').count()) === 0)
+    check('desktop: "Open on your phone" code shown', (await page.locator('.learn-phone-qr svg').count()) === 1)
+    check('desktop: QR is labelled for Nimiq Pay', (await page.locator('.learn-phone-qr svg').getAttribute('aria-label')) === 'QR code that opens NimBooks in Nimiq Pay')
+    check('desktop: no horizontal overflow at 1280', (await overflow(page)) <= 1, `overflow=${await overflow(page)}`)
+    allText.push(await page.locator('body').innerText())
+    check('desktop: no page errors on the landing', errors.length === 0, errors.slice(0, 3).join(' | '))
+
+    for (const slug of SLUGS) {
+      await page.locator(`.learn-list button[data-feature="${slug}"]`).click()
+      await page.waitForFunction((s) => window.location.hash === `#/learn/${s}`, slug, { timeout: 5000 }).catch(() => {})
+      const f = await page.evaluate(() => {
+        const panel = document.querySelector('.learn-panel')
+        const lists = panel ? panel.querySelectorAll('ul.learn-bullets') : []
+        return {
+          title: panel?.querySelector('h3')?.textContent?.trim() ?? '',
+          steps: panel ? panel.querySelectorAll('ol.learn-steps > li').length : 0,
+          behind: lists[0]?.querySelectorAll('li').length ?? 0,
+          good: lists[1]?.querySelectorAll('li').length ?? 0,
+          tryBtn: panel ? [...panel.querySelectorAll('button')].some((b) => /try it in the sample wallet/i.test(b.textContent)) : false,
+          tourBtn: panel ? [...panel.querySelectorAll('button')].some((b) => /take the guided tour/i.test(b.textContent)) : false,
+          text: panel ? panel.innerText : '',
+          current: document.querySelector('.learn-list button[aria-current="true"]')?.dataset.feature ?? '',
+        }
+      })
+      check(
+        `desktop panel ${slug}: steps, behind the scenes, good to know, both buttons`,
+        f.steps >= 3 && f.steps <= 4 && f.behind >= 2 && f.behind <= 4 && f.good >= 1 && f.good <= 3 && f.tryBtn && f.tourBtn && !!f.title && f.current === slug,
+        JSON.stringify({ title: f.title, steps: f.steps, behind: f.behind, good: f.good, current: f.current })
+      )
+      check(`desktop ${slug}: address follows the selection`, (await hashNow(page)) === `#/learn/${slug}`, await hashNow(page))
+      allText.push(f.text)
+    }
+
+    // Deep link on desktop: the panel opens on that feature, no sheet.
+    await loadAt(page, BASE + '/#/learn/staking')
+    await page.waitForSelector('.learn-panel', { timeout: 20000 })
+    const staking = await page.evaluate(() => ({ title: document.querySelector('.learn-panel h3')?.textContent?.trim(), sheet: !!document.querySelector('.learn-sheet') }))
+    check('desktop deep link #/learn/staking selects Staking in the panel', /staking/i.test(staking.title) && !staking.sheet, JSON.stringify(staking))
+
+    // Try it for tax from the desktop panel.
+    await page.locator('.learn-list button[data-feature="tax"]').click()
+    await page.locator('.learn-panel button', { hasText: /try it in the sample wallet/i }).click()
+    await page.waitForSelector('.topbar', { timeout: 30000 })
+    await page.waitForSelector('[data-learn="tax"]', { timeout: 30000 })
+    await waitSampleIdle(page)
+    const exportActive = await page.locator('.tab[aria-current="page"]').innerText().catch(() => '')
+    check('desktop Try it (tax): lands on the Export tab', /export/i.test(exportActive), exportActive)
+    check('desktop Try it (tax): no tour offer card', (await page.locator('#tour-offer-title').count()) === 0)
+    check('desktop Try it (tax): no page errors', errors.length === 0, errors.slice(0, 3).join(' | '))
+    await ctx.close()
+  }
+
+  // Desktop: Take the guided tour shows the offer.
+  {
+    const { ctx, page, errors } = await open(browser, DESK)
+    await loadAt(page, BASE + '/#/learn/privacy')
+    await page.waitForSelector('.learn-panel', { timeout: 20000 })
+    await page.locator('.learn-panel button', { hasText: /take the guided tour/i }).click()
+    await page.waitForSelector('#tour-offer-title', { timeout: 30000 })
+    check('desktop "Take the guided tour" shows the tour offer', true)
+    check('desktop guided tour: no page errors', errors.length === 0, errors.slice(0, 3).join(' | '))
+    await ctx.close()
+  }
+
+  // ── 3. Copy rules across everything the probe read ────────────────────────
+  const joined = allText.join('\n')
+  check('no em-dash in rendered landing or explainer text', !joined.includes(EM_DASH), `${(joined.match(new RegExp(EM_DASH, 'g')) || []).length} found`)
+  check('no "base.org" in rendered text', !/base\.org/i.test(joined))
+
+  console.log(`\n${new Set(noise).size} distinct environment messages ignored (preview server 404s, CoinGecko 429s)`)
+  console.log(`${pass} passed, ${fail} failed`)
+  await browser.close()
+  process.exit(fail > 0 ? 1 : 0)
+})().catch((e) => {
+  console.error(e)
+  process.exit(1)
+})
