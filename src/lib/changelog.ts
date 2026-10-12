@@ -22,6 +22,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     items: [
       'Analytics now tells Nimiq Pay\'s internal HTLC transfers apart from real payments: each round trip into a contract and back is matched and shown as a faded layer on the chart, Received and Sent count real payments only with the internal amount listed underneath, and "Hide internal" zooms the chart to your payments - reported by Paul Gertz',
       'The landing page metric now shows total visits beside the number of connected wallets',
+      'The 10-second refresh now keeps everything current: new transactions appear within seconds instead of up to two minutes, and the statement, crypto tax and portfolio report update on their own without flicker',
     ],
   },
   {

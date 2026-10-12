@@ -1,4 +1,4 @@
-import { getNimiqBalance, getStakingHolding } from './chain'
+import { fetchStakingHolding, getNimiqBalance } from './chain'
 
 export const PORTFOLIO_STORAGE_KEY = 'nimbooks:portfolio:addresses'
 export const PORTFOLIO_MAX_ADDRESSES = 10
@@ -156,14 +156,16 @@ export function validateNewPortfolioAddress(
 /**
  * Fetches liquid balance and staking holding for an address.
  * stakedLuna is active + inactive + retired.
- * Never throws; returns zeros with error: true on failure.
+ * Never throws; returns zeros with error: true on failure. A failed staking
+ * lookup counts as a failure, not as zero staked, so the caller can keep the
+ * last good figures instead of showing a wrong total.
  */
 export async function fetchAddressHolding(address: string): Promise<AddressHolding> {
   const canonical = formatAddress(address)
   try {
     const [balanceStr, holding] = await Promise.all([
       getNimiqBalance(canonical),
-      getStakingHolding(canonical),
+      fetchStakingHolding(canonical),
     ])
     const liquid = Number(balanceStr)
     const liquidLuna = Number.isFinite(liquid) && liquid > 0 ? Math.floor(liquid) : 0

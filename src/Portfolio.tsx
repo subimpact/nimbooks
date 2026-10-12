@@ -25,11 +25,36 @@ export interface PortfolioProps {
   onStake: () => void
   inNimiqPay: boolean
   demo: boolean
+  // Bumped after every heartbeat (see App.tsx). Every sixth one re-reads the extra addresses.
+  refreshTick: number
 }
 
 function shortAddress(addr: string): string {
   const formatted = formatAddress(addr)
   return formatted.length > 14 ? `${formatted.slice(0, 14)}…` : formatted
+}
+
+// A holding as the card shows it. `stale` marks the last good figures kept after a
+// refresh failed, so one flaky read never blanks a number that was right a minute ago.
+type HoldingView = AddressHolding & { stale?: boolean }
+
+// The extra addresses are re-read on every sixth heartbeat (60 s).
+const EXTRA_REFRESH_EVERY_TICKS = 6
+// Gap between extra addresses in one pass, to respect the RPC rate limiter.
+const HOLDING_PACE_MS = 250
+
+// A new read replaces the old one when it lands. A failed read keeps the last good
+// figures, marked stale; only an address with nothing good to show gets the error state.
+function keepOrReplace(
+  prev: Record<string, HoldingView>,
+  address: string,
+  next: AddressHolding
+): Record<string, HoldingView> {
+  const before = prev[address]
+  if (next.error && before && !before.error) {
+    return { ...prev, [address]: { ...before, stale: true } }
+  }
+  return { ...prev, [address]: { ...next, stale: false } }
 }
 
 export function Portfolio({
@@ -43,9 +68,10 @@ export function Portfolio({
   gate,
   onStake,
   inNimiqPay,
+  refreshTick,
 }: PortfolioProps) {
   const [addresses, setAddresses] = useState<PortfolioAddress[]>(() => loadPortfolioAddresses())
-  const [holdings, setHoldings] = useState<Record<string, AddressHolding>>({})
+  const [holdings, setHoldings] = useState<Record<string, HoldingView>>({})
   const [loadingHoldings, setLoadingHoldings] = useState(false)
 
   const [inputAddress, setInputAddress] = useState('')
@@ -55,6 +81,30 @@ export function Portfolio({
   // line is the print time, not whenever the card last rendered.
   const [generatedAt, setGeneratedAt] = useState(() => new Date())
 
+  // Extra-address reads run one pass at a time, sequentially and paced. A newer pass
+  // (a change to the list, or the heartbeat) supersedes the one still running, so two
+  // never write over each other. Each value replaces the old one as it lands.
+  const passRef = useRef(0)
+  const readHoldings = useCallback(async (list: PortfolioAddress[]) => {
+    const pass = ++passRef.current
+    const current = () => pass === passRef.current
+    for (let i = 0; i < list.length; i++) {
+      if (i > 0) {
+        await new Promise((resolve) => setTimeout(resolve, HOLDING_PACE_MS))
+        if (!current()) return
+      }
+      const item = list[i]
+      const next = await fetchAddressHolding(item.address)
+      if (!current()) return
+      setHoldings((prev) => keepOrReplace(prev, item.address, next))
+    }
+    if (current()) setLoadingHoldings(false)
+  }, [])
+  // Invalidates whatever pass is running (see passRef above).
+  const cancelHoldingPasses = useCallback(() => {
+    passRef.current++
+  }, [])
+
   // Fetch extra-address holdings sequentially with 250ms spacing to respect RPC rate limits
   useEffect(() => {
     if (addresses.length === 0) return
@@ -63,32 +113,34 @@ export function Portfolio({
     queueMicrotask(() => {
       if (!cancelled) setLoadingHoldings(true)
     })
-
-    ;(async () => {
-      for (let i = 0; i < addresses.length; i++) {
-        if (cancelled) return
-        if (i > 0) {
-          await new Promise((resolve) => setTimeout(resolve, 250))
-          if (cancelled) return
-        }
-        const item = addresses[i]
-        const holding = await fetchAddressHolding(item.address)
-        if (cancelled) return
-        setHoldings((prev) => ({ ...prev, [item.address]: holding }))
-      }
-      if (!cancelled) {
-        setLoadingHoldings(false)
-      }
-    })()
+    void readHoldings(addresses)
 
     return () => {
       cancelled = true
       // A run cut short by a list change (or by removing the last address)
       // never reaches its own setLoadingHoldings(false); the next run, if
       // any, sets it again.
+      cancelHoldingPasses()
       setLoadingHoldings(false)
     }
+  }, [addresses, readHoldings, cancelHoldingPasses])
+
+  // The heartbeat re-reads the extra addresses every sixth tick (60 s). This card is
+  // only mounted in the Export view, so being mounted is the "Export view open" part;
+  // the page must also be on screen. No timer of its own: it rides refreshTick.
+  const addressesRef = useRef(addresses)
+  const seenTickRef = useRef(refreshTick)
+  useEffect(() => {
+    addressesRef.current = addresses
   }, [addresses])
+  useEffect(() => {
+    if (refreshTick === seenTickRef.current) return
+    seenTickRef.current = refreshTick
+    if (refreshTick % EXTRA_REFRESH_EVERY_TICKS !== 0) return
+    if (document.visibilityState !== 'visible') return
+    if (addressesRef.current.length === 0) return
+    void readHoldings(addressesRef.current)
+  }, [refreshTick, readHoldings])
 
   const retryAddress = async (addressToRetry: string) => {
     setHoldings((prev) => {
@@ -142,13 +194,17 @@ export function Portfolio({
         entry,
         holding: holdings[entry.address],
       }))
-      .filter((row): row is { entry: PortfolioAddress; holding: AddressHolding } => {
+      .filter((row): row is { entry: PortfolioAddress; holding: HoldingView } => {
         return !!row.holding && !row.holding.error
       })
   }, [addresses, holdings])
 
   const failedCount = useMemo(() => {
     return addresses.filter((a) => holdings[a.address]?.error).length
+  }, [addresses, holdings])
+
+  const staleCount = useMemo(() => {
+    return addresses.filter((a) => holdings[a.address]?.stale).length
   }, [addresses, holdings])
 
   // Aggregate grand totals
@@ -296,7 +352,10 @@ export function Portfolio({
             const rowFiat = (rowTotal / 100000) * nimPrice
             return (
               <tr key={entry.address}>
-                <td>{entry.label || '-'}</td>
+                <td>
+                  {entry.label || '-'}
+                  {holding.stale && <span className="portfolio-subnote"> (last figures, not refreshed)</span>}
+                </td>
                 <td className="mono">{entry.address}</td>
                 <td className="num">{formatLuna(holding.liquidLuna, lang)}</td>
                 <td className="num">{formatLuna(holding.stakedLuna, lang)}</td>
@@ -384,6 +443,9 @@ export function Portfolio({
                 <div className="portfolio-row-meta">
                   <div className="portfolio-row-title">{entry.label || 'Extra address'}</div>
                   <div className="portfolio-row-addr mono">{shortAddress(entry.address)}</div>
+                  {h?.stale && (
+                    <div className="portfolio-row-subnote">Could not refresh. Showing the last figures.</div>
+                  )}
                 </div>
               </div>
 
@@ -438,6 +500,13 @@ export function Portfolio({
         <p className="hint small portfolio-loading">Loading balances…</p>
       )}
 
+      {staleCount > 0 && (
+        <p className="hint small">
+          {staleCount === 1
+            ? '1 address could not be refreshed. Its last figures are shown and counted in the totals.'
+            : `${staleCount} addresses could not be refreshed. Their last figures are shown and counted in the totals.`}
+        </p>
+      )}
       {failedCount > 0 && (
         <p className="hint small warn">
           {failedCount === 1
