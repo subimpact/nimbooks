@@ -714,14 +714,18 @@ export default function App() {
   // TourHost asks it to navigate via onNavigate when a route step is entered.
   const [tour, setTour] = useState<TourRuntimeState>({ phase: 'idle', stepIndex: 0 })
 
-  // Public metrics (live connected wallets) for the landing hero
-  const [publicStats, setPublicStats] = useState<{ uniqueWallets: number } | null>(null)
+  // Public metrics (live connected wallets and total visits) for the landing hero
+  const [publicStats, setPublicStats] = useState<{ uniqueWallets: number; totalConnections: number } | null>(null)
   useEffect(() => {
     fetch('/api/stats')
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (data && typeof data.uniqueWallets === 'number') {
-          setPublicStats({ uniqueWallets: data.uniqueWallets })
+          const visits = data.totalConnections
+          setPublicStats({
+            uniqueWallets: data.uniqueWallets,
+            totalConnections: Number.isFinite(visits) && visits >= 0 ? visits : 0,
+          })
         }
       })
       .catch(() => {})
@@ -3395,10 +3399,24 @@ export default function App() {
           <h1>NimBooks</h1>
           <p className="tagline">The books for your Nimiq wallet - and the world's first in-Pay staking.</p>
           {publicStats && publicStats.uniqueWallets > 0 && (
-            <div className="hero-metric-pill" role="status" title="Unique wallets connected to NimBooks">
+            <div
+              className="hero-metric-pill"
+              role="status"
+              title="Unique wallets connected to NimBooks, and total wallet sessions opened"
+            >
               <span className="live-dot" aria-hidden="true" />
               <span className="metric-text">
                 <strong>{publicStats.uniqueWallets.toLocaleString(lang)}</strong> {publicStats.uniqueWallets === 1 ? 'wallet' : 'wallets'} connected
+                {publicStats.totalConnections > 0 && (
+                  // Real spaces either side of the dot: it is aria-hidden, so without them
+                  // screen readers would run the two counts together
+                  <>
+                    {' '}
+                    <span className="metric-sep" aria-hidden="true">·</span>
+                    {' '}
+                    <strong>{publicStats.totalConnections.toLocaleString(lang)}</strong> {publicStats.totalConnections === 1 ? 'visit' : 'visits'}
+                  </>
+                )}
               </span>
             </div>
           )}
