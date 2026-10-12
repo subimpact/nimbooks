@@ -77,16 +77,18 @@ async function openExport(page) {
   const PAY_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) NimiqPay/2.0.3 Mobile/15E148'
   const ADDR = 'NQ43 Y1RH P1K7 JH78 LRTS 95RY GAUU UBDK FFGX'
   const staker = (balance, delegation) => ({ result: { data: { address: ADDR, balance, delegation, inactiveBalance: 0, inactiveFrom: null, retiredBalance: 0 } } })
-  for (const [name, result, copyRe, btnRe, unlocked] of [
+  for (const [name, result, copyRe, btnRe, unlocked, addr = ADDR] of [
     ['not-staked', { error: { code: 1, message: 'No staker with address: x' } }, /stake 1,000 NIM or more with ImpactZero/, /Stake with ImpactZero/, false],
     ['below-min', staker(50000000, 'NQ08 ACT8 T0FE PTG8 P5RL H2S3 QGXH V15R NVXY'), /You have 500 NIM staked with ImpactZero\. Add 500 NIM more/, /Stake with ImpactZero/, false],
     ['other-validator', staker(900000000, 'NQ29 FBVT 0000 0000 0000 0000 0000 0000 0000'), /other validators don't unlock this\. Only ImpactZero does/, /Open Stake panel/, false],
     ['staked-1000', staker(100000000, 'NQ08ACT8T0FEPTG8P5RLH2S3QGXHV15RNVXY'), /Unlocked by your ImpactZero stake/, null, true],
+    // Access grant list: not staked, but this wallet is granted, so unlocked.
+    ['granted-not-staked', { error: { code: 1, message: 'No staker with address: x' } }, /Unlocked for this wallet/, null, true, 'NQ67 ACSR 3GFL HN98 93PR 9PG8 UTU0 9QXV 09UH'],
   ]) {
     const ctx = await browser.newContext({ viewport: { width: 360, height: 780 }, userAgent: PAY_UA })
     await ctx.addInitScript(([addr]) => {
       localStorage.setItem('nimbooks:session', JSON.stringify({ provider: 'pay', nimiqAddress: addr, view: 'export' }))
-    }, [ADDR])
+    }, [addr])
     const page = await ctx.newPage()
     const errors = []
     page.on('pageerror', (e) => errors.push(String(e)))

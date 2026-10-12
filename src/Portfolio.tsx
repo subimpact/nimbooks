@@ -585,6 +585,9 @@ export function Portfolio({
           Unlocked by your ImpactZero stake. Thank you for supporting NimBooks.
         </p>
       )}
+      {gate.unlocked && gate.reason === 'granted' && (
+        <p className="hint small portfolio-thanks">Unlocked for this wallet.</p>
+      )}
     </div>
   )
 
