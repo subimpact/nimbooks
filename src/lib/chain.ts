@@ -219,27 +219,42 @@ export interface StakingHolding {
 }
 
 /**
- * Look up the user's staker record. Returns null when the address has never
- * staked — the RPC answers "No staker with address: …" as an error, not an
- * empty result, so a throw here is the normal not-a-staker path.
+ * The staker record, read fresh. `null` means the address has never staked: the
+ * RPC answers "No staker with address: …" as an error, not an empty result. A
+ * throw means the lookup itself failed, so the answer is unknown. Callers that
+ * already hold a record keep it on a throw (see refresh in App.tsx).
+ */
+export async function fetchStakingHolding(ownAddress: string): Promise<StakingHolding | null> {
+  let data: any
+  try {
+    data = await rpcCall('getStakerByAddress', [cleanAddress(ownAddress)])
+  } catch (e) {
+    // "No staker with address: …" is the answer for every user who has never
+    // staked — the common case, not a fault. Anything else is a real failure.
+    const msg = e instanceof Error ? e.message : String(e)
+    if (/no staker with address/i.test(msg)) return null
+    throw e
+  }
+  if (typeof data?.balance !== 'number') return null
+  return {
+    address: ownAddress,
+    active: String(data.balance),
+    inactive: String(data.inactiveBalance ?? 0),
+    retired: String(data.retiredBalance ?? 0),
+    delegation: data.delegation ?? '',
+    inactiveFrom: Number(data.inactiveFrom ?? 0) || 0,
+  }
+}
+
+/**
+ * fetchStakingHolding for callers that cannot hold a previous record: a failed
+ * lookup reads as null, the same as a wallet that never staked.
  */
 export async function getStakingHolding(ownAddress: string): Promise<StakingHolding | null> {
   try {
-    const data = await rpcCall('getStakerByAddress', [cleanAddress(ownAddress)])
-    if (typeof data?.balance !== 'number') return null
-    return {
-      address: ownAddress,
-      active: String(data.balance),
-      inactive: String(data.inactiveBalance ?? 0),
-      retired: String(data.retiredBalance ?? 0),
-      delegation: data.delegation ?? '',
-      inactiveFrom: Number(data.inactiveFrom ?? 0) || 0,
-    }
+    return await fetchStakingHolding(ownAddress)
   } catch (e) {
-    // "No staker with address: …" is the answer for every user who has never
-    // staked — the common case, not a fault. Only surface real failures.
-    const msg = e instanceof Error ? e.message : String(e)
-    if (!/no staker with address/i.test(msg)) console.warn('Staker lookup failed:', e)
+    console.warn('Staker lookup failed:', e)
     return null
   }
 }
@@ -338,17 +353,25 @@ export async function getNimiqTransactions(
   }
 }
 
-// Fetch the full transaction history by walking the startAt cursor until
-// exhausted (cap at maxTotal to bound the request). Returns oldest→newest.
-// A small delay between pages keeps us under the RPC rate limiter (bursts of
-// 20 rapid calls trip 429s).
+// Full transaction history is walked by the startAt cursor until exhausted (cap
+// at maxTotal to bound the request), newest→oldest. A small delay between pages
+// keeps us under the RPC rate limiter (bursts of 20 rapid calls trip 429s).
 const TX_CACHE_PREFIX = 'nimbooks:txs'
 const TX_CACHE_TTL = 2 * 60 * 1000 // 2 min — balances move, but not every second
+// The heartbeat reads just the newest page (the RPC's own page size).
+const TX_HEAD_PAGE = 50
+// When a heartbeat finds nothing new it still re-stamps the slot, at most this
+// often, so a manual refresh (2-minute TTL) keeps serving it. Rewriting up to
+// 1000 rows on every tick would cost more than it buys.
+const TX_HEAD_RESTAMP_MS = 60 * 1000
 
 interface TxCacheEntry {
   address: string
   at: number
   txs: NimiqTx[]
+  // Set when the walk that wrote the slot died partway (rate limit, network):
+  // the heartbeat treats such a slot as unfinished and walks again.
+  partial?: boolean
 }
 
 // One cache slot per address: the wallet's basic address and its remote HTLC
@@ -357,7 +380,10 @@ function txCacheKey(address: string): string {
   return `${TX_CACHE_PREFIX}:${cleanAddress(address)}`
 }
 
-function readTxCache(address: string): NimiqTx[] | null {
+// The slot as stored, whatever its age. `null` when there is no slot to use:
+// none written, written for another address, dated in the future, or from
+// before HTLC support (no `toType`).
+function readTxCacheEntry(address: string): TxCacheEntry | null {
   try {
     const raw = localStorage.getItem(txCacheKey(address))
     if (!raw) return null
@@ -366,23 +392,37 @@ function readTxCache(address: string): NimiqTx[] | null {
     // A negative age means the entry claims to be from the future — a clock
     // that moved, or a hand-written entry that would otherwise never expire.
     // Either way it is not something to serve.
-    const age = Date.now() - entry.at
-    if (age < 0 || age > TX_CACHE_TTL) return null
+    if (Date.now() - entry.at < 0) return null
     // Entries cached before HTLC support carry no `toType`; serving them would
     // hide swap labels and locked balances until the TTL expired.
     if (entry.txs.some((t) => t.toType === undefined)) return null
-    return entry.txs.map((t) => ({
-      ...t,
-      timestamp: normalizeTimestamp(t.timestamp),
-    }))
+    return {
+      ...entry,
+      txs: entry.txs.map((t) => ({
+        ...t,
+        timestamp: normalizeTimestamp(t.timestamp),
+      })),
+    }
   } catch {
     return null
   }
 }
 
-function writeTxCache(address: string, txs: NimiqTx[]) {
+// The slot while it is within its TTL: what a manual refresh may serve.
+function readTxCache(address: string): NimiqTx[] | null {
+  const entry = readTxCacheEntry(address)
+  if (!entry || Date.now() - entry.at > TX_CACHE_TTL) return null
+  return entry.txs
+}
+
+function writeTxCache(address: string, txs: NimiqTx[], partial = false) {
   const key = txCacheKey(address)
-  const payload = JSON.stringify({ address, at: Date.now(), txs })
+  const payload = JSON.stringify({
+    address,
+    at: Date.now(),
+    txs,
+    ...(partial ? { partial: true } : {}),
+  })
   try {
     localStorage.setItem(key, payload)
     return
@@ -432,11 +472,14 @@ export function clearTxCache(address?: string) {
   }
 }
 
-export async function getNimiqTransactionHistory(address: string, maxTotal = 1000): Promise<NimiqTx[]> {
-  // Serve from cache when fresh — repeat visits cost zero RPC calls.
-  const cached = readTxCache(address)
-  if (cached) return cached
-
+// The full walk, cache ignored. Pages run newest→oldest on the cursor and stop
+// at maxTotal, at the end of the history, or at the first page that fails.
+// `complete` is false only when a page failed, so a caller can tell a short
+// history from a walk that was cut short.
+async function walkTransactionHistory(
+  address: string,
+  maxTotal: number
+): Promise<{ txs: NimiqTx[]; complete: boolean }> {
   const all: NimiqTx[] = []
   let cursor: string | null = null
   for (let i = 0; i < 20; i++) {
@@ -447,7 +490,7 @@ export async function getNimiqTransactionHistory(address: string, maxTotal = 100
       // A mid-pagination failure (rate limit, flaky network) must not wipe the
       // whole history — return what we already have so the user sees txs.
       console.warn(`History pagination stopped at page ${i + 1}:`, e)
-      break
+      return { txs: all, complete: false }
     }
     if (!page.length) break
     all.push(...page)
@@ -458,8 +501,115 @@ export async function getNimiqTransactionHistory(address: string, maxTotal = 100
     cursor = oldest.hash
     if (i < 19) await new Promise((r) => setTimeout(r, 250))
   }
-  if (all.length) writeTxCache(address, all)
-  return all
+  return { txs: all, complete: true }
+}
+
+// Fetch the full transaction history, newest→oldest. Served from the cache while
+// it is within its TTL, so repeat visits cost zero RPC calls.
+export async function getNimiqTransactionHistory(address: string, maxTotal = 1000): Promise<NimiqTx[]> {
+  const cached = readTxCache(address)
+  if (cached) return cached
+  const { txs, complete } = await walkTransactionHistory(address, maxTotal)
+  if (txs.length) writeTxCache(address, txs, !complete)
+  return txs
+}
+
+// The heartbeat's read of a transaction list (the 10 s auto-refresh). Manual
+// refreshes, the first load and the post-send flow keep using
+// getNimiqTransactionHistory, so they keep their 2-minute TTL.
+//
+// With a usable slot the heartbeat asks for the newest page only and merges in
+// what the slot does not hold yet, so a new payment shows within one tick. The
+// slot's age does not matter here: these merges keep it current. Without a usable
+// slot, or when the newest page holds nothing the slot knows (txs may have landed
+// beyond what it holds), it walks the full history instead.
+export async function refreshTransactionHead(address: string, maxTotal = 1000): Promise<NimiqTx[]> {
+  const entry = readTxCacheEntry(address)
+  if (!entry || entry.partial || entry.txs.length === 0) {
+    return walkForHeartbeat(address, maxTotal, entry?.txs ?? [])
+  }
+  const held = entry.txs
+  let head: NimiqTx[]
+  try {
+    head = await getNimiqTransactions(address, TX_HEAD_PAGE, null)
+  } catch {
+    // A failed head fetch never costs the cache: the rows on screen stay.
+    return held
+  }
+  if (head.length === 0) return held
+  const heldHashes = new Set(held.map((t) => t.hash))
+  if (head.every((t) => !heldHashes.has(t.hash))) return walkForHeartbeat(address, maxTotal, held)
+  const merged = mergeHeadRows(head, held).slice(0, maxTotal)
+  if (!sameTxList(merged, held) || Date.now() - entry.at > TX_HEAD_RESTAMP_MS) {
+    writeTxCache(address, merged)
+  }
+  return merged
+}
+
+// The walk the heartbeat falls back to. It never trades a slot that has rows for
+// something worse: an empty walk, or a cut-short one no longer than the slot,
+// leaves the slot as it was.
+async function walkForHeartbeat(address: string, maxTotal: number, held: NimiqTx[]): Promise<NimiqTx[]> {
+  const { txs, complete } = await walkTransactionHistory(address, maxTotal)
+  if ((complete && txs.length === 0 && held.length > 0) || (!complete && held.length >= txs.length)) {
+    return held
+  }
+  if (txs.length) writeTxCache(address, txs, !complete)
+  return txs
+}
+
+// Newest page first, then the held rows the page did not reach. A row the slot
+// already holds is reused, unless its result has moved (pending → confirmed, or
+// reverted): then the page's copy takes its place.
+function mergeHeadRows(head: NimiqTx[], held: NimiqTx[]): NimiqTx[] {
+  const heldByHash = new Map<string, NimiqTx>()
+  for (const t of held) if (!heldByHash.has(t.hash)) heldByHash.set(t.hash, t)
+  const seen = new Set<string>()
+  const merged: NimiqTx[] = []
+  for (const row of head) {
+    if (seen.has(row.hash)) continue
+    seen.add(row.hash)
+    const old = heldByHash.get(row.hash)
+    merged.push(old && old.executionResult === row.executionResult ? old : row)
+  }
+  for (const t of held) {
+    if (seen.has(t.hash)) continue
+    seen.add(t.hash)
+    merged.push(t)
+  }
+  return merged
+}
+
+/**
+ * Same rows in the same order, with the same hash, result and value. Lets a
+ * refresh that finds nothing new keep the list it already has, so nothing
+ * derived from it recomputes.
+ */
+export function sameTxList(a: NimiqTx[], b: NimiqTx[]): boolean {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i]
+    const y = b[i]
+    if (x.hash !== y.hash || x.executionResult !== y.executionResult || x.value !== y.value) {
+      return false
+    }
+  }
+  return true
+}
+
+/** Same staker record, field by field (see sameTxList). */
+export function sameStakingHolding(a: StakingHolding | null, b: StakingHolding | null): boolean {
+  if (a === b) return true
+  if (!a || !b) return false
+  return (
+    a.address === b.address &&
+    a.active === b.active &&
+    a.inactive === b.inactive &&
+    a.retired === b.retired &&
+    a.delegation === b.delegation &&
+    a.inactiveFrom === b.inactiveFrom
+  )
 }
 
 // --- Older-history loader (on-demand extension of the capped window) ---

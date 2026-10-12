@@ -57,6 +57,10 @@ import {
   getStakingHolding,
   getVestingHoldings,
   getNimiqTransactionHistory,
+  refreshTransactionHead,
+  fetchStakingHolding,
+  sameStakingHolding,
+  sameTxList,
   getNimiqExtendedTransactionHistory,
   historyHitCap,
   findSentTx,
@@ -837,15 +841,30 @@ export default function App() {
     }
   }, [])
 
-  const fetchRates = useCallback(async () => {
-    try {
-      const all = await getAllFiatRates()
-      setFiat({ nim: all.nim, usdt: all.usdt, eth: all.eth, pol: all.pol })
-    } catch (e) {
-      console.warn('Rate fetch failed:', e)
-      reportSoftFailure(e, 'Live rates unavailable. Showing cached values.')
-    }
-  }, [reportSoftFailure])
+  // Heartbeat rate refreshes fail quietly: the rates on screen stay, and a failed
+  // retry waits a minute. getAllFiatRates answers from its own 5-minute cache, so
+  // on most ticks this costs no request at all.
+  const ratesRetryAtRef = useRef(0)
+  const fetchRates = useCallback(
+    async (opts?: { quiet?: boolean }) => {
+      if (opts?.quiet && Date.now() < ratesRetryAtRef.current) return
+      try {
+        const all = await getAllFiatRates()
+        // A zero NIM price means the response held no usable rate: keep the one on screen.
+        const nim = all.nim.usd > 0 ? all.nim : null
+        if (opts?.quiet && !nim) ratesRetryAtRef.current = Date.now() + 60_000
+        setFiat((prev) => {
+          const next = { nim: nim ?? prev.nim, usdt: all.usdt, eth: all.eth, pol: all.pol }
+          return JSON.stringify(next) === JSON.stringify(prev) ? prev : next
+        })
+      } catch (e) {
+        console.warn('Rate fetch failed:', e)
+        if (opts?.quiet) ratesRetryAtRef.current = Date.now() + 60_000
+        else reportSoftFailure(e, 'Live rates unavailable. Showing cached values.')
+      }
+    },
+    [reportSoftFailure]
+  )
 
   useEffect(() => {
     setLang(getLanguage() ?? navigator.language.split('-')[0] ?? 'en')
@@ -1085,11 +1104,16 @@ export default function App() {
     }
   }
 
-  const refresh = async (acc: WalletAccount, opts?: { clearError?: boolean }) => {
+  // `heartbeat` marks the 10s auto-refresh: it reads only what is new (see
+  // refreshTransactionHead) and keeps the rates current. Every other caller gets
+  // the full read, as before.
+  const refresh = async (acc: WalletAccount, opts?: { clearError?: boolean; heartbeat?: boolean }) => {
+    const heartbeat = opts?.heartbeat === true
     setLoading(true)
     // Only a manual refresh (or a fresh connect) clears the error banner —
     // the 10s auto-refresh must not wipe an error the user is still reading.
     if (opts?.clearError !== false) setError(null)
+    if (heartbeat) void fetchRates({ quiet: true })
     try {
       if (acc.nimiqAddress) {
         const addr = acc.nimiqAddress
@@ -1123,10 +1147,23 @@ export default function App() {
         } else {
           setRemoteAccountLuna(null)
         }
-        // Full history via cursor pagination (up to 1000 txs) — the 50-tx
-        // cap silently truncated "accountant-ready" statements.
-        const txs = await getNimiqTransactionHistory(addr, 1000)
-        setNimTxs(txs)
+        // The main walk, the staker record and the chain head start together:
+        // none needs the others, and the sweeps further down wait for all three.
+        // The walk is the step that can take seconds; on the heartbeat it is only
+        // the newest page (see refreshTransactionHead).
+        const txsRead = heartbeat
+          ? refreshTransactionHead(addr, 1000)
+          : getNimiqTransactionHistory(addr, 1000)
+        // A failed staker lookup resolves to ok: false and keeps the record on
+        // screen. A null here would read as "never staked" and blank the stake
+        // card for a tick.
+        const stakingRead = fetchStakingHolding(addr).then(
+          (holding) => ({ ok: true as const, holding }),
+          (e) => {
+            console.warn('Staking holding lookup failed:', e)
+            return { ok: false as const, holding: null }
+          }
+        )
         // The wallet's remote HTLC relay history. Nimiq Pay keeps funds in a
         // separate contract address (accounts[1]); the relay hops are the
         // user's real transactions but never show on the basic address list.
@@ -1134,35 +1171,36 @@ export default function App() {
         // it, and History merges the two lists tagged `remote` so the full
         // wallet picture is visible and classified.
         if (acc.remoteAddress) {
-          getNimiqTransactionHistory(acc.remoteAddress, 1000)
-            .then((remote) =>
-              setRemoteTxs(
-                remote.map((t) => ({ ...t, remote: true }))
-              )
-            )
+          const remote = acc.remoteAddress
+          const remoteRead = heartbeat
+            ? refreshTransactionHead(remote, 1000)
+            : getNimiqTransactionHistory(remote, 1000)
+          remoteRead
+            .then((rows) => {
+              const next = rows.map((t) => ({ ...t, remote: true }))
+              setRemoteTxs((prev) => (sameTxList(prev, next) ? prev : next))
+            })
             .catch((e) => {
               console.warn('Remote relay history lookup failed:', e)
-              setRemoteTxs([])
+              setRemoteTxs((prev) => (prev.length === 0 ? prev : []))
             })
         } else {
-          setRemoteTxs([])
+          setRemoteTxs((prev) => (prev.length === 0 ? prev : []))
         }
-        // Staker record and chain head come before the contract sweeps below:
-        // the unstake banner is gated on both, and the sweeps are up to 20
-        // paced RPC calls that would leave it waiting for nothing it needs.
-        let freshHolding: StakingHolding | null = null
-        try {
-          freshHolding = await getStakingHolding(addr)
-          setStakingHolding(freshHolding)
-        } catch (e) {
-          console.warn('Staking holding lookup failed:', e)
-          setStakingHolding(null)
+        // The history, the staker record and the chain head land together, so the
+        // statement (which reads the first two) is built once rather than twice.
+        const [txs, staking, head] = await Promise.all([txsRead, stakingRead, getCurrentBlock()])
+        setNimTxs((prev) => (sameTxList(prev, txs) ? prev : txs))
+        if (staking.ok) {
+          setStakingHolding((prev) =>
+            sameStakingHolding(prev, staking.holding) ? prev : staking.holding
+          )
         }
+        const freshHolding = staking.holding
         // Chain head — needed to tell whether a retire is already valid. Comes
         // from the Pay provider when there is one, otherwise the public RPC
         // (see wallet.getCurrentBlock). Best effort: an unknown height keeps
         // the previous one and the 10s auto-refresh picks it up next pass.
-        const head = await getCurrentBlock()
         if (head !== null) setCurrentBlock(head)
         // Pending unstake resolution: the marker clears when the staker record
         // shows the retire took effect (inactive balance appeared, or active
@@ -1236,10 +1274,11 @@ export default function App() {
         // a non-staker simply has none.
         try {
           const { fromMs, toMs } = restakeWindow()
-          setRewardTxs(await getRestakeRewardTxs(addr, fromMs, toMs))
+          const rewards = await getRestakeRewardTxs(addr, fromMs, toMs)
+          setRewardTxs((prev) => (sameTxList(prev, rewards) ? prev : rewards))
         } catch (e) {
+          // A failed lookup keeps the reward rows already on screen.
           console.warn('Restake events lookup failed:', e)
-          setRewardTxs([])
         }
       }
       if (acc.evmAddress) {
@@ -1976,21 +2015,29 @@ export default function App() {
   // A connected non-staker who never opens the panel now pays nothing.
   // Cached 10 min in chain.ts, so reopening the panel is free.
   useEffect(() => {
-    if (!account?.nimiqAddress || validators.length > 0) return
-    if (!stakeOpen && !stakingHolding?.delegation) return
+    if (!account?.nimiqAddress) return
+    const haveList = validators.length > 0
+    // Opening the stake panel re-reads a list already in hand. getValidators answers
+    // from its own 10-minute cache, so this costs a fetch only once that has lapsed;
+    // without it the in-state copy would be as old as the session.
+    if (haveList && !stakeOpen) return
+    if (!haveList && !stakeOpen && !stakingHolding?.delegation) return
     let cancelled = false
-    setValidatorsLoading(true)
-    setValidatorsError(null)
+    if (!haveList) {
+      setValidatorsLoading(true)
+      setValidatorsError(null)
+    }
     ;(async () => {
       try {
         const list = await getValidators()
         if (!cancelled) setValidators(list)
       } catch (e) {
-        if (cancelled) return
+        // A list already on screen stays put when a re-read fails.
+        if (cancelled || haveList) return
         console.warn('Validator list failed:', e)
         setValidatorsError('Validator list unavailable right now. Try again shortly.')
       } finally {
-        if (!cancelled) setValidatorsLoading(false)
+        if (!cancelled && !haveList) setValidatorsLoading(false)
       }
     })()
     return () => {
@@ -2749,28 +2796,60 @@ export default function App() {
   }
 
   const [countdown, setCountdown] = useState(10)
+  // Bumped after every completed heartbeat. The portfolio's extra addresses re-read
+  // off it every sixth tick, so nothing else needs a timer of its own.
+  const [refreshTick, setRefreshTick] = useState(0)
   const loadingRef = useRef(false)
+  // The heartbeat never overlaps itself: a tick that lands while the last one is
+  // still in flight is skipped, the same as one that lands during a manual refresh.
+  const heartbeatBusyRef = useRef(false)
   useEffect(() => {
     loadingRef.current = loading
   }, [loading])
-  // Auto-refresh: count down from 10s and refresh when it hits 0. Only for a
-  // real connected wallet (demo mode stays manual to avoid pointless RPC load).
+  // Heartbeat: count down from 10s and refresh the books when it hits 0. Only for
+  // a real connected wallet (demo mode stays manual to avoid pointless RPC load).
+  // The countdown pauses while the page is hidden, since Nimiq Pay can keep the
+  // WebView open for hours, and catches up with one refresh when it is back.
   useEffect(() => {
     if (!account?.nimiqAddress || isDemoMode()) return
     // The onboarding tour runs on a static snapshot — no live refreshes
     // mid-walkthrough, or the layout (and the spotlight) could move under it.
     if (tour.phase === 'active') return
+    let remaining = 10
+    let lastBeatAt = Date.now()
+    const beat = () => {
+      if (heartbeatBusyRef.current || loadingRef.current) return
+      heartbeatBusyRef.current = true
+      lastBeatAt = Date.now()
+      void refresh(account, { clearError: false, heartbeat: true }).finally(() => {
+        heartbeatBusyRef.current = false
+        setRefreshTick((n) => n + 1)
+      })
+    }
     setCountdown(10)
     const id = setInterval(() => {
-      setCountdown((c) => {
-        if (c <= 1) {
-          if (!loadingRef.current) void refresh(account, { clearError: false })
-          return 10
-        }
-        return c - 1
-      })
+      if (document.visibilityState === 'hidden') return
+      remaining -= 1
+      if (remaining <= 0) {
+        remaining = 10
+        beat()
+      }
+      setCountdown(remaining)
     }, 1000)
-    return () => clearInterval(id)
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') return
+      // More than a full cycle away: refresh now rather than wait out the countdown.
+      if (Date.now() - lastBeatAt > 10_000) {
+        remaining = 10
+        setCountdown(10)
+        beat()
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => {
+      clearInterval(id)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [account?.nimiqAddress, tour.phase])
 
@@ -3075,9 +3154,13 @@ export default function App() {
     // The display currency is a device preference, not account data — it stays.
   }
 
-  // Tax-year statement: recompute when txs / account / period change.
-  // Prices load once (12h cache); the statement itself computes instantly.
+  // The statement follows the books: it is rebuilt when the transactions, the live
+  // balances or the period change. Figures come from cached prices, so a rebuild
+  // costs no RPC.
   const statementYears = useMemo(() => availableStatementYears(allTxs), [allTxs])
+  // The address and period the statement on screen was built for. A rebuild for the
+  // same pair is silent; a new pair (first build, or a period switch) shows the spinner.
+  const statementKeyRef = useRef<string | null>(null)
 
   // The older-history offer only makes sense while the plain loader actually
   // capped out, and only until the extended window is already in for the
@@ -3118,57 +3201,63 @@ export default function App() {
   }, [account?.nimiqAddress, extendedLoading])
   useEffect(() => {
     if (!account?.nimiqAddress || allTxs.length === 0) {
+      statementKeyRef.current = null
       setStatement(null)
+      setStatementLoading(false)
       return
     }
     const own = account.nimiqAddress // narrowed; stable across the closure
+    const key = `${own}|${statementYear}`
+    // Same address and period as the statement on screen: rebuild it quietly.
+    const silent = statementKeyRef.current === key
     let cancelled = false
-    setStatementLoading(true)
+    if (!silent) setStatementLoading(true)
     ;(async () => {
       try {
-        const prices = await getDailyNimPrices()
+        let prices: Record<string, number> = {}
+        try {
+          prices = await getDailyNimPrices()
+        } catch (e) {
+          // The NIM figures need no prices: build them anyway and leave the USD
+          // columns out, rather than dropping the whole statement.
+          reportSoftFailure(e, 'Statement prices unavailable right now. Try again shortly.')
+        }
         if (cancelled) return
         const base = computeStatement(allTxs, own, statementYear, prices)
         // Replay can only see events, so genesis-seeded pre-PoS funds and
         // auto-compounded stake rewards are invisible to it and the closing
-        // balance comes out too low. For the current year — and for 'all'
-        // time, whose closing balance is the same "right now" figure — anchor
-        // the closing balance to live chain state instead. Past years stay
+        // balance comes out too low. For the current year, and for 'all' time
+        // (whose closing balance is the same "right now" figure), anchor the
+        // closing balance to live chain state instead. Past years stay
         // reconstructed: the chain has long since moved on, so no truthful
-        // historical number exists there.
+        // historical number exists there. The balances are the ones refresh()
+        // already holds, so this costs no RPC.
         const currentYear = String(new Date().getUTCFullYear())
         const anchorLive = statementYear === currentYear || statementYear === 'all'
         let next: Statement = base
-        if (anchorLive) {
-          try {
-            const [liquid, holding] = await Promise.all([getNimiqBalance(own), getStakingHolding(own)])
-            if (cancelled) return
-            next = {
-              ...base,
-              totals: {
-                ...base.totals,
-                closingBalanceNim: liveClosingBalanceNim(
-                  Number(liquid),
-                  Number(holding?.active || 0),
-                  Number(holding?.inactive || 0),
-                  Number(holding?.retired || 0)
-                ),
-                closingBalanceSource: 'live',
-              },
-            }
-          } catch (e) {
-            // base already carries 'reconstructed' — fall back silently rather
-            // than nuking the whole statement over one lookup.
-            console.warn('Live balance lookup failed:', e)
+        if (anchorLive && nimBalance !== null) {
+          next = {
+            ...base,
+            totals: {
+              ...base.totals,
+              closingBalanceNim: liveClosingBalanceNim(
+                Number(nimBalance),
+                Number(stakingHolding?.active || 0),
+                Number(stakingHolding?.inactive || 0),
+                Number(stakingHolding?.retired || 0)
+              ),
+              closingBalanceSource: 'live',
+            },
           }
         }
-        if (cancelled) return
+        statementKeyRef.current = key
         setStatement(next)
       } catch (e) {
         if (cancelled) return
         console.warn('Statement failed:', e)
         reportSoftFailure(e, 'Statement prices unavailable right now. Try again shortly.')
-        setStatement(null)
+        // A rebuild that fails keeps the statement already on screen.
+        if (!silent) setStatement(null)
       } finally {
         if (!cancelled) setStatementLoading(false)
       }
@@ -3176,11 +3265,11 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [account?.nimiqAddress, allTxs, statementYear, reportSoftFailure])
+  }, [account?.nimiqAddress, allTxs, statementYear, nimBalance, stakingHolding, reportSoftFailure])
 
-  // Tax figures recompute once per connect; Recalculate clears and re-runs
-  // (chain state moves while the tab sits open). Switching the reporting
-  // currency re-runs too, so the report always matches what it labels.
+  // Recalculate clears the figures and they are worked out again, and a currency
+  // switch does the same, so the report always matches what it labels. Between
+  // those, the report follows the books (see the effect below).
   // FX rate: how many units of the chosen currency one USD buys. The USDT
   // table carries most codes directly; anything else derives from NIM's two
   // price legs, and USD itself is identity.
@@ -3196,20 +3285,45 @@ export default function App() {
     return 1.0
   }, [fiat, currency])
 
+  // Crypto tax (FIFO). The first figures show a spinner. After that the report
+  // follows the books: while the tax card is on screen, a change to the
+  // transaction list or to the FX rate is worked out again in the background and
+  // swapped in, with the old figures staying visible meanwhile. Recalculate and a
+  // currency switch still start from a clean spinner.
+  const taxRunRef = useRef(0)
+  // The transaction list and FX rate the report on screen was built from.
+  const taxBuiltRef = useRef<{ txs: NimiqTx[]; rate: number } | null>(null)
+  // Every daily close seen so far. A pass that cannot reach DefiLlama must not drop
+  // the years only that history covers, so the prices only ever accumulate.
+  const taxPricesRef = useRef<Record<string, number>>({})
   useEffect(() => {
     if (view !== 'export') return
     const own = account?.nimiqAddress
     if (!own || taxBusy) return
-    if (taxReport && taxReport.currency === currency) return
-    setTaxBusy(true)
+    const sameCurrency = taxReport?.currency === currency
+    const built = taxBuiltRef.current
+    if (sameCurrency && built && built.txs === allTxs && built.rate === taxFxRate) return
+    // A report already on screen in this currency is replaced quietly.
+    const silent = sameCurrency
+    const run = ++taxRunRef.current
+    const txs = allTxs
+    const rate = taxFxRate
+    if (!silent) setTaxBusy(true)
     getAllDailyNimPrices()
-      .then((prices) => {
-        setTaxReport(computeFifoGains(allTxs, own, prices, currency, taxFxRate))
+      .then((fetched) => {
+        if (run !== taxRunRef.current) return
+        taxPricesRef.current = { ...taxPricesRef.current, ...fetched }
+        taxBuiltRef.current = { txs, rate }
+        setTaxReport(computeFifoGains(txs, own, taxPricesRef.current, currency, rate))
       })
       .catch(() => {
-        setError('Tax figures unavailable. Check your connection and recalculate.')
+        if (!silent && run === taxRunRef.current) {
+          setError('Tax figures unavailable. Check your connection and recalculate.')
+        }
       })
-      .finally(() => setTaxBusy(false))
+      .finally(() => {
+        if (!silent && run === taxRunRef.current) setTaxBusy(false)
+      })
   }, [view, account?.nimiqAddress, allTxs, taxReport, taxBusy, currency, taxFxRate])
 
   const exportStatementCsv = () => {
@@ -4617,6 +4731,7 @@ export default function App() {
               onStake={handleStakeFromGate}
               inNimiqPay={inNimiqPay}
               demo={demoMode}
+              refreshTick={refreshTick}
             />
 
             <div className="card statement-card">
