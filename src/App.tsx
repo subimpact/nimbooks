@@ -1371,6 +1371,16 @@ export default function App() {
     () => htlcHoldings.reduce((sum, h) => sum + (Number(h.balance) || 0), 0),
     [htlcHoldings]
   )
+  // Contracts that still hold the user's NIM, for Analytics' netting of internal
+  // HTLC transfers: every HTLC the sweep found, plus the remote account when Pay
+  // names one. Memoised so the netting in Analytics is not redone every render.
+  const analyticsHeldContracts = useMemo(
+    () => [
+      ...htlcHoldings.map((h) => h.address),
+      ...(account?.remoteAddress ? [account.remoteAddress] : []),
+    ],
+    [htlcHoldings, account?.remoteAddress]
+  )
   // Delegated NIM, including the buckets on their way back out: inactive is
   // cooling down and retired is withdrawable, but both are still the user's.
   const stakedLuna =
@@ -4139,6 +4149,7 @@ export default function App() {
               lang={lang}
               nimRate={shown.nim}
               currency={currency}
+              heldContracts={analyticsHeldContracts}
             />
           </section>
         )}

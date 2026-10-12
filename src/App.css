@@ -948,6 +948,26 @@ a:focus-visible {
   font-weight: 700;
   font-size: 15px;
 }
+/* Day sheet: the Internal chip beside a row's direction, and the internal part of its amount.
+   Smaller than a kind pill so it sits on the direction line at phone width. */
+.kind-pill.tx-internal-chip {
+  margin-left: 6px;
+  padding: 2px 7px;
+}
+.kind-pill.tx-internal-chip .tx-kind {
+  font-size: 10px;
+}
+/* The real amount keeps the line; the internal part drops to a muted line under it */
+.tx-amount-split {
+  text-align: right;
+}
+.tx-internal {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
 .tx-memo {
   color: var(--accent-2);
   font-size: 12px;
@@ -1231,6 +1251,14 @@ a.btn-ghost.btn-link {
 }
 .stat .value.green { color: var(--green); }
 .stat .value.red { color: var(--red); }
+/* Internal HTLC layer under Received / Sent: muted, one line, not a payment */
+.stat-sub {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+  margin-top: 2px;
+}
 /* The Txs stat is a <button> that opens History — strip UA button styling only,
    so it keeps the exact card look/padding/radius of its three plain siblings. */
 .stat-btn {
@@ -1423,6 +1451,36 @@ a.btn-ghost.btn-link {
 }
 .flow-ratio-legend .green { color: var(--green); }
 .flow-ratio-legend .red { color: var(--red); }
+/* Chart legend for the internal HTLC layer: a solid and a faded dashed swatch */
+.flow-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.flow-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+}
+.flow-swatch {
+  flex-shrink: 0;
+  width: 12px;
+  height: 10px;
+  border-radius: 2px;
+}
+.flow-swatch-real {
+  background: var(--muted);
+}
+/* Same treatment as the chart's internal bars: faded fill, dashed outline */
+.flow-swatch-internal {
+  box-sizing: border-box;
+  background: color-mix(in srgb, var(--muted) 30%, transparent);
+  border: 1px dashed var(--muted);
+}
 
 /* History tx hash link + failed badge */
 .tx-hash-link {

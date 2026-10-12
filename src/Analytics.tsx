@@ -16,18 +16,28 @@ import {
 } from './lib/chain'
 import { isCashlinkMemo } from './lib/cashlink'
 import { parseInvoiceMemo } from './lib/invoice'
+import { splitHtlcFlows } from './lib/htlcFlows'
 import DetailSheet from './DetailSheet'
 
 export type AnalyticsPeriod = 7 | 30 | 0 // days; 0 = all available
+
+// Luna per NIM. Flows are netted in integer luna, so "no flow" is an exact zero.
+const LUNA_PER_NIM = 100000
+
+// Default for callers that name no held contracts. A shared constant keeps the
+// netting memo from recomputing on every render.
+const NO_HELD_CONTRACTS: readonly string[] = []
 
 interface FlowPoint {
   key: string // YYYY-MM-DD (local)
   label: string
   ts: number
-  in: number // NIM
-  out: number // NIM
-  // The very txs that produced `in`/`out` — the day sheet lists these, so a
-  // bar and its drilldown can never disagree about what the day contained.
+  in: number // NIM, real payments only
+  out: number // NIM, real payments only
+  inInternal: number // NIM, Nimiq Pay HTLC round trips (not payments)
+  outInternal: number // NIM
+  // The very txs that produced the parts above, so a bar and its drilldown can
+  // never disagree about what the day contained.
   txs: NimiqTx[]
 }
 
@@ -35,6 +45,9 @@ interface Stats {
   totalIn: number
   totalOut: number
   net: number
+  // The internal HTLC layer over the period, reported beside the real totals
+  internalIn: number
+  internalOut: number
   count: number
   inCount: number
   outCount: number
@@ -103,14 +116,19 @@ interface Counterparty {
 
 // Sum + count per counterparty address, biggest first. There is no contacts
 // feature, so the first memo that decoded doubles as the party's name.
-function groupCounterparties(txs: NimiqTx[], pick: (tx: NimiqTx) => string): Counterparty[] {
+// `amount` is the NIM a tx counts for; a tx that counts for nothing is left out.
+function groupCounterparties(
+  txs: NimiqTx[],
+  pick: (tx: NimiqTx) => string,
+  amount: (tx: NimiqTx) => number
+): Counterparty[] {
   const byAddr = new Map<string, Counterparty>()
   for (const tx of txs) {
     const raw = pick(tx)
     const norm = raw.replace(/\s+/g, '').toUpperCase()
     if (!norm) continue
-    const v = Number(tx.value) / 100000
-    if (!Number.isFinite(v)) continue
+    const v = amount(tx)
+    if (!Number.isFinite(v) || v <= 0) continue
     let entry = byAddr.get(norm)
     if (!entry) {
       entry = { norm, addr: spacedAddr(raw), name: '', sum: 0, count: 0 }
@@ -238,6 +256,7 @@ export default function Analytics({
   lang,
   nimRate,
   currency,
+  heldContracts = NO_HELD_CONTRACTS,
 }: {
   txs: NimiqTx[]
   currentBalanceNim: string | null
@@ -248,13 +267,18 @@ export default function Analytics({
   lang: string
   nimRate?: number
   currency?: CurrencyCode
+  // Contracts that still hold the wallet's NIM. Their funding is the user's
+  // money, so it nets as internal even before anything has come back.
+  heldContracts?: readonly string[]
 }) {
   const ownNorm = (ownAddress ?? '').replace(/\s+/g, '').toUpperCase()
   // Day key (YYYY-MM-DD) of the bar being drilled into, not an index: the
   // index shifts when the period switch changes the bucket span.
   const [selectedDay, setSelectedDay] = useState<string | null>(null)
   const [statSheet, setStatSheet] = useState<StatSheet | null>(null)
-  const [excludeHtlc, setExcludeHtlc] = useState<boolean>(() => {
+  // "Hide internal" keeps the preference the old "No HTLC" toggle stored, so a
+  // user who had it on still has it. Off means the internal layer is shown.
+  const [hideInternal, setHideInternal] = useState<boolean>(() => {
     try {
       return localStorage.getItem('nimbooks:analytics:filterHtlc') === 'true'
     } catch {
@@ -264,11 +288,11 @@ export default function Analytics({
 
   useEffect(() => {
     try {
-      localStorage.setItem('nimbooks:analytics:filterHtlc', String(excludeHtlc))
+      localStorage.setItem('nimbooks:analytics:filterHtlc', String(hideInternal))
     } catch {
       /* storage unavailable */
     }
-  }, [excludeHtlc])
+  }, [hideInternal])
   // Keyboard cursor into the flow chart's slots; -1 until a key or a tap puts
   // it somewhere. An index is right here (unlike `selectedDay`) because it is
   // pure focus state — it is clamped to the new range on a period switch, not
@@ -289,8 +313,26 @@ export default function Analytics({
     return () => clearTimeout(id)
   }, [now])
 
+  // Each transfer's real and internal parts, netted over the whole loaded list:
+  // a contract funded last month and refunded today is still a round trip.
+  const splits = useMemo(
+    () => splitHtlcFlows(txs, ownAddress ?? '', { heldContracts }),
+    [txs, ownAddress, heldContracts]
+  )
+
   const data = useMemo(() => {
-    const buckets = new Map<string, { ts: number; in: number; out: number; txs: NimiqTx[] }>()
+    // Buckets sum in integer luna, so a day with no flow is an exact zero.
+    const buckets = new Map<
+      string,
+      {
+        ts: number
+        inLuna: number
+        outLuna: number
+        inInternalLuna: number
+        outInternalLuna: number
+        txs: NimiqTx[]
+      }
+    >()
     const t = new Date(now)
     // Seed buckets so empty days render as flat segments.
     // For "All", span from the earliest tx (capped at 90 days) so the chart
@@ -309,7 +351,14 @@ export default function Analytics({
     let oldestSeeded = now
     for (let i = 0; i < seedDays; i++) {
       const k = dayKey(t.getTime())
-      buckets.set(k, { ts: t.getTime(), in: 0, out: 0, txs: [] })
+      buckets.set(k, {
+        ts: t.getTime(),
+        inLuna: 0,
+        outLuna: 0,
+        inInternalLuna: 0,
+        outInternalLuna: 0,
+        txs: [],
+      })
       oldestSeeded = t.getTime()
       t.setDate(t.getDate() - 1)
     }
@@ -318,8 +367,10 @@ export default function Analytics({
     // that day's 00:00 was counted by no bucket and by no total — and the
     // "vs previous" comparison measured calendar days against a rolling window.
     const cutoff = period === 0 ? 0 : startOfDay(oldestSeeded)
-    let totalIn = 0
-    let totalOut = 0
+    let totalInLuna = 0
+    let totalOutLuna = 0
+    let internalInLuna = 0
+    let internalOutLuna = 0
     let count = 0
     let inCount = 0
     let outCount = 0
@@ -330,37 +381,33 @@ export default function Analytics({
       if (tx.executionResult === false) continue
       const ts = tx.timestamp ? timestampToMs(tx.timestamp) : now
       if (ts < cutoff) continue
-      if (excludeHtlc) {
-        const isHtlc =
-          tx.remote ||
-          tx.toType === 2 ||
-          (() => {
-            const l = txLabel(tx, ownAddress ?? '')
-            return l === 'swap' || l === 'htlc'
-          })()
-        if (isHtlc) continue
-      }
       const v = Number(tx.value) / 100000
       if (!Number.isFinite(v) || v <= 0) continue
-      const isOut = tx.sender.replace(/\s+/g, '').toUpperCase() === ownNorm
       const k = dayKey(ts)
       const b = buckets.get(k)
       if (b) {
         // Sending to yourself is net-zero — the money never left. Counting only
         // the outgoing leg would read as a spend the wallet never made, so it
         // stays out of both flow totals and shows up in the day sheet only.
-        if (isOut && tx.recipient.replace(/\s+/g, '').toUpperCase() === ownNorm) {
-          // no flow either way
-        } else if (isOut) {
-          b.out += v
-          totalOut += v
-          outCount++
-          largestOut = Math.max(largestOut, v)
-        } else {
-          b.in += v
-          totalIn += v
-          inCount++
-          largestIn = Math.max(largestIn, v)
+        // A tx the netting leaves unsplit (a self transfer) moves no totals.
+        const sp = splits.get(tx.hash)
+        if (sp) {
+          b.inLuna += sp.realIn
+          b.outLuna += sp.realOut
+          b.inInternalLuna += sp.internalIn
+          b.outInternalLuna += sp.internalOut
+          totalInLuna += sp.realIn
+          totalOutLuna += sp.realOut
+          internalInLuna += sp.internalIn
+          internalOutLuna += sp.internalOut
+          if (sp.realIn > 0) {
+            inCount++
+            largestIn = Math.max(largestIn, sp.realIn / LUNA_PER_NIM)
+          }
+          if (sp.realOut > 0) {
+            outCount++
+            largestOut = Math.max(largestOut, sp.realOut / LUNA_PER_NIM)
+          }
         }
         // Collected inside the same guards as the totals above, so the day
         // sheet can never list a tx the bar's own arithmetic left out.
@@ -368,20 +415,26 @@ export default function Analytics({
         count++
       }
     }
+    const totalIn = totalInLuna / LUNA_PER_NIM
+    const totalOut = totalOutLuna / LUNA_PER_NIM
     const points: FlowPoint[] = [...buckets.entries()]
       .map(([key, b]) => ({
         key,
         label: dayLabel(b.ts),
         ts: b.ts,
-        in: b.in,
-        out: b.out,
+        in: b.inLuna / LUNA_PER_NIM,
+        out: b.outLuna / LUNA_PER_NIM,
+        inInternal: b.inInternalLuna / LUNA_PER_NIM,
+        outInternal: b.outInternalLuna / LUNA_PER_NIM,
         txs: b.txs.sort((x, z) => timestampToMs(z.timestamp ?? 0) - timestampToMs(x.timestamp ?? 0)),
       }))
       .sort((a, b) => a.key.localeCompare(b.key))
     const stats: Stats = {
       totalIn,
       totalOut,
-      net: totalIn - totalOut,
+      net: (totalInLuna - totalOutLuna) / LUNA_PER_NIM,
+      internalIn: internalInLuna / LUNA_PER_NIM,
+      internalOut: internalOutLuna / LUNA_PER_NIM,
       count,
       inCount,
       outCount,
@@ -393,7 +446,7 @@ export default function Analytics({
     // `cutoff` travels with the data: the trajectory and the trend window are
     // the same window as the bars, or they are lying about the same period.
     return { points, stats, cutoff }
-  }, [txs, period, ownNorm, now, excludeHtlc, ownAddress])
+  }, [txs, period, now, splits])
 
   const trajectory = useMemo(
     () => {
@@ -416,7 +469,25 @@ export default function Analytics({
   const plotW = W - PAD_L - 4
   const plotH = H - PAD_T - PAD_B
   const n = data.points.length
-  const maxFlow = Math.max(1, ...data.points.map((p) => Math.abs(p.in - p.out)), 0.000001)
+  // The internal layer draws only while the period has some and it is not hidden.
+  // Hidden, it neither draws nor sets the scale, so the chart reads as payments.
+  const hasInternal = data.stats.internalIn > 0 || data.stats.internalOut > 0
+  const showInternal = hasInternal && !hideInternal
+  // What each day draws, in NIM. The real net is the solid bar. The internal
+  // net is the faded bar: stacked past the real bar when both point the same
+  // way, otherwise drawn from zero on its own side. [lo, hi] is what it covers.
+  const dayBars = data.points.map((p) => {
+    const real = p.in - p.out
+    const internal = showInternal ? p.inInternal - p.outInternal : 0
+    const stacked = real !== 0 && internal !== 0 && Math.sign(real) === Math.sign(internal)
+    const ends = [0, real, ...(internal === 0 ? [] : [stacked ? real + internal : internal])]
+    return { real, internal, stacked, lo: Math.min(...ends), hi: Math.max(...ends) }
+  })
+  const maxFlow = Math.max(
+    1,
+    ...dayBars.map((d) => Math.max(Math.abs(d.lo), Math.abs(d.hi))),
+    0.000001
+  )
   // The 1-NIM floor above keeps a near-zero period from being magnified into a
   // full-height plot — but when the floor is what's setting the scale, every bar
   // is a sliver against an axis the user never asked for. That is a real reading
@@ -427,12 +498,18 @@ export default function Analytics({
   const slotW = plotW / n
 
   // Y gridlines: 0 at bottom; symmetric around 0 if net goes negative
-  const hasNeg = data.points.some((p) => p.in - p.out < 0)
+  const hasNeg = dayBars.some((d) => d.lo < 0)
   const yMax = hasNeg ? Math.max(1, maxFlow) : maxFlow
   const yMin = hasNeg ? -yMax : 0
   const yRange = yMax - yMin
 
   const y = (v: number) => PAD_T + plotH - ((v - yMin) / yRange) * plotH
+  // Top edge and height of a bar spanning the values a..b
+  const span = (a: number, b: number) => ({
+    y: y(Math.max(a, b)),
+    h: Math.max(1.2, (Math.abs(b - a) / yRange) * plotH),
+  })
+  const barColour = (v: number) => (v >= 0 ? 'var(--green)' : 'var(--red)')
 
   // Bounded y-floor: 25% headroom below the data min (never below 0). Scaling
   // from the min instead makes any wobble, however small, fill the plot height.
@@ -542,19 +619,24 @@ export default function Analytics({
     // which are shares of the bucket totals, past 100%). Its fee was still
     // real money spent, so `all` — not `flow` — is what fees are summed over.
     const flow = all.filter((tx) => !isSelf(tx))
-    const inTxs = flow.filter((tx) => !isOut(tx))
-    const outTxs = flow.filter(isOut)
+    // Real parts only. The internal legs of a round trip are not payments, so
+    // they stay out of who paid whom and of what kind each payment was.
+    const realIn = (tx: NimiqTx) => splits.get(tx.hash)?.realIn ?? 0
+    const realOut = (tx: NimiqTx) => splits.get(tx.hash)?.realOut ?? 0
+    const inTxs = flow.filter((tx) => !isOut(tx) && realIn(tx) > 0)
+    const outTxs = flow.filter((tx) => isOut(tx) && realOut(tx) > 0)
 
     // Composition: in − out per kind, so "you didn't spend 50k NIM, you staked
     // it" reads straight off the list rather than needing to be inferred.
     const byKind = new Map<TxLabel, { in: number; out: number; count: number }>()
     for (const tx of flow) {
-      const v = Number(tx.value) / 100000
-      if (!Number.isFinite(v)) continue
+      const inV = realIn(tx) / LUNA_PER_NIM
+      const outV = realOut(tx) / LUNA_PER_NIM
+      if (inV === 0 && outV === 0) continue
       const kind = txLabel(tx, own)
       const e = byKind.get(kind) ?? { in: 0, out: 0, count: 0 }
-      if (isOut(tx)) e.out += v
-      else e.in += v
+      e.in += inV
+      e.out += outV
       e.count++
       byKind.set(kind, e)
     }
@@ -567,7 +649,7 @@ export default function Analytics({
     // under the same guards the bucket pass uses. Both ends are day-aligned
     // (stepped by calendar days off the bucket cutoff), so this is period
     // calendar days against period calendar days — not against a rolling window.
-    let prevNet = 0
+    let prevNetLuna = 0
     let prevCount = 0
     if (period !== 0) {
       const cutoff = data.cutoff
@@ -578,23 +660,14 @@ export default function Analytics({
         if (tx.executionResult === false) continue
         const ts = tx.timestamp ? timestampToMs(tx.timestamp) : now
         if (ts < start || ts >= cutoff) continue
-        const v = Number(tx.value) / 100000
-        if (!Number.isFinite(v) || v <= 0) continue
-        if (isSelf(tx)) continue // net-zero, same as the current window
-        if (excludeHtlc) {
-          const isHtlc =
-            tx.remote ||
-            tx.toType === 2 ||
-            (() => {
-              const l = txLabel(tx, ownAddress ?? '')
-              return l === 'swap' || l === 'htlc'
-            })()
-          if (isHtlc) continue
-        }
-        prevNet += isOut(tx) ? -v : v
-        prevCount++
+        // Real parts only, netted like the current window. A self transfer has none.
+        const sp = splits.get(tx.hash)
+        if (!sp) continue
+        prevNetLuna += sp.realIn - sp.realOut
+        if (sp.realIn + sp.realOut > 0) prevCount++
       }
     }
+    const prevNet = prevNetLuna / LUNA_PER_NIM
     // An empty previous window means there is nothing to compare against —
     // never a −100% that would read as a real collapse.
     const prevDelta =
@@ -607,8 +680,8 @@ export default function Analytics({
     const worst = byNet[byNet.length - 1]
 
     return {
-      senders: groupCounterparties(inTxs, (tx) => tx.sender),
-      recipients: groupCounterparties(outTxs, (tx) => tx.recipient),
+      senders: groupCounterparties(inTxs, (tx) => tx.sender, (tx) => realIn(tx) / LUNA_PER_NIM),
+      recipients: groupCounterparties(outTxs, (tx) => tx.recipient, (tx) => realOut(tx) / LUNA_PER_NIM),
       inKinds: tallyKinds(inTxs, own),
       outKinds: tallyKinds(outTxs, own),
       fees: all.filter(isOut).reduce((sum, tx) => {
@@ -620,7 +693,7 @@ export default function Analytics({
       best: best && best.in - best.out > 0 ? best : null,
       worst: worst && worst.in - worst.out < 0 ? worst : null,
     }
-  }, [statSheet, data, txs, ownAddress, ownNorm, period, now, excludeHtlc])
+  }, [statSheet, data, txs, ownAddress, ownNorm, period, now, splits])
 
   // "All" truncates at 90 days of buckets — never call any of this all-time.
   const scopeLabel = period === 0 ? 'the loaded history (capped at 90 days)' : `the last ${period} days`
@@ -663,16 +736,20 @@ export default function Analytics({
               {p === 0 ? 'All' : `${p}d`}
             </button>
           ))}
-          <div className="period-sep" aria-hidden="true" />
-          <button
-            type="button"
-            className={excludeHtlc ? 'period active htlc-toggle' : 'period htlc-toggle'}
-            onClick={() => setExcludeHtlc((prev) => !prev)}
-            title="Filter out Nimiq Pay internal HTLC balance maintenance transfers"
-            aria-pressed={excludeHtlc}
-          >
-            No HTLC
-          </button>
+          {hasInternal && (
+            <>
+              <div className="period-sep" aria-hidden="true" />
+              <button
+                type="button"
+                className={hideInternal ? 'period active htlc-toggle' : 'period htlc-toggle'}
+                onClick={() => setHideInternal((prev) => !prev)}
+                title="Hide Nimiq Pay's internal HTLC transfers from the chart"
+                aria-pressed={hideInternal}
+              >
+                Hide internal
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -685,6 +762,9 @@ export default function Analytics({
         >
           <span className="label">Received</span>
           <span className="value green">+{fmt(data.stats.totalIn)}</span>
+          {!hideInternal && data.stats.internalIn > 0 && (
+            <span className="stat-sub">+ {fmt(data.stats.internalIn)} internal</span>
+          )}
         </button>
         <button
           type="button"
@@ -694,6 +774,9 @@ export default function Analytics({
         >
           <span className="label">Sent</span>
           <span className="value red">−{fmt(data.stats.totalOut)}</span>
+          {!hideInternal && data.stats.internalOut > 0 && (
+            <span className="stat-sub">− {fmt(data.stats.internalOut)} internal</span>
+          )}
         </button>
         <button
           type="button"
@@ -716,7 +799,7 @@ export default function Analytics({
       <div className="card chart-card">
         <span className="label label-with-info">
           Daily net flow (NIM)
-          <InfoIcon text="Received minus sent per day, from your indexed transactions. Tap a bar to see that day's transactions. Rewards and staking moves are not included." />
+          <InfoIcon text="Received minus sent per day, from your indexed transactions. Faded bars are Nimiq Pay's internal HTLC transfers: NIM that leaves for a contract and comes back to you. Tap a bar to see that day's transactions. Rewards and staking moves are not included." />
         </span>
         <svg
           viewBox={`0 0 ${W} ${H}`}
@@ -776,24 +859,49 @@ export default function Analytics({
           ))}
           {/* bars — only render days with actual flow; empty days read as the flat zero line */}
           {data.points.map((p, i) => {
-            const net = p.in - p.out
-            if (net === 0) return null
+            const { real, internal, stacked } = dayBars[i]
+            if (real === 0 && internal === 0) return null
             const x = PAD_L + i * slotW + (slotW - barW) / 2
-            const barH = Math.max(1.2, (Math.abs(net) / yRange) * plotH)
-            const yy = net >= 0 ? y(net) : y(0)
+            const realBar = real !== 0 ? span(0, real) : null
+            const internalBar =
+              internal !== 0 ? (stacked ? span(real, real + internal) : span(0, internal)) : null
+            const parts: string[] = []
+            if (real !== 0) {
+              const amount = formatLuna(Math.abs(real) * LUNA_PER_NIM, lang)
+              parts.push(`${amount} NIM ${real >= 0 ? 'received' : 'sent'}`)
+            }
+            if (internal !== 0) {
+              const amount = formatLuna(Math.abs(internal) * LUNA_PER_NIM, lang)
+              parts.push(`${amount} NIM internal HTLC transfers ${internal >= 0 ? 'in' : 'out'}`)
+            }
             return (
               <g key={p.key}>
-                <rect
-                  x={x}
-                  y={yy}
-                  width={barW}
-                  height={barH}
-                  rx="1.5"
-                  fill={net >= 0 ? 'var(--green)' : 'var(--red)'}
-                  opacity="0.9"
-                >
-                  <title>{`${p.label}: ${formatLuna(Math.abs(net) * 100000, lang)} NIM ${net >= 0 ? 'received' : 'sent'}`}</title>
-                </rect>
+                <title>{`${p.label}: ${parts.join('; ')}`}</title>
+                {realBar && (
+                  <rect
+                    x={x}
+                    y={realBar.y}
+                    width={barW}
+                    height={realBar.h}
+                    rx="1.5"
+                    fill={barColour(real)}
+                    opacity="0.9"
+                  />
+                )}
+                {internalBar && (
+                  <rect
+                    x={x}
+                    y={internalBar.y}
+                    width={barW}
+                    height={internalBar.h}
+                    rx="1.5"
+                    fill={barColour(internal)}
+                    fillOpacity="0.3"
+                    stroke={barColour(internal)}
+                    strokeWidth="1"
+                    strokeDasharray="2 1.5"
+                  />
+                )}
                 {n <= 16 && (
                   <text x={x + barW / 2} y={H - 6} fontSize="8" fill="var(--muted)" textAnchor="middle">
                     {p.label}
@@ -815,6 +923,18 @@ export default function Analytics({
             0
           </text>
         </svg>
+        {showInternal && (
+          <div className="flow-legend">
+            <span className="flow-legend-item">
+              <span className="flow-swatch flow-swatch-real" aria-hidden="true" />
+              Payments
+            </span>
+            <span className="flow-legend-item">
+              <span className="flow-swatch flow-swatch-internal" aria-hidden="true" />
+              Internal HTLC transfers (Nimiq Pay)
+            </span>
+          </div>
+        )}
         {flowFlat && <p className="hint small">No significant daily flow in this period</p>}
       </div>
 
@@ -931,14 +1051,29 @@ export default function Analytics({
               const isOut = tx.sender.replace(/\s+/g, '').toUpperCase() === ownNorm
               const label = txLabel(tx, ownAddress ?? '')
               const memo = decodeMemo(tx.data)
+              // The amount is the real part; a round trip's internal part sits beside it.
+              // A self transfer has no split, so it keeps its plain amount.
+              const sp = splits.get(tx.hash)
+              const realLuna = sp ? (isOut ? sp.realOut : sp.realIn) : tx.value
+              const internalLuna = sp ? (isOut ? sp.internalOut : sp.internalIn) : 0
               return (
                 <div key={tx.hash} className="tx">
                   <div className="tx-main">
                     <span className={isOut ? 'out' : 'in'}>
                       {isOut ? '▼ sent' : '▲ received'}
                       {isLabelledTxKind(label) && <span className={`tx-kind ${label}`}> · {label}</span>}
+                      {internalLuna > 0 && (
+                        <span className="kind-pill tx-internal-chip">
+                          <span className="tx-kind htlc">Internal</span>
+                        </span>
+                      )}
                     </span>
-                    <span className="tx-amount">{formatLuna(tx.value, lang)} NIM</span>
+                    <span className={internalLuna > 0 ? 'tx-amount tx-amount-split' : 'tx-amount'}>
+                      {formatLuna(realLuna, lang)} NIM
+                      {internalLuna > 0 && (
+                        <span className="tx-internal">(+{formatLuna(internalLuna, lang)} internal)</span>
+                      )}
+                    </span>
                   </div>
                   <div className="tx-sub">
                     {tx.timestamp
