@@ -145,6 +145,8 @@ import Analytics, { type AnalyticsPeriod } from './Analytics'
 import InfoIcon from './InfoIcon'
 import Confetti from './Confetti'
 import TourHost from './TourHost'
+import Landing, { PhoneQr } from './Landing'
+import type { SampleEntry } from './lib/features'
 import {
   advanceNext,
   dismissOffer,
@@ -170,6 +172,50 @@ const VIEWS: View[] = ['dashboard', 'history', 'receipts', 'request', 'export']
 
 function isView(value: string | null): value is View {
   return !!value && (VIEWS as string[]).includes(value)
+}
+
+/**
+ * Scrolls to a `data-learn` anchor and lights it briefly. The screen is still
+ * filling in when the sample wallet lands (statements and portfolio data arrive
+ * above the anchor and push it down), so the anchor is re-checked for a few
+ * seconds and put back if it drifted. A touch, a wheel or a key press ends that,
+ * so the reader keeps control of the page.
+ */
+function scrollToLearnTarget(target: string): void {
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  const started = Date.now()
+  let timer = 0
+  let anchored = false
+  const stop = () => {
+    window.clearTimeout(timer)
+    window.removeEventListener('wheel', stop)
+    window.removeEventListener('touchstart', stop)
+    window.removeEventListener('keydown', stop)
+  }
+  window.addEventListener('wheel', stop, { passive: true })
+  window.addEventListener('touchstart', stop, { passive: true })
+  window.addEventListener('keydown', stop)
+  const settle = () => {
+    const el = document.querySelector<HTMLElement>(`[data-learn="${target}"]`)
+    if (!el) {
+      if (Date.now() - started < 3000) timer = window.setTimeout(settle, 100)
+      else stop()
+      return
+    }
+    if (!anchored) {
+      anchored = true
+      el.scrollIntoView({ block: 'start', behavior: reduce ? 'auto' : 'smooth' })
+      el.classList.add('learn-flash')
+      window.setTimeout(() => el.classList.remove('learn-flash'), 2200)
+      timer = window.setTimeout(settle, 800)
+      return
+    }
+    // Content above the anchor has landed: put the anchor back at the top.
+    if (Math.abs(el.getBoundingClientRect().top) > 24) el.scrollIntoView({ block: 'start', behavior: 'auto' })
+    if (Date.now() - started < 3500) timer = window.setTimeout(settle, 250)
+    else stop()
+  }
+  settle()
 }
 
 const RATES_KEY = 'nimbooks:rates'
@@ -717,6 +763,11 @@ export default function App() {
   // Onboarding tour state machine (see lib/tour.ts). The App owns setView, so
   // TourHost asks it to navigate via onNavigate when a route step is entered.
   const [tour, setTour] = useState<TourRuntimeState>({ phase: 'idle', stepIndex: 0 })
+  // Sample-wallet entries from the landing's explainers (lib/features.ts). An entry
+  // that names a screen skips the tour offer once, and the screen is applied when
+  // the account lands (see the learn effect after openStake).
+  const skipTourOfferRef = useRef(false)
+  const learnEntryRef = useRef<SampleEntry | null>(null)
 
   // Public metrics (live connected wallets and total visits) for the landing hero
   const [publicStats, setPublicStats] = useState<{ uniqueWallets: number; totalConnections: number } | null>(null)
@@ -789,6 +840,11 @@ export default function App() {
     if (!isDemoMode()) return
     if (tour.phase !== 'idle') return
     if (sendOpen || stakeOpen || cashlinkOpen || changelogOpen) return
+    // A learn-page entry that named a screen takes its one-shot skip here.
+    if (skipTourOfferRef.current) {
+      skipTourOfferRef.current = false
+      return
+    }
     setTour((t) => offerTour(t))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [account?.nimiqAddress, connecting, loading, sendOpen, stakeOpen, cashlinkOpen, changelogOpen])
@@ -1080,9 +1136,12 @@ export default function App() {
     }
   }
 
-  const connectDemo = async () => {
+  // `entry` comes from a learn-page explainer: it lands on that screen, and only
+  // a tour entry keeps the tour offer. The plain button passes nothing.
+  const connectDemo = async (entry?: SampleEntry) => {
     setConnecting(true)
     setError(null)
+    skipTourOfferRef.current = !!entry && !entry.tour
     try {
       // Public mainnet address with real human activity — read-only demo mode.
       // (NQ43 Y1RH P1K7 JH78 LRTS 95RY GAUU UBDK FFGX: seeded story wallet —
@@ -1095,9 +1154,14 @@ export default function App() {
       seedDemoData(acc.nimiqAddress ?? 'NQ43 Y1RH P1K7 JH78 LRTS 95RY GAUU UBDK FFGX')
       setPayConsensus(acc.consensus ?? null)
       setAccount(acc)
+      if (entry) {
+        setView(entry.view)
+        learnEntryRef.current = entry
+      }
       await refresh(acc)
       setToast('Demo mode: read-only sample wallet.')
     } catch (e) {
+      skipTourOfferRef.current = false
       setError('Demo load failed: ' + (e as Error).message)
     } finally {
       setConnecting(false)
@@ -2230,6 +2294,17 @@ export default function App() {
     }
     setStakeOpen(true)
   }
+
+  // A learn-page entry lands on the screen it named: its panel opens, and the
+  // anchor it names scrolls into view. Runs once, when the sample account arrives.
+  useEffect(() => {
+    const entry = learnEntryRef.current
+    if (!entry || !account) return
+    learnEntryRef.current = null
+    if (entry.open === 'stake') openStake()
+    if (entry.target) scrollToLearnTarget(entry.target)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [account])
 
   // Watch a submitted stake tx until it shows up on chain. Fire-and-forget:
   // the panel stays usable while it runs, and a tx that never lands turns into
@@ -3443,6 +3518,7 @@ export default function App() {
   const mcpChip = (
     <a
       className="mcp-chip"
+      data-learn="mcp"
       href="/mcp"
       target="_blank"
       rel="noopener"
@@ -3494,110 +3570,104 @@ export default function App() {
     const inNimiqPay = isInNimiqPay()
     const isMobile = isMobileDevice()
     return (
-      <div className="app">
+      <div className="app app-landing">
         <HeroBackground />
-        <header className="hero">
-          <div className="hero-actions">
-            {versionBadge}
-            {mcpChip}
-            <button
-              className="btn-ghost theme-toggle"
-              onClick={toggleTheme}
-              title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-              aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-            >
-              {theme === 'dark' ? '☀️' : '🌙'}
-            </button>
-          </div>
-          <div className="logo">📒</div>
-          <h1>NimBooks</h1>
-          <p className="tagline">The books for your Nimiq wallet - and the world's first in-Pay staking.</p>
-          {publicStats && publicStats.uniqueWallets > 0 && (
-            <div
-              className="hero-metric-pill"
-              role="status"
-              title="Unique wallets connected to NimBooks, and total wallet sessions opened"
-            >
-              <span className="live-dot" aria-hidden="true" />
-              <span className="metric-text">
-                <strong>{publicStats.uniqueWallets.toLocaleString(lang)}</strong> {publicStats.uniqueWallets === 1 ? 'wallet' : 'wallets'} connected
-                {publicStats.totalConnections > 0 && (
-                  // Real spaces either side of the dot: it is aria-hidden, so without them
-                  // screen readers would run the two counts together
-                  <>
-                    {' '}
-                    <span className="metric-sep" aria-hidden="true">·</span>
-                    {' '}
-                    <strong>{publicStats.totalConnections.toLocaleString(lang)}</strong> {publicStats.totalConnections === 1 ? 'visit' : 'visits'}
-                  </>
-                )}
-              </span>
-            </div>
-          )}
-        </header>
-        <main className="connect-panel">
-          {inNimiqPay ? (
-            <>
-              <button className="btn-primary" onClick={connect} disabled={connecting || hubConnecting}>
-                {connecting ? 'Connecting…' : 'Connect Wallet'}
-              </button>
-              <p className="hint">Connect your Nimiq wallet to start keeping the books.</p>
-              {payConsensus === false && <p className="hint small dim">{PAY_SYNCING_COPY}</p>}
-              <div className="connect-divider">or</div>
-            </>
-          ) : isMobile ? (
-            <>
-              <a
-                className="btn-primary btn-link"
-                href={NIMIQ_PAY_APP_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                Open in Nimiq Pay →
-              </a>
-              <p className="hint">
-                NimBooks runs inside the Nimiq Pay app, where your NIM wallet lives. Tap it
-                on your phone.
-              </p>
-              {/* Phone without the app: the Hub login works on mobile browsers
-                  via redirect (lib/wallet.connectHub) — staking included,
-                  since the Hub signing path shipped. */}
+        <div className="landing-intro">
+          <header className="hero">
+            <div className="hero-actions">
+              {versionBadge}
+              {mcpChip}
               <button
-                className="btn-ghost-lg"
-                onClick={connectWithHub}
-                disabled={connecting || hubConnecting}
+                className="btn-ghost theme-toggle"
+                onClick={toggleTheme}
+                title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+                aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
               >
-                {hubConnecting ? 'Opening Nimiq Hub…' : 'No app? Continue with Nimiq Hub'}
+                {theme === 'dark' ? '☀️' : '🌙'}
               </button>
-            </>
-          ) : (
-            <>
-              <button className="btn-primary" onClick={connectWithHub} disabled={connecting || hubConnecting}>
-                {hubConnecting ? 'Opening Nimiq Hub…' : 'Continue with Nimiq Hub'}
-              </button>
-              <p className="hint">
-                Sign in with your Nimiq wallet right here in the browser. No app needed.
-              </p>
-            </>
-          )}
-          <button className="btn-ghost-lg" onClick={connectDemo} disabled={connecting || hubConnecting}>
-            Try with a sample wallet
-          </button>
-          <ul className="feature-list">
-            <li>Balance &amp; history with live fiat values (37 currencies)</li>
-            {/* A Pay user needs no suffix; everyone else gets a pointer to the
-                two ways in — Hub sign-in now signs staking for real, and the
-                Pay app stays the one-tap path. */}
-            <li>Stake, unstake &amp; track rewards{!inNimiqPay && ' (Nimiq Pay or Hub sign-in)'}</li>
-            <li>Payment requests (invoices) that settle on-chain</li>
-            <li>Signed receipts: verifiable proof of payment</li>
-            <li>Tax-ready CSV statements &amp; exports</li>
-          </ul>
-          {error && <p className="error">{error}</p>}
-          {/* Soft warnings (stale rates, a busy node) land in the toast, which
-              this screen has no room for — a dim note carries them instead. */}
-          {toast && !error && <p className="hint small">{toast}</p>}
-        </main>
+            </div>
+            <div className="logo">📒</div>
+            <h1>NimBooks</h1>
+            <p className="tagline">The books for your Nimiq wallet - and the world's first in-Pay staking.</p>
+            {publicStats && publicStats.uniqueWallets > 0 && (
+              <div
+                className="hero-metric-pill"
+                role="status"
+                title="Unique wallets connected to NimBooks, and total wallet sessions opened"
+              >
+                <span className="live-dot" aria-hidden="true" />
+                <span className="metric-text">
+                  <strong>{publicStats.uniqueWallets.toLocaleString(lang)}</strong> {publicStats.uniqueWallets === 1 ? 'wallet' : 'wallets'} connected
+                  {publicStats.totalConnections > 0 && (
+                    // Real spaces either side of the dot: it is aria-hidden, so without them
+                    // screen readers would run the two counts together
+                    <>
+                      {' '}
+                      <span className="metric-sep" aria-hidden="true">·</span>
+                      {' '}
+                      <strong>{publicStats.totalConnections.toLocaleString(lang)}</strong> {publicStats.totalConnections === 1 ? 'visit' : 'visits'}
+                    </>
+                  )}
+                </span>
+              </div>
+            )}
+          </header>
+          <main className="connect-panel">
+            {inNimiqPay ? (
+              <>
+                <button className="btn-primary" onClick={connect} disabled={connecting || hubConnecting}>
+                  {connecting ? 'Connecting…' : 'Connect Wallet'}
+                </button>
+                <p className="hint">Connect your Nimiq wallet to start keeping the books.</p>
+                {payConsensus === false && <p className="hint small dim">{PAY_SYNCING_COPY}</p>}
+                <div className="connect-divider">or</div>
+              </>
+            ) : isMobile ? (
+              <>
+                <a
+                  className="btn-primary btn-link"
+                  href={NIMIQ_PAY_APP_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Open in Nimiq Pay →
+                </a>
+                <p className="hint">
+                  NimBooks runs inside the Nimiq Pay app, where your NIM wallet lives. Tap it
+                  on your phone.
+                </p>
+                {/* Phone without the app: the Hub login works on mobile browsers
+                    via redirect (lib/wallet.connectHub) — staking included,
+                    since the Hub signing path shipped. */}
+                <button
+                  className="btn-ghost-lg"
+                  onClick={connectWithHub}
+                  disabled={connecting || hubConnecting}
+                >
+                  {hubConnecting ? 'Opening Nimiq Hub…' : 'No app? Continue with Nimiq Hub'}
+                </button>
+              </>
+            ) : (
+              <>
+                <button className="btn-primary" onClick={connectWithHub} disabled={connecting || hubConnecting}>
+                  {hubConnecting ? 'Opening Nimiq Hub…' : 'Continue with Nimiq Hub'}
+                </button>
+                <p className="hint">
+                  Sign in with your Nimiq wallet right here in the browser. No app needed.
+                </p>
+              </>
+            )}
+            <button className="btn-ghost-lg" onClick={() => connectDemo()} disabled={connecting || hubConnecting}>
+              Try with a sample wallet
+            </button>
+            {error && <p className="error">{error}</p>}
+            {/* Soft warnings (stale rates, a busy node) land in the toast, which
+                this screen has no room for — a dim note carries them instead. */}
+            {toast && !error && <p className="hint small">{toast}</p>}
+          </main>
+          <PhoneQr />
+        </div>
+        <Landing onSampleEntry={connectDemo} busy={connecting || hubConnecting} />
         {changelogModal}
       </div>
     )
@@ -3839,7 +3909,7 @@ export default function App() {
         {view === 'dashboard' && (
           <section className="dashboard">
             <div className="stat-row">
-              <div className="card total">
+              <div className="card total" data-learn="total">
                 <div className="total-header">
                   <span className="label label-with-info">
                     Total value
@@ -3920,7 +3990,7 @@ export default function App() {
             {/* Quick actions: the two things a wallet is for, one thumb-reach
                 below the balance. Actions, not sections — they open sheets and
                 leave the 5-tab dock alone. */}
-            <div className="card quick-actions">
+            <div className="card quick-actions" data-learn="quick-actions">
               <span className="label">Quick actions</span>
               <div className="quick-actions-row">
                 <button
@@ -4693,7 +4763,7 @@ export default function App() {
         )}
 
         {view === 'export' && (
-          <section className="export">
+          <section className="export" data-learn="export">
             <h2>Export</h2>
             <p className="hint">
               Download your NIM transaction history as CSV, ready for your accountant or tax
@@ -4734,7 +4804,7 @@ export default function App() {
               refreshTick={refreshTick}
             />
 
-            <div className="card statement-card">
+            <div className="card statement-card" data-learn="statement">
               <span className="label">Tax-year statement</span>
               <p className="hint small">
                 Daily closes at CoinGecko UTC prices, aggregated per day: received, sent, fees,
@@ -4903,7 +4973,7 @@ export default function App() {
               )}
             </div>
 
-            <div className="card tax-card">
+            <div className="card tax-card" data-learn="tax">
               <span className="label">Crypto tax (FIFO)</span>
               <p className="hint small">
                 Realized gains on a first-in-first-out basis, priced at each day's close and
@@ -5005,7 +5075,7 @@ export default function App() {
               )}
             </div>
 
-            <div className="card backup-card">
+            <div className="card backup-card" data-learn="backup">
               <span className="label">Backup &amp; restore</span>
               <p className="hint small">
                 Your books are yours: take them out any time. Receipts, payment requests, the

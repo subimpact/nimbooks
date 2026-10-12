@@ -589,7 +589,7 @@ export function Portfolio({
   )
 
   return (
-    <div className={`card portfolio-card${!gate.unlocked ? ' locked' : ''}`}>
+    <div className={`card portfolio-card${!gate.unlocked ? ' locked' : ''}`} data-learn="portfolio">
       <span className="label">Portfolio report</span>
       <p className="hint small">
         Your wallet plus any other Nimiq addresses you hold, in one report with a grand total. Save it as a PDF for your records or your accountant.

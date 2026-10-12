@@ -723,7 +723,7 @@ export default function Analytics({
   const TOP_N = 5
 
   return (
-    <section className="analytics">
+    <section className="analytics" data-learn="analytics">
       <div className="analytics-head">
         <h2>Analytics</h2>
         <div className="period-switch">
