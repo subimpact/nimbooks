@@ -243,6 +243,10 @@ a:focus-visible {
   color: var(--accent);
   font-weight: 700;
 }
+.metric-sep {
+  margin: 0 6px;
+  opacity: 0.6;
+}
 .live-dot {
   width: 7px;
   height: 7px;

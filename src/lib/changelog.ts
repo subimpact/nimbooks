@@ -21,6 +21,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     date: '2026-10-12',
     items: [
       'Analytics now tells Nimiq Pay\'s internal HTLC transfers apart from real payments: each round trip into a contract and back is matched and shown as a faded layer on the chart, Received and Sent count real payments only with the internal amount listed underneath, and "Hide internal" zooms the chart to your payments - reported by Paul Gertz',
+      'The landing page metric now shows total visits beside the number of connected wallets',
     ],
   },
   {
