@@ -337,7 +337,7 @@ function SupportSection() {
     <section className="learn-support" id="learn-support" aria-labelledby="learn-support-title">
       <h2 id="learn-support-title">Support NimBooks</h2>
       <p className="learn-support-lead">
-        NimBooks is free and built by one person. If NimBooks saves you time, you can support it by sending some NIM to the address below.
+        NimBooks is free and built by one person. If it saves you time, you can support it by sending some NIM to the address below.
       </p>
       <p className="learn-support-lead">
         Staking with ImpactZero also supports NimBooks and keeps your NIM earning.
