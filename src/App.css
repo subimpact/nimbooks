@@ -3425,9 +3425,16 @@ a.btn-ghost.btn-link {
   body.printing-portfolio > *:not(.portfolio-report) {
     display: none !important;
   }
+  /* body keeps min-height: 100vh for the app; in print that resolves to a full
+     page (or the phone screen), so an empty second page follows the report. */
   html:has(body.printing-portfolio),
   body.printing-portfolio {
     background: #fff !important;
+    min-height: 0 !important;
+    height: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
   }
   body.printing-portfolio .portfolio-report,
   body.printing-portfolio .portfolio-report * {
@@ -3442,6 +3449,13 @@ a.btn-ghost.btn-link {
     font-family: var(--font-sans);
     padding: 0;
     margin: 0;
+    break-inside: avoid-page;
+    page-break-inside: avoid;
+    break-after: avoid-page;
+    page-break-after: avoid;
+  }
+  body.printing-portfolio .portfolio-report > :last-child {
+    margin-bottom: 0 !important;
   }
   body.printing-portfolio .portfolio-report-head {
     display: flex;
