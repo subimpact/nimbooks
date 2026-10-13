@@ -141,6 +141,7 @@ import { buildDownloadLink, buildShortExportLink } from './lib/downloadLink'
 import { exportBackup, importBackup, validateBackup } from './lib/backup'
 import { APP_VERSION_LABEL, CHANGELOG } from './lib/changelog'
 import QrCode from './QrCode'
+import { DONATION_ADDRESS, DONATION_MEMO } from './lib/support'
 import Analytics, { type AnalyticsPeriod } from './Analytics'
 import InfoIcon from './InfoIcon'
 import Confetti from './Confetti'
@@ -1870,6 +1871,16 @@ export default function App() {
     setSendOpen(true)
   }
 
+  // The changelog's support link: the modal closes and the send sheet opens
+  // already addressed, the memo naming the cause. The amount stays empty: a
+  // suggestion of how much to give is not NimBooks' business.
+  const openDonationFromChangelog = () => {
+    setChangelogOpen(false)
+    setSendTo(DONATION_ADDRESS)
+    setSendMemo(DONATION_MEMO)
+    openSend()
+  }
+
   // Memoised on `sendState` so the Escape handler below can depend on it and
   // always hold a current copy — a stale one would think it may close.
   const closeSend = useCallback(() => {
@@ -3502,6 +3513,27 @@ export default function App() {
         <p className="changelog-feedback">
           Report a bug or send feedback at <a href="mailto:nimbooks@subimpact.net">nimbooks@subimpact.net</a>
         </p>
+        {isDemoMode() || !canSend() ? (
+          // Demo and read-only sessions cannot sign a payment, so the changelog
+          // shows the public donation address with a copy instead.
+          <p className="changelog-feedback">
+            Support NimBooks:{' '}
+            <span className="mono">{DONATION_ADDRESS}</span>{' '}
+            <button
+              type="button"
+              className="btn-ghost changelog-support-copy"
+              onClick={async () => {
+                if (await copyText(DONATION_ADDRESS, 'NIM address copied!')) setAddrCopied(true)
+              }}
+            >
+              {addrCopied ? 'Copied ✓' : 'Copy'}
+            </button>
+          </p>
+        ) : (
+          <button type="button" className="btn-ghost-lg changelog-support" onClick={openDonationFromChangelog}>
+            Support NimBooks
+          </button>
+        )}
         {CHANGELOG.map((entry) => (
           <div key={entry.version} className="changelog-entry">
             <div className="changelog-version">

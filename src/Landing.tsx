@@ -3,6 +3,7 @@ import FeatureArt from './LandingArt'
 import QrCode from './QrCode'
 import { dialogFocus } from './lib/dialogFocus'
 import { NIMIQ_PAY_APP_URL } from './lib/device'
+import { DONATION_ADDRESS, DONATION_QR_VALUE } from './lib/support'
 import { FEATURES, featureBySlug, type FeatureDef, type SampleEntry } from './lib/features'
 
 // What NimBooks does, before you connect. Below 1024px: feature cards that open a
@@ -64,6 +65,9 @@ const TRUST = [
     body: 'There is nothing to sign up for. Your wallet is your sign-in.',
   },
 ]
+
+/** Public facts about the donation address: it is the owner's, shown on chain. */
+const TOP_SUPPORTERS = 20
 
 interface LandingProps {
   /** Starts the sample wallet on the screen an explainer asked for, or on the guided tour. */
@@ -135,6 +139,8 @@ export default function Landing({ onSampleEntry, busy }: LandingProps) {
   const takeTour = () => enterSample({ view: 'dashboard', tour: true })
 
   const shown = featureBySlug(openSlug)
+  const support = <SupportSection />
+
 
   if (desktop) {
     const panel = shown ?? FEATURES[0]
@@ -174,6 +180,7 @@ export default function Landing({ onSampleEntry, busy }: LandingProps) {
         </section>
         <HowItWorks />
         <TrustStrip />
+        {support}
       </>
     )
   }
@@ -199,6 +206,7 @@ export default function Landing({ onSampleEntry, busy }: LandingProps) {
       </section>
       <HowItWorks />
       <TrustStrip />
+      {support}
       <p className="learn-builders">
         Building with AI? NimBooks has a read-only MCP server for AI assistants.{' '}
         <a href="/mcp/" target="_blank" rel="noopener">
@@ -258,6 +266,115 @@ function TrustStrip() {
           </li>
         ))}
       </ul>
+    </section>
+  )
+}
+
+/** Whole NIM, decimals dropped: a decimal that small is noise, not news. */
+const wholeNim = (nim: number): string => Math.floor(nim).toLocaleString('en-GB')
+
+/** The public donation summary, fetched once. Errors keep the address card. */
+type SupportState = { status: 'loading' } | { status: 'error' } | { status: 'ok'; data: SupportersJson }
+
+interface SupportersJson {
+  totalNim?: number
+  count?: number
+  supporters?: { name: string; amountNim: number }[]
+}
+
+/** The section after the trust strip: why to give, the address, and the public totals. */
+function SupportSection() {
+  const [state, setState] = useState<SupportState>({ status: 'loading' })
+  const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    const control = new AbortController()
+    const load = async () => {
+      try {
+        const res = await fetch('/api/supporters', { signal: control.signal })
+        if (!res.ok) throw new Error(String(res.status))
+        const data = (await res.json()) as SupportersJson
+        setState({ status: 'ok', data })
+      } catch (e) {
+        // Aborted (unmounted) is not an error — the component is gone anyway.
+        if (e instanceof DOMException && e.name === 'AbortError') return
+        setState({ status: 'error' })
+      }
+    }
+    void load()
+    return () => control.abort()
+  }, [])
+
+  // The landing has no toast of its own; the button itself confirms.
+  const copyAddress = async () => {
+    try {
+      await navigator.clipboard.writeText(DONATION_ADDRESS)
+    } catch {
+      const ta = document.createElement('textarea')
+      ta.value = DONATION_ADDRESS
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      try {
+        document.execCommand('copy')
+      } catch {
+        /* nothing more to try */
+      }
+      ta.remove()
+    }
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  const loaded = state.status === 'ok'
+  const data = loaded ? state.data : null
+  const supporters = (loaded && data?.supporters) || []
+  const shown = supporters.slice(0, TOP_SUPPORTERS)
+  const total = loaded && typeof data?.totalNim === 'number' ? data.totalNim : null
+
+  return (
+    <section className="learn-support" id="learn-support" aria-labelledby="learn-support-title">
+      <h2 id="learn-support-title">Support NimBooks</h2>
+      <p className="learn-support-lead">
+        NimBooks is free and built by one person. If it saves you time, you can support it with NIM.
+      </p>
+      <p className="learn-support-lead">
+        Staking with ImpactZero also supports NimBooks and keeps your NIM earning.
+      </p>
+      <div className="learn-support-card">
+        <QrCode
+          value={DONATION_QR_VALUE}
+          size={132}
+          label="QR code of the NimBooks donation address"
+        />
+        <p className="mono learn-support-addr">{DONATION_ADDRESS}</p>
+        <button type="button" className="btn-secondary" onClick={() => void copyAddress()}>
+          {copied ? 'Address copied ✓' : 'Copy address'}
+        </button>
+      </div>
+      {loaded && (
+        <div className="learn-support-pool">
+          {total !== null && (
+            <p className="learn-support-total">
+              Total raised: <strong>{wholeNim(total)} NIM</strong>
+            </p>
+          )}
+          {shown.length === 0 ? (
+            <p className="learn-support-empty">Be the first supporter</p>
+          ) : (
+            <ul className="learn-support-list" aria-label="Supporters">
+              {shown.map((s, i) => (
+                // Names can repeat (two "Anonymous supporter" senders stay separate rows).
+                <li key={`${s.name}-${i}`}>
+                  <span>{s.name}</span>
+                  <span className="learn-support-nim">{wholeNim(s.amountNim)} NIM</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </section>
   )
 }

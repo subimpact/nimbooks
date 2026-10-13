@@ -306,6 +306,7 @@ a:focus-visible {
 .learn-section,
 .learn-how,
 .learn-trust,
+.learn-support,
 .learn-builders {
   margin-top: 28px;
 }
@@ -488,6 +489,87 @@ a:focus-visible {
 .learn-builders a {
   color: var(--accent);
   font-weight: 700;
+}
+
+/* Support section: why to give, the donation address card, and the public
+   supporters list the API serves. The list hides while loading or if the API
+   fails: the address card is the part that must never disappear. */
+.learn-support {
+  text-align: center;
+}
+.learn-support h2 {
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+.learn-support-lead {
+  max-width: 460px;
+  margin: 6px auto 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.learn-support-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  max-width: 560px;
+  margin: 16px auto 0;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--card);
+}
+.learn-support-card .qr {
+  width: 132px;
+  height: 132px;
+}
+.learn-support-addr {
+  max-width: 100%;
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+.learn-support-pool {
+  max-width: 560px;
+  margin: 4px auto 0;
+  padding: 0 16px;
+}
+.learn-support-total {
+  margin: 6px auto 0;
+  font-size: 14px;
+  color: var(--text);
+}
+.learn-support-total strong {
+  font-weight: 800;
+}
+.learn-support-list {
+  list-style: none;
+  margin-top: 10px;
+  text-align: left;
+}
+.learn-support-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  color: var(--text);
+}
+.learn-support-list li:last-child {
+  border-bottom: 0;
+}
+.learn-support-nim {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+.learn-support-empty {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--muted);
 }
 
 /* Phone sheet: full screen, scrolls inside, Escape / Back / ✕ close it. */
@@ -729,7 +811,8 @@ a:focus-visible {
     margin-top: 20px;
   }
   .learn-how,
-  .learn-trust {
+  .learn-trust,
+  .learn-support {
     grid-column: 1 / -1;
     margin-top: 40px;
   }
@@ -2823,6 +2906,17 @@ a.btn-ghost.btn-link {
   line-height: 1.5;
   color: var(--muted);
   margin-bottom: 3px;
+}
+
+/* The changelog's support link: a quiet full-width action under the feedback
+   line (writable sessions), or a copy beside the address (read-only ones). */
+.changelog-support {
+  width: 100%;
+  margin: 0 0 14px;
+}
+.changelog-support-copy {
+  padding: 2px 8px;
+  font-size: 12px;
 }
 
 /* Radio-style option rows — currency list and validator picker */
