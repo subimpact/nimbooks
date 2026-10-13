@@ -379,6 +379,86 @@ async function sheetFacts(page) {
     await ctx.close()
   }
 
+  // ── 2b. The support section: donation address card + public supporters list
+  //          served by a mocked /api/supporters (the probe never touches RPC).
+  {
+    const FIXTURE = {
+      address: 'NQ39 XC3L JHXL 5GKB K09G J765 X577 PS3A KHFE',
+      totalNim: 21809.29948,
+      count: 1,
+      supporters: [{ name: 'Wool', amountNim: 21809.29948, lastAt: 1791907083283 }],
+      updatedAt: 1791907200000,
+    }
+    for (const [label, viewport] of [['phone', PHONE], ['desktop', DESK]]) {
+      const { ctx, page, errors } = await open(browser, viewport)
+      await page.route('**/api/supporters', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(FIXTURE) }))
+      await page.goto(BASE + '/', { waitUntil: 'domcontentloaded' })
+      if (label === 'phone') await page.waitForSelector('.learn-card', { timeout: 20000 })
+      else await page.waitForSelector('.learn-list button', { timeout: 20000 })
+      await page.waitForSelector('.learn-support .learn-support-total', { timeout: 10000 })
+      const facts = await page.evaluate(() => {
+        const sec = document.querySelector('.learn-support')
+        const copy = [...document.querySelectorAll('.learn-support-card button')].find((b) => /copy/i.test(b.textContent))
+        return {
+          present: !!sec,
+          title: sec?.querySelector('h2')?.textContent?.trim() ?? '',
+          addr: sec?.querySelector('.learn-support-addr')?.textContent?.trim() ?? '',
+          hasCopy: !!copy,
+          copyLabel: copy?.textContent?.trim() ?? '',
+          qr: !!sec?.querySelector('svg.qr'),
+          total: [...(sec?.querySelectorAll('.learn-support-total') ?? [])].map((p) => p.textContent.replace(/\s+/g, ' ').trim()).join(''),
+          list: [...(sec?.querySelectorAll('.learn-support-list li') ?? [])].map((li) => li.textContent.replace(/\s+/g, ' ').trim()),
+          text: sec?.innerText ?? '',
+        }
+      })
+      check(`${label}: support section shows the donation address in mono`, /NQ39 XC3L JHXL 5GKB K09G J765 X577 PS3A KHFE/.test(facts.addr), facts.addr)
+      check(`${label}: support section has a copy button`, facts.hasCopy, JSON.stringify(facts))
+      check(`${label}: support section shows a QR code`, facts.qr)
+      check(`${label}: "Total raised: 21,809 NIM" (whole NIM, rounded down)`, /Total raised:\s*21,809 NIM/.test(facts.total), facts.total)
+      check(`${label}: "Support NimBooks" heading and copy line`, facts.title === 'Support NimBooks' && /free and built by one person/.test(facts.text), JSON.stringify({ title: facts.title }))
+      check(`${label}: ImpactZero staking line`, /Staking with ImpactZero also supports NimBooks/.test(facts.text))
+      check(`${label}: supporters list shows "Wool" with his amount`,
+        facts.list.some((li) => /Wool/.test(li) && /21,809 NIM/.test(li)), JSON.stringify(facts.list))
+      check(`${label}: body text carries no supporter address ("NQ88")`, !(await page.evaluate(() => document.body.innerText)).includes('NQ88'))
+      check(`${label}: no horizontal overflow at 360px (support section)`, (await overflow(page)) <= 1, `overflow=${await overflow(page)}`)
+      check(`${label}: support section: no page errors`, errors.length === 0, errors.slice(0, 3).join(' | '))
+      await ctx.close()
+    }
+
+    // API fails: the address card stays, the list part hides.
+    {
+      const { ctx, page, errors } = await open(browser, PHONE)
+      await page.route('**/api/supporters', (r) => r.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'unavailable' }) }))
+      await page.goto(BASE + '/', { waitUntil: 'domcontentloaded' })
+      await page.waitForSelector('.learn-support .learn-support-card', { timeout: 10000 })
+      const down = await page.evaluate(() => {
+        const sec = document.querySelector('.learn-support')
+        return {
+          addr: sec?.querySelector('.learn-support-addr')?.textContent?.trim() ?? '',
+          copy: [...(sec?.querySelectorAll('button') ?? [])].some((b) => /copy/i.test(b.textContent)),
+          qr: !!sec?.querySelector('svg.qr'),
+          total: !!sec?.querySelector('.learn-support-total'),
+          list: !!sec?.querySelector('.learn-support-list'),
+        }
+      })
+      check('API 503: the address card still renders', /NQ39 XC3L/.test(down.addr) && down.copy && down.qr, JSON.stringify(down))
+      check('API 503: the supporters list hides, gracefully', !down.total && !down.list, JSON.stringify(down))
+      check('API 503: no page errors', errors.length === 0, errors.slice(0, 3).join(' | '))
+      await ctx.close()
+    }
+
+    // Zero donations: "Be the first supporter".
+    {
+      const { ctx, page } = await open(browser, PHONE)
+      await page.route('**/api/supporters', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ totalNim: 0, count: 0, supporters: [], updatedAt: 1 }) }))
+      await page.goto(BASE + '/', { waitUntil: 'domcontentloaded' })
+      await page.waitForSelector('.learn-support-pool', { timeout: 10000 })
+      check('zero donations: "Be the first supporter" shows',
+        (await page.locator('.learn-support-pool').innerText()).includes('Be the first supporter'))
+      await ctx.close()
+    }
+  }
+
   // ── 3. Copy rules across everything the probe read ────────────────────────
   const joined = allText.join('\n')
   check('no em-dash in rendered landing or explainer text', !joined.includes(EM_DASH), `${(joined.match(new RegExp(EM_DASH, 'g')) || []).length} found`)
