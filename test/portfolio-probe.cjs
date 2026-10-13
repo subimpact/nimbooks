@@ -70,6 +70,28 @@ async function openExport(page) {
     await page.emulateMedia({ media: 'print' })
     const repHidden = await page.evaluate(() => getComputedStyle(document.querySelector('.portfolio-report')).display)
     check('print w/o class: report stays hidden', repHidden === 'none')
+    // No blank second page: body must not reserve 100vh in print (report is ~310-390px).
+    // scrollHeight can never drop below the viewport, so it is compared against
+    // max(viewport, report); the body box is the strict check.
+    for (const [w, h] of [[673, 1001], [412, 915]]) {
+      await page.setViewportSize({ width: w, height: h })
+      await page.evaluate(() => document.body.classList.add('printing-portfolio'))
+      await page.emulateMedia({ media: 'print' })
+      const m = await page.evaluate(() => ({
+        repH: document.querySelector('.portfolio-report').getBoundingClientRect().height,
+        bodyH: document.body.getBoundingClientRect().height,
+        bodyMinH: getComputedStyle(document.body).minHeight,
+        docSH: document.documentElement.scrollHeight,
+        vh: innerHeight,
+      }))
+      const cap = Math.ceil(m.repH) + 2
+      const info = JSON.stringify(m)
+      check(`print ${w}x${h}: body min-height is 0px`, m.bodyMinH === '0px', info)
+      check(`print ${w}x${h}: body box fits report (no extra page)`, m.bodyH <= cap, info)
+      check(`print ${w}x${h}: scrollHeight <= max(viewport, report)+2`, m.docSH <= Math.max(m.vh, cap), info)
+      await page.evaluate(() => document.body.classList.remove('printing-portfolio'))
+      await page.emulateMedia({ media: 'screen' })
+    }
     check('demo: no page errors', errors.length === 0, errors.join(' | '))
     await ctx.close()
   }
