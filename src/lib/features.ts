@@ -295,8 +295,8 @@ export const FEATURES: FeatureDef[] = [
       'Stays in your wallet: your key. NimBooks only ever gets the signature and the public key (the part of a key that anyone may see).',
     ],
     goodToKnow: [
-      'The check confirms the signer is the sender or the recipient, and that the amount, the time (within a minute) and the note match the chain.',
-      'A transaction that failed on chain, or does not exist, fails the check.',
+      'The check confirms the signer is the sender or the recipient, and that the amount, the time (within a minute) and the note match the chain. A transaction that failed, or does not exist, fails it.',
+      'The signature is not on-chain: a receipt is kept on the device that signed it and inside its link. Back up from Export to keep it through a reset; a link you shared keeps working either way.',
       'The sample wallet is read-only. It includes one receipt signed in advance.',
     ],
     tryView: { view: 'receipts' },
@@ -549,7 +549,7 @@ export const FEATURES: FeatureDef[] = [
     ],
     goodToKnow: [
       'The chain is public. Anyone can look up the transactions your books show.',
-      "Counting is your choice: the connect screen has a Don't count me link, and Export, Backup & restore changes it later. The record keeps the hash and the masked form, not the full address, but anyone who already knows an address could work out its hash, so treat it as pseudonymous, not anonymous.",
+      "Counting is your choice: the connect screen has a Don't count me link, and Export, Backup & restore changes it later, which also deletes your wallet's record. The record keeps the hash and the masked form, not the full address, but anyone who already knows an address could work out its hash, so treat it as pseudonymous, not anonymous.",
       'A shared request or receipt link can go through a link shortener, which can read the link.',
     ],
     tryView: { view: 'export', target: 'backup' },
