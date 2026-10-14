@@ -247,6 +247,12 @@ a:focus-visible {
   margin: 0 6px;
   opacity: 0.6;
 }
+.hero-metric-split {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+  opacity: 0.85;
+}
 .live-dot {
   width: 7px;
   height: 7px;
@@ -3813,4 +3819,12 @@ a.btn-ghost.btn-link {
 }
 .count-consent-actions .btn-secondary {
   margin: 0;
+}
+
+/* Backup reminder (lib/backupNudge): Receipts tab card and the cashlink result */
+.backup-nudge .hint.small {
+  margin: 0 0 10px;
+}
+.receipts .backup-nudge {
+  margin-bottom: 12px;
 }

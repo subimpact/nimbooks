@@ -15,6 +15,8 @@
 // that dropped them would lose the only copy. It also means the file has to be
 // kept as carefully as a wallet, which the backup screen says out loud.
 
+import { BACKUP_STATE_KEY } from './backupNudge'
+
 export interface BackupFile {
   app: 'nimbooks'
   version: 1
@@ -43,9 +45,13 @@ const CACHE_PREFIXES = ['nimbooks:restake:', 'nimbooks:txs:']
 // than falling outside the backup on a punctuation mismatch.
 const CASHLINK_KEY = 'nimbooks.cashlinks.v1'
 
-/** Re-fetchable, never exported — and never restorable either (see below). */
+// About this device, not the books: the backup reminder's own timestamps would
+// silence the reminder on whichever device a backup is restored to.
+const DEVICE_KEYS = [BACKUP_STATE_KEY]
+
+/** Re-fetchable or device-bound, never exported — and never restorable either (see below). */
 function isCacheKey(key: string): boolean {
-  return CACHE_KEYS.includes(key) || CACHE_PREFIXES.some((p) => key.startsWith(p))
+  return CACHE_KEYS.includes(key) || DEVICE_KEYS.includes(key) || CACHE_PREFIXES.some((p) => key.startsWith(p))
 }
 
 function isUserData(key: string): boolean {

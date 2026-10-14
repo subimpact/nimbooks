@@ -149,6 +149,7 @@ import TourHost from './TourHost'
 import Landing, { PhoneQr } from './Landing'
 import type { SampleEntry } from './lib/features'
 import { COUNT_NOTICE, consentFromLanding, getCountConsent, setCountConsent, type CountConsent } from './lib/connectCount'
+import { markBackedUp, markUnbackedChange, needsBackup } from './lib/backupNudge'
 import {
   advanceNext,
   dismissOffer,
@@ -789,7 +790,7 @@ export default function App() {
 
   // Public metrics for the landing hero: real wallets and their visits since the
   // tracker started (sample-wallet sessions are not visits)
-  const [publicStats, setPublicStats] = useState<{ uniqueWallets: number; totalConnections: number; since: string | null } | null>(null)
+  const [publicStats, setPublicStats] = useState<{ uniqueWallets: number; totalConnections: number; since: string | null; pay: number; hub: number } | null>(null)
   useEffect(() => {
     fetch('/api/stats')
       .then((r) => (r.ok ? r.json() : null))
@@ -800,6 +801,8 @@ export default function App() {
             uniqueWallets: data.uniqueWallets,
             totalConnections: Number.isFinite(visits) && visits >= 0 ? visits : 0,
             since: typeof data.since === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(data.since) ? data.since : null,
+            pay: Number.isFinite(data.pay) && data.pay >= 0 ? data.pay : 0,
+            hub: Number.isFinite(data.hub) && data.hub >= 0 ? data.hub : 0,
           })
         }
       })
@@ -810,9 +813,28 @@ export default function App() {
   // the notice and not opted out (lib/connectCount). The sample wallet carries
   // no one's data, so it is always counted (as demo, apart from real visits).
   const [countConsent, setCountConsentState] = useState<CountConsent | null>(getCountConsent)
+  // Receipts and cashlink keys exist only on this device: after one is made,
+  // suggest a backup until one is copied (lib/backupNudge).
+  const [backupDue, setBackupDue] = useState(needsBackup)
+  const noteUnbacked = () => {
+    markUnbackedChange()
+    setBackupDue(true)
+  }
   const chooseCount = (v: CountConsent) => {
     setCountConsent(v)
     setCountConsentState(v)
+    // Opting out also deletes this wallet's record on the server, so a wallet
+    // counted before the choice doesn't stay counted. Opting back in counts it
+    // again on the spot (the effect below re-runs once the ref is cleared).
+    trackedWalletRef.current = null
+    const addr = account?.provider !== 'demo' ? account?.nimiqAddress : undefined
+    if (v === 'no' && addr) {
+      fetch('/api/forget-wallet', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ address: addr }),
+      }).catch(() => {})
+    }
   }
   const trackedWalletRef = useRef<string | null>(null)
   useEffect(() => {
@@ -1731,6 +1753,7 @@ export default function App() {
       return
     }
     setCashlinkHistory(loadCashlinks(from))
+    noteUnbacked()
     try {
       const res = await sendNim({
         recipient: fresh.address,
@@ -3005,6 +3028,7 @@ export default function App() {
       } catch {
         /* storage full — keep in memory */
       }
+      noteUnbacked()
       setToast('Receipt signed ✓')
     } catch (e) {
       console.error('signReceipt failed:', e)
@@ -3675,6 +3699,13 @@ export default function App() {
                   )}
                 </span>
               </div>
+            )}
+            {/* Where the visits come from: Pay on phones, the Hub (Nimiq Wallet) in any browser */}
+            {publicStats && publicStats.pay + publicStats.hub > 0 && (
+              <p className="hero-metric-split">
+                {publicStats.pay.toLocaleString(lang)} {publicStats.pay === 1 ? 'visit' : 'visits'} via Nimiq Pay ·{' '}
+                {publicStats.hub.toLocaleString(lang)} via Nimiq Wallet
+              </p>
             )}
           </header>
           <main className="connect-panel">
@@ -4685,7 +4716,22 @@ export default function App() {
               <p className="empty">
                 No receipts yet. Go to History and tap "Sign receipt" on a transaction to create
                 a shareable proof-of-payment.
+                <br />
+                Signed some before? Receipts are kept on the device that signed them, so signing
+                out of Nimiq Pay clears them. Restore a backup from Export, or sign them again
+                from History: the transactions are still on-chain.
               </p>
+            )}
+            {receipts.length > 0 && backupDue && (
+              <div className="card backup-nudge" role="status">
+                <p className="hint small">
+                  These receipts live only on this device. Signing out of Nimiq Pay or clearing
+                  its data removes them; links you already shared keep working.
+                </p>
+                <button className="btn-secondary" onClick={openBackup}>
+                  Back up now
+                </button>
+              </div>
             )}
             {receipts.map((r) => (
               <div key={r.txHash} className="receipt">
@@ -5351,6 +5397,8 @@ export default function App() {
                   onClick={async () => {
                     try {
                       await navigator.clipboard.writeText(backupJson)
+                      markBackedUp()
+                      setBackupDue(false)
                       setToast('Backup copied. Paste it somewhere safe ✓')
                     } catch {
                       setError('Could not copy. Select the text above and copy it manually.')
@@ -6273,6 +6321,23 @@ export default function App() {
                 >
                   Revert to my wallet
                 </button>
+                {backupDue && (
+                  <div className="backup-nudge">
+                    <p className="hint small warn">
+                      This link's key lives only on this device. Back up now so a reset of Nimiq
+                      Pay can't strand the NIM.
+                    </p>
+                    <button
+                      className="btn-secondary"
+                      onClick={() => {
+                        closeCashlink()
+                        openBackup()
+                      }}
+                    >
+                      Back up now
+                    </button>
+                  </div>
+                )}
                 {cashlinkError && <p className="hint small warn">{cashlinkError}</p>}
                 <button className="btn-ghost-lg" onClick={closeCashlink}>
                   Done
@@ -6330,10 +6395,17 @@ export default function App() {
                   {cashlinkBusy ? 'Confirm in your wallet…' : 'Create cashlink'}
                 </button>
                 {cashlinkSignerReady ? (
-                  <p className="hint small">
-                    One wallet confirmation puts the NIM into the link. Anyone holding the link
-                    can claim it — keep it private until you send it.
-                  </p>
+                  <>
+                    <p className="hint small">
+                      One wallet confirmation puts the NIM into the link. Anyone holding the link
+                      can claim it — keep it private until you send it.
+                    </p>
+                    <p className="hint small warn">
+                      The link's key is kept only on this device. Until it is claimed, the link
+                      itself is the only way to claim or revert the NIM, so copy it or back up
+                      before you sign out of Nimiq Pay or switch phones.
+                    </p>
+                  </>
                 ) : (
                   <p className="hint small">Preparing the signing library…</p>
                 )}
