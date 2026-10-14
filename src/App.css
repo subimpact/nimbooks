@@ -3794,3 +3794,23 @@ a.btn-ghost.btn-link {
   line-height: 1.45;
   color: var(--text-secondary);
 }
+
+/* Wallet-count consent: the landing notice, the one-time banner, the Backup toggle */
+.count-notice {
+  margin-top: 12px;
+}
+.count-notice .btn-link-inline {
+  font-size: inherit;
+  padding: 0;
+}
+.count-consent .hint.small {
+  margin: 0 0 10px;
+}
+.count-consent-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.count-consent-actions .btn-secondary {
+  margin: 0;
+}
