@@ -23,6 +23,8 @@ export const CHANGELOG: ChangelogEntry[] = [
       'An honest usage number: the landing page now counts only real wallets recorded since October 9 (the earlier figure started from a placeholder of 18 wallets and 45 visits), sample-wallet sessions no longer count as visits, and a reload within 30 minutes is the same visit',
       "NimBooks asks before it counts your wallet: the connect screen says what is kept and has a Don't count me link, wallets that connected before ask once, and Export, Backup & restore has the switch",
       'Nimiq Pay SDK 0.2.4: when Pay turns down a payment, stake or signature, NimBooks now shows the reason Pay gave',
+      "Don't count me now also deletes your wallet's record from the server, and the landing page shows where visits come from: Nimiq Pay or Nimiq Wallet",
+      'Receipts and cashlink keys live only on the device, so signing out of Nimiq Pay clears them: NimBooks now says so where it matters, warns before you create a cashlink, and suggests a backup after you sign a receipt or create a link until one is copied',
     ],
   },
   {
