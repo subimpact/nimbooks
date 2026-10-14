@@ -1,6 +1,6 @@
 # 📒 NimBooks
 
-**Stake your NIM and keep the books — in Nimiq Pay, or with Nimiq Wallet in any browser.**
+**Earn on your NIM: stake it, follow every reward and keep the books — in Nimiq Pay or with Nimiq Wallet in any browser.**
 
 NimBooks is a Nimiq Pay Mini App that answers the question every payments wallet user eventually asks: *"What do I actually have, and what happened to it?"*
 

@@ -54,6 +54,8 @@ const { firefox } = require('playwright');
     t('changelog feedback line', await page.locator('.changelog-feedback').count() > 0);
     const fbText = await page.locator('.changelog-feedback').first().innerText().catch(() => '');
     t('feedback line is the email', fbText.includes('nimbooks@subimpact.net') && !fbText.includes('at nimbooks.subimpact.net'), JSON.stringify(fbText.trim().slice(0, 60)));
+    const tg = await page.locator('.changelog-feedback a[href="https://t.me/subimpactNET/6"]').count();
+    t('feedback line links the Telegram group', tg === 1);
     t('changelog has entries', await page.locator('.changelog-entry').count() >= 3);
     const close = page.locator('[aria-label="Close"]').first();
     if (await close.count() > 0) await close.click();

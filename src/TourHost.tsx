@@ -96,6 +96,13 @@ function CoachCard({
           </div>
           <h3 id="tour-coach-title">{step.title}</h3>
           <p>{step.body}</p>
+          {step.link && (
+            <p>
+              <a href={step.link.href} target="_blank" rel="noopener noreferrer">
+                {step.link.label}
+              </a>
+            </p>
+          )}
           <button type="button" className="btn-primary" onClick={onNext}>
             {primaryLabel}
           </button>

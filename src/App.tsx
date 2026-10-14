@@ -55,6 +55,7 @@ import {
   getHtlcInTransit,
   getRemoteAccountBalance,
   getStakingHolding,
+  peekCachedValidators,
   getVestingHoldings,
   getNimiqTransactionHistory,
   refreshTransactionHead,
@@ -150,9 +151,13 @@ import Landing, { PhoneQr } from './Landing'
 import type { SampleEntry } from './lib/features'
 import { COUNT_NOTICE, consentFromLanding, getCountConsent, setCountConsent, type CountConsent } from './lib/connectCount'
 import { markBackedUp, markUnbackedChange, needsBackup } from './lib/backupNudge'
+import { typicalRate, compoundsFor } from './lib/yieldCalc'
+import EarnCard from './EarnCard'
+import YieldCalculator from './YieldCalculator'
 import {
   advanceNext,
   dismissOffer,
+  FEEDBACK_TELEGRAM_URL,
   offerTour,
   skipTour,
   startTour,
@@ -759,6 +764,7 @@ export default function App() {
   const [validatorsError, setValidatorsError] = useState<string | null>(null)
   const validatorLogosRefreshedRef = useRef(false)
   const [selectedValidator, setSelectedValidator] = useState<string | null>(null)
+  const [calcOpen, setCalcOpen] = useState(false)
   const [stakeAmount, setStakeAmount] = useState('')
   const [staking, setStaking] = useState(false)
   const [stakeError, setStakeError] = useState<string | null>(null)
@@ -2136,21 +2142,29 @@ export default function App() {
     setView('dashboard')
   }, [closeUnstakeModal])
 
-  // The validator list is a 1.4 MB payload — 13× the whole gzipped bundle —
-  // so it is fetched only when something actually renders from it, never just
-  // because a wallet connected:
-  //   - the stake panel is open (the picker needs the full list), or
-  //   - this wallet has a delegation (the balance card resolves its name).
-  // A connected non-staker who never opens the panel now pays nothing.
-  // Cached 10 min in chain.ts, so reopening the panel is free.
+  // The validator list is a big payload (~0.8 MB compressed), so it is fetched
+  // fresh only where freshness matters: the stake panel and the yield
+  // calculator. The Earn card on Overview shows a yield to every wallet, but
+  // takes any cached list for that, so a wallet pays for the download once,
+  // when nothing is cached yet. Cached 10 min in chain.ts, so reopening the
+  // panel is free.
   useEffect(() => {
     if (!account?.nimiqAddress) return
     const haveList = validators.length > 0
     // Opening the stake panel re-reads a list already in hand. getValidators answers
     // from its own 10-minute cache, so this costs a fetch only once that has lapsed;
     // without it the in-state copy would be as old as the session.
-    if (haveList && !stakeOpen) return
-    if (!haveList && !stakeOpen && !stakingHolding?.delegation) return
+    if (haveList && !stakeOpen && !calcOpen) return
+    // The Earn card at the top of Overview needs a yield for everyone, staker
+    // or not. Any cached list will do for that (yields move slowly), so the big
+    // payload is fetched only when nothing is cached at all.
+    if (!haveList && !stakeOpen && !calcOpen) {
+      const cached = peekCachedValidators()
+      if (cached) {
+        setValidators(cached)
+        return
+      }
+    }
     let cancelled = false
     if (!haveList) {
       setValidatorsLoading(true)
@@ -2172,7 +2186,7 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [account?.nimiqAddress, stakeOpen, validators.length, stakingHolding?.delegation])
+  }, [account?.nimiqAddress, stakeOpen, calcOpen, validators.length])
 
   // When the stake panel is open and the in-memory list has validators but is
   // missing logos (no full logo AND no cached thumbnail, i.e. an old-format
@@ -2334,6 +2348,14 @@ export default function App() {
   // attempt it and Pay's wallet does the redemption.
   const stakeMaxLuna = Math.max(0, (Number(nimBalance) || 0) + htlcLuna)
   const stakeMaxNim = stakeMaxLuna / 100000
+
+  // Earn card (top of Overview): earning now, and what idle NIM could add. A
+  // staker sees their own pool's yield; anyone else the median pool's, so the
+  // card never steers a newcomer to one validator.
+  const activeStakeNim = (Number(stakingHolding?.active) || 0) / 100000
+  const earning = activeStakeNim > 0
+  const earnRate = (earning ? currentValidator?.annualReward : null) ?? typicalRate(validators)
+  const earnCompound = earning && currentValidator ? compoundsFor(currentValidator) : true
 
   const openStake = () => {
     // A verification still in flight keeps its card — reopening mid-check
@@ -3550,7 +3572,11 @@ export default function App() {
           </button>
         </div>
         <p className="changelog-feedback">
-          Report a bug or send feedback at <a href="mailto:nimbooks@subimpact.net">nimbooks@subimpact.net</a>
+          Report a bug or send feedback in the{' '}
+          <a href={FEEDBACK_TELEGRAM_URL} target="_blank" rel="noopener noreferrer">
+            Telegram group
+          </a>{' '}
+          or at <a href="mailto:nimbooks@subimpact.net">nimbooks@subimpact.net</a>
         </p>
         {isDemoMode() || !canSend() ? (
           // Demo and read-only sessions cannot sign a payment, so the changelog
@@ -3638,7 +3664,7 @@ export default function App() {
         <header className="hero">
           <div className="logo">📒</div>
           <h1>NimBooks</h1>
-          <p className="tagline">Stake your NIM and keep the books - in Nimiq Pay, or with Nimiq Wallet in any browser.</p>
+          <p className="tagline">Earn on your NIM: stake it, follow every reward and keep the books - in Nimiq Pay or with Nimiq Wallet in any browser.</p>
         </header>
         <main className="connect-panel">
           <div className="stake-progress" role="status" aria-live="polite">
@@ -3675,7 +3701,7 @@ export default function App() {
             </div>
             <div className="logo">📒</div>
             <h1>NimBooks</h1>
-            <p className="tagline">Stake your NIM and keep the books - in Nimiq Pay, or with Nimiq Wallet in any browser.</p>
+            <p className="tagline">Earn on your NIM: stake it, follow every reward and keep the books - in Nimiq Pay or with Nimiq Wallet in any browser.</p>
             {publicStats && publicStats.uniqueWallets > 0 && (
               <div
                 className="hero-metric-pill"
@@ -4106,6 +4132,25 @@ export default function App() {
                 </div>
               </div>
             )}
+
+            {/* Earning comes first: what the wallet earns now, or could. */}
+            <EarnCard
+              stakedNim={activeStakeNim}
+              idleNim={stakeMaxNim}
+              hasStaker={earning}
+              rate={earnRate ?? null}
+              validatorName={earning ? (currentValidator?.name ?? null) : null}
+              compound={earnCompound}
+              minStakeNim={MIN_STAKE_NIM}
+              nimPrice={shown.nim}
+              currency={currency}
+              lang={lang}
+              onStake={() => {
+                openStake()
+                if (stakeMaxNim > 0) setStakeAmount(String(Math.floor(stakeMaxNim)))
+              }}
+              onCalculator={() => setCalcOpen(true)}
+            />
 
             {/* Quick actions: the two things a wallet is for, one thumb-reach
                 below the balance. Actions, not sections — they open sheets and
@@ -5243,6 +5288,26 @@ export default function App() {
       </main>
 
       {changelogModal}
+
+      {calcOpen && (
+        <YieldCalculator
+          validators={validators}
+          loading={validatorsLoading}
+          initialAmountNim={earning ? activeStakeNim : stakeMaxNim}
+          initialValidator={earning && currentValidator ? currentValidator.address : null}
+          nimPrice={shown.nim}
+          currency={currency}
+          lang={lang}
+          onClose={() => setCalcOpen(false)}
+          onStake={(amountNim, validatorAddress) => {
+            setCalcOpen(false)
+            openStake()
+            setStakeAmount(String(amountNim))
+            // Only a first stake picks a pool; an existing staker keeps theirs.
+            if (!stakingHolding && validatorAddress) setSelectedValidator(cleanAddr(validatorAddress))
+          }}
+        />
+      )}
 
       {extendedConfirmOpen && (
         <div className="modal-overlay" onClick={() => setExtendedConfirmOpen(false)}>
