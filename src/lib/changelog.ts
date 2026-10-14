@@ -7,7 +7,7 @@
 // Badge text. Spelled out rather than built from a version constant so the exact
 // label ships as one string in the bundle (JSX would emit "v" as a separate node).
 // package.json carries the machine-readable version.
-export const APP_VERSION_LABEL = 'v1.26.0'
+export const APP_VERSION_LABEL = 'v1.27.0'
 
 export interface ChangelogEntry {
   version: string
@@ -16,6 +16,15 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '1.27.0',
+    date: '2026-10-15',
+    items: [
+      'An honest usage number: the landing page now counts only real wallets recorded since October 9 (the earlier figure started from a placeholder of 18 wallets and 45 visits), sample-wallet sessions no longer count as visits, and a reload within 30 minutes is the same visit',
+      "NimBooks asks before it counts your wallet: the connect screen says what is kept and has a Don't count me link, wallets that connected before ask once, and Export, Backup & restore has the switch",
+      'Nimiq Pay SDK 0.2.4: when Pay turns down a payment, stake or signature, NimBooks now shows the reason Pay gave',
+    ],
+  },
   {
     version: '1.26.0',
     date: '2026-10-14',
@@ -168,7 +177,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     version: '1.7.0',
     date: '2026-09-10',
     items: [
-      'World first: stake NIM from inside Nimiq Pay even while your funds are in transit. NimBooks lets Pay’s wallet fund your stake straight from HTLC swap contracts, so your NIM never needs to rest to start earning',
+      'Stake NIM from inside Nimiq Pay even while your funds are in transit. NimBooks lets Pay’s wallet fund your stake straight from HTLC swap contracts, so your NIM never needs to rest to start earning',
       'Your true balance, even inside Nimiq Pay: funds held in HTLC swap contracts now count toward your total, with an “in transit” line and a trajectory that shows the real story',
       'Stake ceiling now counts your in-transit NIM: the slider shows your true stakable balance, not just the resting balance',
       'Stake panel celebrates: confetti burst on a confirmed stake, then the panel closes itself, no more staring at a success line',

@@ -538,17 +538,18 @@ export const FEATURES: FeatureDef[] = [
       },
       {
         title: 'Little leaves the device',
-        body: 'Your books stay in your browser or Pay. The server keeps two things only: a copy of a short export link, for 48 hours, and the connection record.',
+        body: "Your books stay in your browser or Pay. The server keeps two things only: a copy of a short export link, for 48 hours, and, if you agree, a record that counts your wallet.",
       },
     ],
     behindTheScenes: [
       'On this device: receipts, payment requests, the staking log, the cashlink shelf and your settings.',
-      "On NimBooks' server: a SHA-256 hash of each connected address (a one-way fingerprint), a masked form (first and last four characters), the wallet app and the device type.",
+      "On NimBooks' server, for wallets that agreed to be counted: a SHA-256 hash of the address (a one-way fingerprint), a masked form (first and last four characters), the wallet app, the device type, when it first and last connected, and how many visits.",
+      "Each counted visit also sends the builder a chat alert on NimBooks' own Matrix server with the masked address, the wallet app and the device type.",
       'Never leaves your wallet: your keys. NimBooks never sees a key.',
     ],
     goodToKnow: [
       'The chain is public. Anyone can look up the transactions your books show.',
-      "Connecting sends your address to NimBooks' own server once, to count it. The record keeps the hash and the masked form, not the full address.",
+      "Counting is your choice: the connect screen has a Don't count me link, and Export, Backup & restore changes it later. The record keeps the hash and the masked form, not the full address, but anyone who already knows an address could work out its hash, so treat it as pseudonymous, not anonymous.",
       'A shared request or receipt link can go through a link shortener, which can read the link.',
     ],
     tryView: { view: 'export', target: 'backup' },
