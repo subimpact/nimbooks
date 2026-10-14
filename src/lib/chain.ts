@@ -1166,7 +1166,8 @@ const SUPPLY_DECAY = 0.9999999999960264 // supply decay per ms
 const GENESIS_DATE = Date.UTC(2024, 10, 19, 16, 0, 0) // mainnet genesis
 const GENESIS_SUPPLY = 12_893_109_654_06244
 
-function supplyAtTime(ms: number): number {
+/** Circulating NIM supply (Luna) at a moment, on the protocol's emission curve. */
+export function supplyAtTime(ms: number): number {
   const t = ms - GENESIS_DATE
   return TOTAL_SUPPLY - (TOTAL_SUPPLY - GENESIS_SUPPLY) * Math.pow(SUPPLY_DECAY, t)
 }
@@ -1289,6 +1290,22 @@ async function withLogoThumbs(validators: ValidatorInfo[]): Promise<ValidatorInf
 // refresh; both would otherwise download the whole ~1.4 MB list. Share one
 // in-flight request instead.
 let validatorsInflight: Promise<ValidatorInfo[]> | null = null
+
+/**
+ * The cached validator list at any age, without a network call. Yields move
+ * slowly, so an hour-old list is fine for the Overview's earning estimate; the
+ * stake panel still refreshes through getValidators. Null when nothing is cached.
+ */
+export function peekCachedValidators(): ValidatorInfo[] | null {
+  try {
+    const raw = localStorage.getItem(VALIDATORS_CACHE_KEY)
+    if (!raw) return null
+    const entry = JSON.parse(raw) as ValidatorCacheEntry
+    return Array.isArray(entry.validators) && entry.validators.length > 0 ? sortValidators(entry.validators) : null
+  } catch {
+    return null
+  }
+}
 
 export async function getValidators(opts?: { force?: boolean }): Promise<ValidatorInfo[]> {
   // A stale list still beats an empty picker if the API is down.
