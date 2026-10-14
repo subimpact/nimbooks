@@ -7,7 +7,7 @@
 // Badge text. Spelled out rather than built from a version constant so the exact
 // label ships as one string in the bundle (JSX would emit "v" as a separate node).
 // package.json carries the machine-readable version.
-export const APP_VERSION_LABEL = 'v1.27.0'
+export const APP_VERSION_LABEL = 'v1.28.0'
 
 export interface ChangelogEntry {
   version: string
@@ -17,9 +17,12 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
-    version: '1.27.0',
+    version: '1.28.0',
     date: '2026-10-15',
     items: [
+      "Earning comes first: a new Earn card tops Overview with what your stake earns a year (or what your NIM could earn staked, at the median pool's rate), how much NIM sits idle, and one tap to stake it",
+      'Yield calculator: pick an amount, a validator and 1, 3 or 5 years to see the rewards month by month, with a chart and a year-by-year table. It counts compounding for pools that restake, and the yearly fall in new NIM issuance, so later years honestly earn less',
+      'Bugs and ideas now have a home: the changelog and the end of the tour link to the NimBooks Telegram group',
       'An honest usage number: the landing page now counts only real wallets recorded since October 9 (the earlier figure started from a placeholder of 18 wallets and 45 visits), sample-wallet sessions no longer count as visits, and a reload within 30 minutes is the same visit',
       "NimBooks asks before it counts your wallet: the connect screen says what is kept and has a Don't count me link, wallets that connected before ask once, and Export, Backup & restore has the switch",
       'Nimiq Pay SDK 0.2.4: when Pay turns down a payment, stake or signature, NimBooks now shows the reason Pay gave',

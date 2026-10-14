@@ -14,7 +14,7 @@ const PAY_UA =
 const PHONE = { width: 360, height: 780 }
 const DESK = { width: 1280, height: 800 }
 const SLUGS = [
-  'balance', 'history', 'analytics', 'send-receive', 'staking', 'requests', 'receipts',
+  'staking', 'balance', 'history', 'analytics', 'send-receive', 'requests', 'receipts',
   'cashlinks', 'statements', 'tax', 'exports', 'portfolio', 'mcp', 'privacy',
 ]
 const EM_DASH = '\u2014'

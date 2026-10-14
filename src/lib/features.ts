@@ -50,6 +50,42 @@ const PAY_AND_BROWSER = 'Nimiq Pay and browser'
 
 export const FEATURES: FeatureDef[] = [
   {
+    slug: 'staking',
+    title: 'Staking',
+    oneLiner: 'See what your NIM earns, stake it with a validator, and follow every reward.',
+    icon: '🌱',
+    availability: PAY_AND_BROWSER,
+    steps: [
+      {
+        title: 'Start from the Earn card',
+        body: 'The first card on Overview shows what your NIM earns a year, or could earn if you staked it. See the maths opens a calculator; Start earning (or the leaf icon in the top bar) opens the Stake panel.',
+      },
+      {
+        title: 'Pick a validator',
+        body: 'A validator is a node that secures the network and pays rewards to the NIM staked with it. The list is live from Nimiq\'s public validator data. ImpactZero, the validator that keeps NimBooks running, is pinned first.',
+      },
+      {
+        title: 'Stake',
+        body: 'A first stake needs at least 100 NIM. Confirm it in your wallet, and the panel waits until it is on chain.',
+      },
+      {
+        title: 'Unstake in three steps',
+        body: 'Unstake starts a cooldown. When it has cooled down, complete the unstake, then withdraw. The balance banner has both buttons.',
+      },
+    ],
+    behindTheScenes: [
+      'On chain: stakes, unstakes and rewards. Staking is a transaction to the staking contract.',
+      'In Nimiq Pay: your wallet signs and sends the staking transactions.',
+      'In a browser: NimBooks builds the staking transactions, and the Nimiq Hub signs them.',
+    ],
+    goodToKnow: [
+      "Rewards arrive as daily totals, and today's appear tomorrow.",
+      'Unstaking takes up to about a day. It takes longer if the validator is jailed, which means it is removed from the network for a time after misbehaving.',
+      'To switch validator, unstake, wait out the cooldown, then stake again.',
+    ],
+    tryView: { view: 'dashboard', open: 'stake' },
+  },
+  {
     slug: 'balance',
     title: 'Balance in 37 currencies',
     oneLiner: 'Your NIM balance, with its value in the currency you pick.',
@@ -192,42 +228,6 @@ export const FEATURES: FeatureDef[] = [
       'On a phone browser, the Hub takes you to its own page to sign, then brings you back.',
     ],
     tryView: { view: 'dashboard', target: 'quick-actions' },
-  },
-  {
-    slug: 'staking',
-    title: 'Staking',
-    oneLiner: 'Stake NIM with a validator, follow the rewards and unstake when you need to.',
-    icon: '🌱',
-    availability: PAY_AND_BROWSER,
-    steps: [
-      {
-        title: 'Open the Stake panel',
-        body: 'Tap the stake icon in the top bar. The panel shows your current stake and its validator.',
-      },
-      {
-        title: 'Pick a validator',
-        body: 'A validator is a node that secures the network and pays rewards to the NIM staked with it. The list is live from Nimiq\'s public validator data. ImpactZero, the validator that keeps NimBooks running, is pinned first.',
-      },
-      {
-        title: 'Stake',
-        body: 'A first stake needs at least 100 NIM. Confirm it in your wallet, and the panel waits until it is on chain.',
-      },
-      {
-        title: 'Unstake in three steps',
-        body: 'Unstake starts a cooldown. When it has cooled down, complete the unstake, then withdraw. The balance banner has both buttons.',
-      },
-    ],
-    behindTheScenes: [
-      'On chain: stakes, unstakes and rewards. Staking is a transaction to the staking contract.',
-      'In Nimiq Pay: your wallet signs and sends the staking transactions.',
-      'In a browser: NimBooks builds the staking transactions, and the Nimiq Hub signs them.',
-    ],
-    goodToKnow: [
-      "Rewards arrive as daily totals, and today's appear tomorrow.",
-      'Unstaking takes up to about a day. It takes longer if the validator is jailed, which means it is removed from the network for a time after misbehaving.',
-      'To switch validator, unstake, wait out the cooldown, then stake again.',
-    ],
-    tryView: { view: 'dashboard', open: 'stake' },
   },
   {
     slug: 'requests',

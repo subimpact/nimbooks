@@ -8,6 +8,9 @@
  * it.
  */
 
+/** Community chat for bug reports and feedback. */
+export const FEEDBACK_TELEGRAM_URL = 'https://t.me/subimpactNET/6'
+
 export type TourPhase = 'idle' | 'offer' | 'active' | 'completed'
 
 export type TourSpotlightId =
@@ -18,6 +21,7 @@ export type TourSpotlightId =
   | 'history-tab'
   | 'receipts-tab'
   | 'stake'
+  | 'earn'
   | 'export-tab'
 
 export type TourStepDef = {
@@ -29,6 +33,8 @@ export type TourStepDef = {
   route?: 'dashboard' | 'history' | 'receipts' | 'request' | 'export'
   /** Primary button label; defaults to Next. */
   primaryLabel?: string
+  /** A link shown under the body (opens in a new window). */
+  link?: { label: string; href: string }
 }
 
 export const TOUR_STEPS: readonly TourStepDef[] = [
@@ -37,6 +43,13 @@ export const TOUR_STEPS: readonly TourStepDef[] = [
     title: 'Your books, live from the chain',
     body: 'NimBooks reads your Nimiq wallet directly - balance, staking, and every payment, with fiat values in your currency.',
     spotlights: ['balance'],
+    primaryLabel: 'Next',
+  },
+  {
+    id: 'stake',
+    title: 'Make your NIM work',
+    body: 'The Earn card shows what your NIM earns a year, or could earn staked. Its button stakes in one confirmation, See the maths opens the calculator, and you can unstake any time.',
+    spotlights: ['earn'],
     primaryLabel: 'Next',
   },
   {
@@ -78,13 +91,6 @@ export const TOUR_STEPS: readonly TourStepDef[] = [
     primaryLabel: 'Next',
   },
   {
-    id: 'stake',
-    title: 'Make your NIM work',
-    body: 'Delegate to a validator and earn rewards - they show up in Overview as income, and you can unstake anytime.',
-    spotlights: ['stake'],
-    primaryLabel: 'Next',
-  },
-  {
     id: 'export-tab',
     title: 'Your books, exported',
     body: 'Download your statement or full CSV in one tap - no third party, no server copy. The file is yours.',
@@ -95,9 +101,10 @@ export const TOUR_STEPS: readonly TourStepDef[] = [
   {
     id: 'done',
     title: "That's it!",
-    body: 'The books keep themselves. Reach out at nimbooks@subimpact.net if you have feedback.',
+    body: 'The books keep themselves. Found a bug or have an idea? Tell us in the NimBooks Telegram group, or at nimbooks@subimpact.net.',
     spotlights: [],
     primaryLabel: 'Done',
+    link: { label: 'Join the Telegram group', href: FEEDBACK_TELEGRAM_URL },
   },
 ] as const
 

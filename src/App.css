@@ -3828,3 +3828,95 @@ a.btn-ghost.btn-link {
 .receipts .backup-nudge {
   margin-bottom: 12px;
 }
+
+/* Earn card (top of Overview) and the yield calculator sheet */
+.earn-card {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+.earn-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.earn-rate {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+}
+.earn-hero {
+  margin: 6px 0 4px;
+  font-size: 26px;
+  font-weight: 800;
+  color: var(--text);
+  line-height: 1.15;
+}
+.earn-unit {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.earn-idle {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  font-size: 13px;
+  color: var(--text);
+}
+.earn-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+.earn-actions .btn-primary {
+  width: auto;
+  flex: 1 1 auto;
+  margin: 0;
+}
+.calc-form {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.calc-horizons {
+  justify-self: start;
+  margin-top: 6px;
+}
+.calc-result {
+  margin-bottom: 8px;
+}
+.calc-chart .chart {
+  touch-action: none;
+}
+.calc-readout {
+  margin: 2px 0 4px;
+  font-size: 12px;
+  color: var(--muted);
+  min-height: 1.4em;
+}
+.calc-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 10px 0 12px;
+  font-size: 13px;
+}
+.calc-table th,
+.calc-table td {
+  padding: 6px 4px;
+  text-align: right;
+  border-bottom: 1px solid var(--border);
+}
+.calc-table th:first-child,
+.calc-table td:first-child {
+  text-align: left;
+}
+.calc-table th {
+  font-weight: 600;
+  color: var(--muted);
+}
+.calc-note {
+  margin-top: 12px;
+}
