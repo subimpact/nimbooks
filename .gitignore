@@ -26,3 +26,12 @@ dist-ssr
 *.sln
 *.sw?
 .git-commit-msg
+reference/
+
+# Local secrets
+.env
+.env.*
+.dev.vars
+
+# Test bundles
+test/tmp/
