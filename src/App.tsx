@@ -148,6 +148,7 @@ import Confetti from './Confetti'
 import TourHost from './TourHost'
 import Landing, { PhoneQr } from './Landing'
 import type { SampleEntry } from './lib/features'
+import { COUNT_NOTICE, consentFromLanding, getCountConsent, setCountConsent, type CountConsent } from './lib/connectCount'
 import {
   advanceNext,
   dismissOffer,
@@ -786,8 +787,9 @@ export default function App() {
   const skipTourOfferRef = useRef(false)
   const learnEntryRef = useRef<SampleEntry | null>(null)
 
-  // Public metrics (live connected wallets and total visits) for the landing hero
-  const [publicStats, setPublicStats] = useState<{ uniqueWallets: number; totalConnections: number } | null>(null)
+  // Public metrics for the landing hero: real wallets and their visits since the
+  // tracker started (sample-wallet sessions are not visits)
+  const [publicStats, setPublicStats] = useState<{ uniqueWallets: number; totalConnections: number; since: string | null } | null>(null)
   useEffect(() => {
     fetch('/api/stats')
       .then((r) => (r.ok ? r.json() : null))
@@ -797,16 +799,25 @@ export default function App() {
           setPublicStats({
             uniqueWallets: data.uniqueWallets,
             totalConnections: Number.isFinite(visits) && visits >= 0 ? visits : 0,
+            since: typeof data.since === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(data.since) ? data.since : null,
           })
         }
       })
       .catch(() => {})
   }, [])
 
-  // Auto-track wallet sign-ins (once per wallet session)
+  // Public wallet count: a real wallet is counted only once its owner has seen
+  // the notice and not opted out (lib/connectCount). The sample wallet carries
+  // no one's data, so it is always counted (as demo, apart from real visits).
+  const [countConsent, setCountConsentState] = useState<CountConsent | null>(getCountConsent)
+  const chooseCount = (v: CountConsent) => {
+    setCountConsent(v)
+    setCountConsentState(v)
+  }
   const trackedWalletRef = useRef<string | null>(null)
   useEffect(() => {
     if (!account) return
+    if (account.provider !== 'demo' && countConsent !== 'yes') return
     const addr = account.nimiqAddress || (account.provider === 'demo' ? 'demo' : '')
     if (!addr || trackedWalletRef.current === addr) return
     trackedWalletRef.current = addr
@@ -816,7 +827,7 @@ export default function App() {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ address: addr, provider: account.provider, platform }),
     }).catch(() => {})
-  }, [account])
+  }, [account, countConsent])
   // While the walkthrough runs, the dashboard is a passive showroom: none of
   // its controls should open anything under the spotlight.
   const tourActive = tour.phase === 'active'
@@ -1118,6 +1129,8 @@ export default function App() {
   }
 
   const connect = async () => {
+    consentFromLanding()
+    setCountConsentState(getCountConsent())
     setConnecting(true)
     setError(null)
     try {
@@ -1139,6 +1152,8 @@ export default function App() {
   }
 
   const connectWithHub = async () => {
+    consentFromLanding()
+    setCountConsentState(getCountConsent())
     setHubConnecting(true)
     setError(null)
     try {
@@ -3599,7 +3614,7 @@ export default function App() {
         <header className="hero">
           <div className="logo">📒</div>
           <h1>NimBooks</h1>
-          <p className="tagline">The books for your Nimiq wallet - and the world's first in-Pay staking.</p>
+          <p className="tagline">Stake your NIM and keep the books - in Nimiq Pay, or with Nimiq Wallet in any browser.</p>
         </header>
         <main className="connect-panel">
           <div className="stake-progress" role="status" aria-live="polite">
@@ -3636,16 +3651,18 @@ export default function App() {
             </div>
             <div className="logo">📒</div>
             <h1>NimBooks</h1>
-            <p className="tagline">The books for your Nimiq wallet - and the world's first in-Pay staking.</p>
+            <p className="tagline">Stake your NIM and keep the books - in Nimiq Pay, or with Nimiq Wallet in any browser.</p>
             {publicStats && publicStats.uniqueWallets > 0 && (
               <div
                 className="hero-metric-pill"
                 role="status"
-                title="Unique wallets connected to NimBooks, and total wallet sessions opened"
+                title="Real wallets that connected to NimBooks, and their visits. The sample wallet is not counted."
               >
                 <span className="live-dot" aria-hidden="true" />
                 <span className="metric-text">
                   <strong>{publicStats.uniqueWallets.toLocaleString(lang)}</strong> {publicStats.uniqueWallets === 1 ? 'wallet' : 'wallets'} connected
+                  {publicStats.since &&
+                    ` since ${new Date(publicStats.since + 'T00:00:00Z').toLocaleDateString(lang, { month: 'short', day: 'numeric', timeZone: 'UTC' })}`}
                   {publicStats.totalConnections > 0 && (
                     // Real spaces either side of the dot: it is aria-hidden, so without them
                     // screen readers would run the two counts together
@@ -3712,6 +3729,18 @@ export default function App() {
             {/* Soft warnings (stale rates, a busy node) land in the toast, which
                 this screen has no room for — a dim note carries them instead. */}
             {toast && !error && <p className="hint small">{toast}</p>}
+            {/* Informed consent sits beside the buttons that act on it. */}
+            <p className="hint small dim count-notice">
+              {COUNT_NOTICE}{' '}
+              {countConsent === 'no' ? (
+                <>
+                  This device won't be counted.{' '}
+                  <button className="btn-link-inline" onClick={() => chooseCount('yes')}>Count me</button>
+                </>
+              ) : (
+                <button className="btn-link-inline" onClick={() => chooseCount('no')}>Don't count me</button>
+              )}
+            </p>
           </main>
           <PhoneQr />
         </div>
@@ -4033,6 +4062,18 @@ export default function App() {
                 empty wallet. Nothing is gated on this. */}
             {payConsensus === false && totalNimLuna === 0 && allTxs.length === 0 && (
               <p className="hint small dim">{PAY_SYNCING_COPY}</p>
+            )}
+
+            {/* A session restored from before the notice existed never saw it:
+                ask once, and count nothing until answered. */}
+            {account.provider !== 'demo' && countConsent === null && (
+              <div className="card count-consent" role="region" aria-label="Wallet count">
+                <p className="hint small">{COUNT_NOTICE}</p>
+                <div className="count-consent-actions">
+                  <button className="btn-secondary" onClick={() => chooseCount('yes')}>OK, count me</button>
+                  <button className="btn-secondary" onClick={() => chooseCount('no')}>Don't count me</button>
+                </div>
+              </div>
             )}
 
             {/* Quick actions: the two things a wallet is for, one thumb-reach
@@ -5136,6 +5177,16 @@ export default function App() {
               <button className="btn-secondary" onClick={openRestore}>
                 Restore from backup
               </button>
+              {account.provider !== 'demo' && (
+                <p className="hint small dim count-notice">
+                  {countConsent === 'yes'
+                    ? 'This wallet is counted in the public usage number (a one-way hash and a masked address).'
+                    : "This wallet isn't counted in the public usage number."}{' '}
+                  <button className="btn-link-inline" onClick={() => chooseCount(countConsent === 'yes' ? 'no' : 'yes')}>
+                    {countConsent === 'yes' ? "Don't count me" : 'Count me'}
+                  </button>
+                </p>
+              )}
             </div>
 
             <button className="btn-secondary" onClick={requestDeviceId}>

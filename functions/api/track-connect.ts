@@ -1,9 +1,20 @@
 // POST /api/track-connect — records wallet sign-ins and alerts Matrix.
+//
+// The app calls this only after the user has seen the counting notice and not
+// opted out (src/lib/connectCount.ts). What is kept, per wallet: a SHA-256 of
+// the address as the key, a masked form (first and last four characters), the
+// wallet app, the device type, first/last seen and a visit count.
 
-interface KVNamespace {
-  get(key: string): Promise<string | null>
-  put(key: string, value: string, options?: { expirationTtl?: number }): Promise<void>
-}
+import {
+  type KVNamespace,
+  SUMMARY_KEY,
+  VISIT_WINDOW_MS,
+  countWalletRecords,
+  isNimiqAddress,
+  needsRecount,
+  parseStats,
+  walletKey,
+} from '../_lib/connectStats'
 
 interface Ctx {
   request: Request
@@ -15,13 +26,14 @@ interface Ctx {
   }
 }
 
-// SHA-256 for privacy hash of wallet address
-async function sha256(text: string): Promise<string> {
-  const enc = new TextEncoder().encode(text)
-  const buf = await crypto.subtle.digest('SHA-256', enc)
-  return Array.from(new Uint8Array(buf))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('')
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+      'access-control-allow-origin': '*',
+    },
+  })
 }
 
 export const onRequestPost = async ({ request, env }: Ctx): Promise<Response> => {
@@ -36,85 +48,68 @@ export const onRequestPost = async ({ request, env }: Ctx): Promise<Response> =>
     const provider = String(body.provider || 'pay').toLowerCase()
     const platform = String(body.platform || 'web').toLowerCase()
 
-    if (!rawAddress) {
-      return new Response(JSON.stringify({ error: 'missing address' }), {
-        status: 400,
-        headers: { 'content-type': 'application/json; charset=utf-8' },
-      })
-    }
+    if (!rawAddress) return json({ error: 'missing address' }, 400)
 
     const isDemo = rawAddress.toLowerCase() === 'demo' || provider === 'demo'
     const cleanAddr = rawAddress.replace(/\s+/g, '')
-    const hash = await sha256(cleanAddr.toLowerCase())
-    const maskedAddr = isDemo
-      ? 'Demo Sample Wallet'
-      : cleanAddr.length >= 8
-      ? `${cleanAddr.slice(0, 4)}…${cleanAddr.slice(-4)}`
-      : cleanAddr
+    // Random strings never reach the count: only a checksum-valid Nimiq address
+    // (or the sample wallet) is recorded.
+    if (!isDemo && !isNimiqAddress(cleanAddr)) return json({ error: 'invalid address' }, 400)
+
+    const maskedAddr = isDemo ? 'Demo Sample Wallet' : `${cleanAddr.slice(0, 4)}…${cleanAddr.slice(-4)}`
 
     let isNew = false
-    let currentStats = {
-      uniqueWallets: 18,
-      totalConnections: 45,
-      pay: 31,
-      hub: 14,
-      demo: 0,
-      updatedAt: Date.now(),
-    }
+    let countedVisit = false
+    let stats = parseStats(null)
 
     if (env.EXPORT_KV) {
-      const rawSummary = await env.EXPORT_KV.get('stats:summary')
-      if (rawSummary) {
-        try {
-          currentStats = { ...currentStats, ...JSON.parse(rawSummary) }
-        } catch {}
-      }
+      const kv = env.EXPORT_KV
+      const rawSummary = await kv.get(SUMMARY_KEY)
+      stats = parseStats(rawSummary)
+      const now = Date.now()
 
-      const walletKey = `wallet:${hash}`
-      const existingWallet = await env.EXPORT_KV.get(walletKey)
+      const key = await walletKey(cleanAddr)
+      const existing = await kv.get(key)
 
-      if (!existingWallet) {
+      if (!existing) {
         isNew = true
-        if (!isDemo) {
-          currentStats.uniqueWallets += 1
-        }
-        await env.EXPORT_KV.put(
-          walletKey,
-          JSON.stringify({
-            firstSeen: Date.now(),
-            count: 1,
-            provider,
-            platform,
-            masked: maskedAddr,
-          })
-        )
+        countedVisit = true
+        await kv.put(key, JSON.stringify({ firstSeen: now, lastSeen: now, count: 1, provider, platform, masked: maskedAddr }))
       } else {
+        let w: { lastSeen?: number; firstSeen?: number; count?: number } = {}
         try {
-          const w = JSON.parse(existingWallet)
-          await env.EXPORT_KV.put(
-            walletKey,
-            JSON.stringify({
-              ...w,
-              lastSeen: Date.now(),
-              count: (w.count || 1) + 1,
-              provider,
-              platform,
-            })
-          )
-        } catch {}
+          w = JSON.parse(existing)
+        } catch {
+          /* unreadable record — rewrite it below */
+        }
+        // A reload or a reconnect inside the window is the same visit.
+        countedVisit = now - (w.lastSeen || w.firstSeen || 0) > VISIT_WINDOW_MS
+        await kv.put(
+          key,
+          JSON.stringify({ ...w, lastSeen: now, count: (w.count || 1) + (countedVisit ? 1 : 0), provider, platform })
+        )
       }
 
-      currentStats.totalConnections += 1
-      if (provider === 'pay') currentStats.pay += 1
-      else if (provider === 'hub') currentStats.hub += 1
-      else if (provider === 'demo') currentStats.demo += 1
-      currentStats.updatedAt = Date.now()
+      // Recount from the records whenever the wallet set changed, or the
+      // summary is still v1 (seeded) — the records are the source of truth.
+      if ((isNew && !isDemo) || needsRecount(rawSummary)) {
+        stats.uniqueWallets = await countWalletRecords(kv)
+      }
 
-      await env.EXPORT_KV.put('stats:summary', JSON.stringify(currentStats))
+      if (countedVisit) {
+        if (provider === 'pay') stats.pay += 1
+        else if (provider === 'hub') stats.hub += 1
+        else if (provider === 'demo') stats.demo += 1
+      }
+      stats.totalConnections = stats.pay + stats.hub
+      stats.updatedAt = now
+
+      await kv.put(SUMMARY_KEY, JSON.stringify(stats))
     }
 
-    // Send Matrix alert for real wallet sign-ins (and rate-limit demo pings)
-    if (env.MATRIX_ACCESS_TOKEN && env.MATRIX_ROOM_ID && (!isDemo || isNew)) {
+    // Matrix alert for real wallet sign-ins (demo pings only the first time).
+    // Goes to the owner's own homeserver; carries the masked address only.
+    if (env.MATRIX_ACCESS_TOKEN && env.MATRIX_ROOM_ID && countedVisit && (!isDemo || isNew)) {
       const server = (env.MATRIX_HOMESERVER || 'https://matrix.subimpact.net').replace(/\/+$/, '')
       const roomId = encodeURIComponent(env.MATRIX_ROOM_ID)
       const txnId = `connect_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
@@ -122,15 +117,8 @@ export const onRequestPost = async ({ request, env }: Ctx): Promise<Response> =>
 
       const icon = isNew ? '🎉 New Sign-in' : '⚡ Wallet Active'
       const providerLabel = provider === 'pay' ? 'Nimiq Pay' : provider === 'hub' ? 'Nimiq Hub' : 'Demo'
-      const plainText = `${icon} | ${maskedAddr} via ${providerLabel} (${platform}) • Unique wallets: ${currentStats.uniqueWallets} (total visits: ${currentStats.totalConnections})`
-      const htmlText = `${isNew ? '🎉' : '⚡'} <b>${isNew ? 'New Sign-in' : 'Wallet Active'}</b> | <code>${maskedAddr}</code> via <b>${providerLabel}</b> (${platform})<br>Unique wallets: <b>${currentStats.uniqueWallets}</b> • Total visits: <b>${currentStats.totalConnections}</b>`
-
-      const payload = {
-        msgtype: 'm.text',
-        body: plainText,
-        format: 'org.matrix.custom.html',
-        formatted_body: htmlText,
-      }
+      const plainText = `${icon} | ${maskedAddr} via ${providerLabel} (${platform}) • Unique wallets: ${stats.uniqueWallets} (visits: ${stats.totalConnections})`
+      const htmlText = `${isNew ? '🎉' : '⚡'} <b>${isNew ? 'New Sign-in' : 'Wallet Active'}</b> | <code>${maskedAddr}</code> via <b>${providerLabel}</b> (${platform})<br>Unique wallets: <b>${stats.uniqueWallets}</b> • Visits: <b>${stats.totalConnections}</b>`
 
       // Await fetch to Matrix so the edge worker does not terminate before delivery
       try {
@@ -141,34 +129,19 @@ export const onRequestPost = async ({ request, env }: Ctx): Promise<Response> =>
             'Content-Type': 'application/json',
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
           },
-          body: JSON.stringify(payload),
+          body: JSON.stringify({ msgtype: 'm.text', body: plainText, format: 'org.matrix.custom.html', formatted_body: htmlText }),
         })
       } catch (e) {
         console.error('Matrix ping error:', e)
       }
     }
 
-    return new Response(
-      JSON.stringify({
-        ok: true,
-        isNew,
-        stats: {
-          uniqueWallets: currentStats.uniqueWallets,
-          totalConnections: currentStats.totalConnections,
-        },
-      }),
-      {
-        status: 200,
-        headers: {
-          'content-type': 'application/json; charset=utf-8',
-          'access-control-allow-origin': '*',
-        },
-      }
-    )
-  } catch (err: any) {
-    return new Response(JSON.stringify({ error: err?.message || 'internal error' }), {
-      status: 500,
-      headers: { 'content-type': 'application/json; charset=utf-8' },
+    return json({
+      ok: true,
+      isNew,
+      stats: { uniqueWallets: stats.uniqueWallets, totalConnections: stats.totalConnections, since: stats.since },
     })
+  } catch (err: any) {
+    return json({ error: err?.message || 'internal error' }, 500)
   }
 }

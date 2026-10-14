@@ -1,10 +1,10 @@
 # 📒 NimBooks
 
-**The books for your Nimiq wallet — and the world's first in-Pay staking.**
+**Stake your NIM and keep the books — in Nimiq Pay, or with Nimiq Wallet in any browser.**
 
 NimBooks is a Nimiq Pay Mini App that answers the question every payments wallet user eventually asks: *"What do I actually have, and what happened to it?"*
 
-It shows your NIM balance and transaction history with fiat values, lets you **stake and unstake** with a validator picker — **including staking NIM that's still in transit through HTLC swap contracts, a world first for Nimiq Pay mini apps** — exports CSV statements for tax records, issues **payment requests (invoices)** that settle on-chain and reconcile themselves, and lets you create **cryptographically signed proof-of-payment receipts** that anyone can verify on a public page.
+It shows your NIM balance and transaction history with fiat values, lets you **stake and unstake** with a validator picker — **including NIM that's still in transit through Nimiq Pay's HTLC swap contracts** — exports CSV statements for tax records, issues **payment requests (invoices)** that settle on-chain and reconcile themselves, and lets you create **cryptographically signed proof-of-payment receipts** that anyone can verify on a public page.
 
 **Live:** https://nimbooks.subimpact.net (legacy: https://nimbooks.pages.dev redirects)
 
@@ -29,7 +29,7 @@ It shows your NIM balance and transaction history with fiat values, lets you **s
 ## Tech
 
 - React 19 + TypeScript + Vite
-- `@nimiq/mini-app-sdk` (v0.1.0) — `init()`, `listAccounts()`, `sign()`, `sendBasicTransactionWithData()`, `requestDeviceIdentifier()`
+- `@nimiq/mini-app-sdk` (v0.2.4) — `init()`, `listAccounts()`, `sign()`, `sendBasicTransactionWithData()`, `requestDeviceIdentifier()`
 - `@nimiq/hub-api` — the desktop path: sign-in, checkout and staking transactions when there's no Nimiq Pay provider to talk to
 - `@nimiq/core` — the wasm signer: builds the staking transactions the Hub signs, and mints and sweeps cashlink keys; lazy-loaded via dynamic `import()` (~1.2 MB wasm) the first time a staking or cashlink surface opens in a browser session, so Nimiq Pay users never download it
 - `viem` — multi-chain EVM balance reads via public RPCs (no chain-switching needed); lazy-loaded via dynamic `import()`, so it code-splits out of the initial bundle and only downloads when EVM balances are read

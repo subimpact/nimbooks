@@ -1,9 +1,9 @@
 // GET /api/stats — returns public connection metrics for NimBooks landing page.
+//
+// Read-only: a v1 (seeded) summary is corrected on the fly by parseStats, and
+// the next connect rewrites it as v2 with the wallet count taken from records.
 
-interface KVNamespace {
-  get(key: string): Promise<string | null>
-  put(key: string, value: string, options?: { expirationTtl?: number }): Promise<void>
-}
+import { type KVNamespace, SUMMARY_KEY, parseStats } from '../_lib/connectStats'
 
 interface Ctx {
   request: Request
@@ -14,28 +14,7 @@ interface Ctx {
 
 export const onRequestGet = async ({ env }: Ctx): Promise<Response> => {
   try {
-    let summary = {
-      uniqueWallets: 18,
-      totalConnections: 45,
-      pay: 31,
-      hub: 14,
-      demo: 0,
-      updatedAt: Date.now(),
-    }
-
-    if (env.EXPORT_KV) {
-      const raw = await env.EXPORT_KV.get('stats:summary')
-      if (raw) {
-        try {
-          const parsed = JSON.parse(raw)
-          if (typeof parsed.uniqueWallets === 'number') {
-            summary = { ...summary, ...parsed }
-          }
-        } catch {
-          // fallback to defaults
-        }
-      }
-    }
+    const summary = parseStats(env.EXPORT_KV ? await env.EXPORT_KV.get(SUMMARY_KEY) : null)
 
     return new Response(JSON.stringify(summary), {
       status: 200,

@@ -2,7 +2,7 @@
 // Nimiq-specific calls live ONLY here, so the app can port to
 // Telegram Mini Apps / Farcaster later by swapping this file.
 
-import { init, requestDeviceIdentifier, getHostLanguage } from '@nimiq/mini-app-sdk'
+import { init, requestDeviceIdentifier, getHostLanguage, NimiqProviderError } from '@nimiq/mini-app-sdk'
 import type { NimiqProvider } from '@nimiq/mini-app-sdk'
 // Only the default export is real at runtime: hub-api 1.15.0's types/index.d.ts
 // re-exports RedirectRequestBehavior, but dist/HubApi.es.js exports nothing but
@@ -217,8 +217,8 @@ async function readPayAccount(): Promise<WalletAccount> {
 
   try {
     nimiqProvider = await init({ timeout: 10000 })
-    // Typed `Promise<string[] | ErrorResponse>` — anything that isn't an array
-    // means the host didn't answer, and the account stays addressless.
+    // A host error throws a NimiqProviderError (SDK 0.2+), caught below; an
+    // empty or non-array answer still leaves the account addressless.
     const accounts = await nimiqProvider.listAccounts()
     if (Array.isArray(accounts) && accounts.length > 0) {
       account.nimiqAddress = accounts[0]
@@ -558,14 +558,16 @@ export async function getCurrentBlock(): Promise<number | null> {
   }
 }
 
-/** Human-readable text for a signing failure. Pay's SDK rejects with an
- * ErrorResponse object ({ error: { type, message } }) rather than an Error,
- * and String() of that is "[object Object]" — extract the real message. */
+/** Human-readable text for a wallet failure. Pay's SDK (0.2+) throws a
+ * NimiqProviderError, which is an Error; a host method the SDK doesn't wrap can
+ * still hand back a legacy { error: { type, message } } object, whose String()
+ * is "[object Object]" — extract the real message from either. */
 export function errorText(e: unknown): string {
   if (e instanceof Error) return e.message
+  const legacy = NimiqProviderError.fromLegacyResponse(e)
+  if (legacy) return legacy.message
   if (e && typeof e === 'object') {
-    const maybe = e as { error?: { message?: unknown }; message?: unknown }
-    if (maybe.error && typeof maybe.error.message === 'string') return maybe.error.message
+    const maybe = e as { message?: unknown }
     if (typeof maybe.message === 'string') return maybe.message
   }
   return ''
@@ -596,13 +598,6 @@ export async function signMessage(
   if (!nimiqProvider) return null
   try {
     const result = await nimiqProvider.sign(message)
-    if (result && 'error' in result && result.error) {
-      throw new Error(
-        (result.error && typeof result.error.message === 'string'
-          ? result.error.message
-          : null) || 'The Nimiq Pay request failed.'
-      )
-    }
     if (result && 'signature' in result) {
       return { publicKey: result.publicKey, signature: result.signature }
     }
@@ -641,10 +636,6 @@ export function canSend(): boolean {
   if (activeProvider === 'hub') return true
   return !!nimiqProvider
 }
-
-// Nimiq Pay's SDK answers failures as { error: { type, message } } objects;
-// the shape is not exported by the package, so mirror it for narrowing.
-type PayErrorResponse = { error: { type: string; message: string } }
 
 export async function sendNim({
   recipient,
@@ -709,7 +700,7 @@ export async function sendNim({
   //
   // `extraData` has no route here by the shape of the API: Pay takes a string,
   // so a binary tag (a cashlink's FUNDING bytes) cannot ride this rail at all.
-  let res: string | PayErrorResponse
+  let res: string
   try {
     res = memo
       ? await nimiqProvider.sendBasicTransactionWithData({ recipient: to, value, fee, data: memo })
@@ -717,10 +708,6 @@ export async function sendNim({
   } catch (e) {
     console.error('Nimiq Pay send failed:', e)
     throw new Error(errorText(e) || 'The Nimiq Pay payment was rejected.')
-  }
-  if (typeof res !== 'string') {
-    const message = res && typeof res === 'object' && 'error' in res ? res.error?.message : null
-    throw new Error(message || 'Transaction was rejected.')
   }
   // Nimiq Pay returns the serialized transaction, not a hash — the caller
   // recovers the hash from history (chain.findSentTx).
@@ -1011,17 +998,13 @@ export async function stakeNim(delegation: string | null, amountNim: number): Pr
           fee: 0,
         })
       : await nimiqProvider.sendStakeTransaction({ value, fee: 0 })
-    if (typeof res !== 'string') {
-      const message = res && typeof res === 'object' && 'error' in res ? res.error?.message : null
-      return { ok: false, error: message || 'The staking transaction was rejected.' }
-    }
     // Nimiq Pay hands back the transaction it sent — a hash for the staking
     // calls, a serialized transaction for the basic ones. Either way it is the
     // receipt the user sees; the balance card is the real confirmation.
     return { ok: true, hash: res }
   } catch (e) {
     console.error('Nimiq Pay staking failed:', e)
-    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    return { ok: false, error: errorText(e) || 'The staking transaction was rejected.' }
   }
 }
 
@@ -1070,14 +1053,10 @@ export async function unstakeDeactivate(newActiveBalanceNim: number): Promise<Un
 
   try {
     const res = await nimiqProvider.sendSetActiveStakeTransaction({ newActiveBalance: value, fee: 0 })
-    if (typeof res !== 'string') {
-      const message = res && typeof res === 'object' && 'error' in res ? res.error?.message : null
-      return { ok: false, error: message || 'The unstaking transaction was rejected.' }
-    }
     return { ok: true, hash: res }
   } catch (e) {
     console.error('Nimiq Pay unstake (deactivate) failed:', e)
-    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    return { ok: false, error: errorText(e) || 'The unstaking transaction was rejected.' }
   }
 }
 
@@ -1122,14 +1101,10 @@ export async function unstakeRetire(amountNim: number): Promise<UnstakeResult> {
 
   try {
     const res = await nimiqProvider.sendRetireStakeTransaction({ retireStake: value, fee: 0 })
-    if (typeof res !== 'string') {
-      const message = res && typeof res === 'object' && 'error' in res ? res.error?.message : null
-      return { ok: false, error: message || 'The unstaking transaction was rejected.' }
-    }
     return { ok: true, hash: res }
   } catch (e) {
     console.error('Nimiq Pay unstake (retire) failed:', e)
-    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    return { ok: false, error: errorText(e) || 'The unstaking transaction was rejected.' }
   }
 }
 
@@ -1170,14 +1145,10 @@ export async function unstakeRemove(amountNim: number): Promise<UnstakeResult> {
 
   try {
     const res = await nimiqProvider.sendRemoveStakeTransaction({ value, fee: 0 })
-    if (typeof res !== 'string') {
-      const message = res && typeof res === 'object' && 'error' in res ? res.error?.message : null
-      return { ok: false, error: message || 'The withdrawal transaction was rejected.' }
-    }
     return { ok: true, hash: res }
   } catch (e) {
     console.error('Nimiq Pay unstake (remove) failed:', e)
-    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    return { ok: false, error: errorText(e) || 'The withdrawal transaction was rejected.' }
   }
 }
 
