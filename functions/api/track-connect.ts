@@ -117,8 +117,10 @@ export const onRequestPost = async ({ request, env }: Ctx): Promise<Response> =>
 
       const icon = isNew ? '🎉 New Sign-in' : '⚡ Wallet Active'
       const providerLabel = provider === 'pay' ? 'Nimiq Pay' : provider === 'hub' ? 'Nimiq Hub' : 'Demo'
-      const plainText = `${icon} | ${maskedAddr} via ${providerLabel} (${platform}) • Unique wallets: ${stats.uniqueWallets} (visits: ${stats.totalConnections})`
-      const htmlText = `${isNew ? '🎉' : '⚡'} <b>${isNew ? 'New Sign-in' : 'Wallet Active'}</b> | <code>${maskedAddr}</code> via <b>${providerLabel}</b> (${platform})<br>Unique wallets: <b>${stats.uniqueWallets}</b> • Visits: <b>${stats.totalConnections}</b>`
+      // Visits split by wallet app, the same numbers the landing pill shows.
+      const split = `Nimiq Pay ${stats.pay} · Hub ${stats.hub}`
+      const plainText = `${icon} | ${maskedAddr} via ${providerLabel} (${platform}) • Unique wallets: ${stats.uniqueWallets} • Visits: ${stats.totalConnections} (${split})`
+      const htmlText = `${isNew ? '🎉' : '⚡'} <b>${isNew ? 'New Sign-in' : 'Wallet Active'}</b> | <code>${maskedAddr}</code> via <b>${providerLabel}</b> (${platform})<br>Unique wallets: <b>${stats.uniqueWallets}</b> • Visits: <b>${stats.totalConnections}</b> (Nimiq Pay <b>${stats.pay}</b> · Hub <b>${stats.hub}</b>)`
 
       // Await fetch to Matrix so the edge worker does not terminate before delivery
       try {
