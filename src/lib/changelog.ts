@@ -21,7 +21,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     date: '2026-10-15',
     items: [
       "Earning comes first: a new Earn card tops Overview with what your stake earns a year (or what your NIM could earn staked, at the median pool's rate), how much NIM sits idle, and one tap to stake it",
-      'Yield calculator: pick an amount, a validator and 1, 3 or 5 years to see the rewards month by month, with a chart and a year-by-year table. It counts compounding for pools that restake, and the yearly fall in new NIM issuance, so later years honestly earn less',
+      'Yield calculator: pick an amount, a validator and 1, 3 or 5 years to see the rewards month by month, with a chart and a year-by-year table. It counts compounding for pools that restake, and the yearly fall in new NIM issuance, so later years honestly earn less. Its stake button only ever offers NIM that is free to stake, never what is already staking',
       'Bugs and ideas now have a home: the changelog and the end of the tour link to the NimBooks Telegram group',
       'An honest usage number: the landing page now counts only real wallets recorded since October 9 (the earlier figure started from a placeholder of 18 wallets and 45 visits), sample-wallet sessions no longer count as visits, and a reload within 30 minutes is the same visit',
       "NimBooks asks before it counts your wallet: the connect screen says what is kept and has a Don't count me link, wallets that connected before ask once, and Export, Backup & restore has the switch",

@@ -33,6 +33,9 @@ export default function YieldCalculator({
   lang,
   onClose,
   onStake,
+  availableNim,
+  stakedNim,
+  minStakeNim,
 }: {
   validators: ValidatorInfo[]
   loading: boolean
@@ -45,6 +48,12 @@ export default function YieldCalculator({
   onClose: () => void
   /** Opens the stake panel with this amount (and pool, unless "typical"); omitted when staking isn't possible here. */
   onStake?: (amountNim: number, validatorAddress: string | null) => void
+  /** NIM that can be staked right now (basic balance plus funds in transit). */
+  availableNim: number
+  /** NIM already staking (active). Above zero means the button adds to the stake. */
+  stakedNim: number
+  /** Protocol minimum for a first stake. */
+  minStakeNim: number
 }) {
   const [amount, setAmount] = useState(initialAmountNim > 0 ? String(Math.round(initialAmountNim * 100) / 100) : '1000')
   const [pool, setPool] = useState<string>(initialValidator ?? TYPICAL)
@@ -69,6 +78,20 @@ export default function YieldCalculator({
         : null,
     [rate, amountOk, amountNim, years, compound]
   )
+
+  // The button can only ever stake what is free to stake. Whatever is already
+  // staking shows up as earnings in the projection, never as an offer to stake again.
+  const isStaker = stakedNim > 0
+  const freeNim = Math.floor(availableNim * 100000) / 100000
+  const canStake = isStaker ? freeNim >= 1 : freeNim >= minStakeNim
+  const toStake = amountOk ? Math.min(amountNim, freeNim) : 0
+  const stakeNote = !canStake
+    ? isStaker
+      ? `Your ${nimFmt(stakedNim, lang)} NIM is already staking, so this is what it earns. There is no idle NIM to add right now.`
+      : `Staking starts at ${minStakeNim} NIM. You have ${nimFmt(freeNim, lang, 5)} NIM available.`
+    : amountOk && amountNim > freeNim
+      ? `You have ${nimFmt(freeNim, lang, 5)} NIM available to stake${isStaker ? `, on top of the ${nimFmt(stakedNim, lang)} NIM already staking` : ''}.`
+      : null
 
   const maxR = proj ? Math.max(proj.rewardsNim, 1e-9) : 1
   const x = (m: number) => PAD_L + (m / (years * 12)) * plotW
@@ -220,9 +243,10 @@ export default function YieldCalculator({
               </tbody>
             </table>
 
-            {onStake && (
-              <button className="btn-primary" onClick={() => onStake(amountNim, chosen?.address ?? null)}>
-                Stake {nimFmt(amountNim, lang)} NIM
+            {onStake && stakeNote && <p className="hint small calc-stake-note">{stakeNote}</p>}
+            {onStake && canStake && (
+              <button className="btn-primary" onClick={() => onStake(toStake, chosen?.address ?? null)}>
+                {isStaker ? `Add ${nimFmt(toStake, lang)} NIM to your stake` : `Stake ${nimFmt(toStake, lang)} NIM`}
               </button>
             )}
           </>
