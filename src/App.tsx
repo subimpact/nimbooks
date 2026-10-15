@@ -5299,6 +5299,9 @@ export default function App() {
           currency={currency}
           lang={lang}
           onClose={() => setCalcOpen(false)}
+          availableNim={stakeMaxNim}
+          stakedNim={earning ? activeStakeNim : 0}
+          minStakeNim={MIN_STAKE_NIM}
           onStake={(amountNim, validatorAddress) => {
             setCalcOpen(false)
             openStake()
