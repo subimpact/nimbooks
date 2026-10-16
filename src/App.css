@@ -2875,6 +2875,14 @@ a.btn-ghost.btn-link {
   margin: 0 0 12px;
 }
 
+/* Standalone amber note (e.g. the send sheet's "Checking the chain…"
+   heading during a Pay outcome-unknown). Same tint the demo banner uses:
+   amber, "wait and check", not the error red. */
+.warn {
+  font-weight: 600;
+  color: var(--accent);
+}
+
 /* Changelog modal */
 .changelog-feedback {
   font-size: 13px;

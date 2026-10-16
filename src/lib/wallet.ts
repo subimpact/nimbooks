@@ -611,6 +611,52 @@ export async function signMessage(
 
 // --- Sending ---
 
+/** A 64-character hex string — the shape of a Nimiq transaction hash. */
+const TX_HASH_RE = /^[0-9a-f]{64}$/i
+
+/**
+ * The error a caller sees when Nimiq Pay rejects a send with "the transaction
+ * outcome is unknown" — Pay signed (or staged) it but could not learn whether
+ * it reached the network. The money may already be out, so a caller must
+ * switch to a chain lookup rather than offer a retry that can pay twice.
+ * `hash` is the staged transaction's hash when Pay preserved it in `data`.
+ */
+export class TxOutcomeUnknownError extends Error {
+  readonly hash: string | null
+  constructor(message: string, hash: string | null) {
+    super(message)
+    this.name = 'TxOutcomeUnknownError'
+    this.hash = hash
+  }
+}
+
+/**
+ * Did this error mean "the send may have gone out, but Pay could not confirm
+ * it"? Recognised from `NimiqProviderError.from(e)` carrying Pay's documented
+ * marker (code -32001 / type TRANSACTION_OUTCOME_UNKNOWN), or from the typed
+ * error this module throws upstream. Never throws: anything unrecognised
+ * reads as a plain failure.
+ */
+export function outcomeUnknownHash(e: unknown): { unknown: boolean; hash: string | null } {
+  if (e instanceof TxOutcomeUnknownError) return { unknown: true, hash: e.hash }
+  try {
+    const err = NimiqProviderError.from(e)
+    if (err && (err.code === -32001 || err.type === 'TRANSACTION_OUTCOME_UNKNOWN')) {
+      const raw = (err.data as { hash?: unknown } | undefined)?.hash
+      const hash = typeof raw === 'string' && TX_HASH_RE.test(raw) ? raw : null
+      return { unknown: true, hash }
+    }
+  } catch {
+    /* `from` is total over plain inputs — belt only, never a rejection */
+  }
+  return { unknown: false, hash: null }
+}
+
+// Pay's own wording of the failure, reused for every affected call so the
+// advice ("do not send it again") is always the same.
+const PAY_OUTCOME_UNKNOWN_COPY =
+  'Nimiq Pay could not confirm whether this payment went out. Do not send it again until it shows in History.'
+
 export interface SendNimParams {
   recipient: string
   amountLuna: string // string in, so callers never do float maths on Luna
@@ -625,8 +671,11 @@ export interface SendNimParams {
 }
 
 export interface SendNimResult {
-  /** Known immediately for Hub; recovered from history afterwards for Nimiq Pay. */
+  /** Known immediately for Hub and current Nimiq Pay builds (Pay hands back
+   *  the tx hash); recovered from history afterwards only for older Pay
+   *  builds that returned a serialized transaction. */
   hash: string | null
+  /** Legacy Pay builds only: the serialized transaction, rebroadcast-able. */
   serializedTx?: string
 }
 
@@ -707,10 +756,21 @@ export async function sendNim({
       : await nimiqProvider.sendBasicTransaction({ recipient: to, value, fee })
   } catch (e) {
     console.error('Nimiq Pay send failed:', e)
+    // Pay rejects with "outcome unknown" when it cannot tell whether the
+    // signed transaction reached the network. The money may be gone, so this
+    // must surface as a typed error that carries the staged hash (if Pay kept
+    // one) — the caller then looks the payment up on chain instead of inviting
+    // a retry that can pay twice.
+    const unk = outcomeUnknownHash(e)
+    if (unk.unknown) throw new TxOutcomeUnknownError(PAY_OUTCOME_UNKNOWN_COPY, unk.hash)
     throw new Error(errorText(e) || 'The Nimiq Pay payment was rejected.')
   }
-  // Nimiq Pay returns the serialized transaction, not a hash — the caller
-  // recovers the hash from history (chain.findSentTx).
+  // Nimiq Pay resolves with the transaction hash on current builds; the
+  // caller's history lookup (chain.findSentTx) stays as the fallback for
+  // older Pay builds that handed back a serialized transaction.
+  if (typeof res === 'string' && TX_HASH_RE.test(res)) {
+    return { hash: res.toLowerCase(), serializedTx: undefined }
+  }
   return { hash: null, serializedTx: res }
 }
 
@@ -998,12 +1058,24 @@ export async function stakeNim(delegation: string | null, amountNim: number): Pr
           fee: 0,
         })
       : await nimiqProvider.sendStakeTransaction({ value, fee: 0 })
-    // Nimiq Pay hands back the transaction it sent — a hash for the staking
-    // calls, a serialized transaction for the basic ones. Either way it is the
-    // receipt the user sees; the balance card is the real confirmation.
+    // Nimiq Pay hands back the transaction hash it sent — the receipt the
+    // user sees; the balance card is the real confirmation.
     return { ok: true, hash: res }
   } catch (e) {
     console.error('Nimiq Pay staking failed:', e)
+    // "Outcome unknown" is not a no: the transaction may already be mined.
+    // Hand the caller the staged hash to verify on chain (the existing
+    // waitForTxMined flow) rather than inviting a second stake, and never a
+    // blank failure when Pay kept a hash.
+    const unk = outcomeUnknownHash(e)
+    if (unk.unknown) {
+      if (unk.hash) return { ok: true, hash: unk.hash }
+      return {
+        ok: false,
+        error:
+          'Nimiq Pay could not confirm whether this transaction went out. Check History before trying again.',
+      }
+    }
     return { ok: false, error: errorText(e) || 'The staking transaction was rejected.' }
   }
 }
@@ -1056,6 +1128,18 @@ export async function unstakeDeactivate(newActiveBalanceNim: number): Promise<Un
     return { ok: true, hash: res }
   } catch (e) {
     console.error('Nimiq Pay unstake (deactivate) failed:', e)
+    // Same rule as stakeNim's "outcome unknown" leg: a staged transaction is
+    // reported as sent (the caller verifies by hash), and only a hashless
+    // unknown reads as a failure — and then with the check-History wording.
+    const unk = outcomeUnknownHash(e)
+    if (unk.unknown) {
+      if (unk.hash) return { ok: true, hash: unk.hash }
+      return {
+        ok: false,
+        error:
+          'Nimiq Pay could not confirm whether this transaction went out. Check History before trying again.',
+      }
+    }
     return { ok: false, error: errorText(e) || 'The unstaking transaction was rejected.' }
   }
 }
@@ -1104,6 +1188,18 @@ export async function unstakeRetire(amountNim: number): Promise<UnstakeResult> {
     return { ok: true, hash: res }
   } catch (e) {
     console.error('Nimiq Pay unstake (retire) failed:', e)
+    // Same rule as stakeNim's "outcome unknown" leg: a staged transaction is
+    // reported as sent (the caller verifies by hash), and only a hashless
+    // unknown reads as a failure — and then with the check-History wording.
+    const unk = outcomeUnknownHash(e)
+    if (unk.unknown) {
+      if (unk.hash) return { ok: true, hash: unk.hash }
+      return {
+        ok: false,
+        error:
+          'Nimiq Pay could not confirm whether this transaction went out. Check History before trying again.',
+      }
+    }
     return { ok: false, error: errorText(e) || 'The unstaking transaction was rejected.' }
   }
 }
@@ -1148,6 +1244,18 @@ export async function unstakeRemove(amountNim: number): Promise<UnstakeResult> {
     return { ok: true, hash: res }
   } catch (e) {
     console.error('Nimiq Pay unstake (remove) failed:', e)
+    // Same rule as stakeNim's "outcome unknown" leg: a staged transaction is
+    // reported as sent (the caller verifies by hash), and only a hashless
+    // unknown reads as a failure — and then with the check-History wording.
+    const unk = outcomeUnknownHash(e)
+    if (unk.unknown) {
+      if (unk.hash) return { ok: true, hash: unk.hash }
+      return {
+        ok: false,
+        error:
+          'Nimiq Pay could not confirm whether this transaction went out. Check History before trying again.',
+      }
+    }
     return { ok: false, error: errorText(e) || 'The withdrawal transaction was rejected.' }
   }
 }

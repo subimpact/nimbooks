@@ -8,6 +8,16 @@
 // spending apart.
 //
 // Pure: no RPC, no DOM. Every amount is integer luna.
+//
+// Payment and stake activity made *inside* Nimiq Pay never touches the basic
+// address: it goes out of the contract — to the merchant, or to the fixed
+// staking contract when the user stakes in Pay. Those rows only show in the
+// contract's own history, which the basic-address list never sees, so a stake
+// made in Pay would otherwise be counted as real "Sent" while Analytics' own
+// info text says staking moves are not included. `splitHtlcFlows` therefore
+// accepts `contractTxs` — the merged row set of the wallet's contracts — and
+// nets every contract's staking outflow against its funding before deciding
+// how much of the funding leg is still real spending.
 
 import type { NimiqTx } from './chain'
 
@@ -38,6 +48,36 @@ interface Flow {
   luna: bigint
 }
 
+// The fixed staking contract Nimiq Pay stakes into, flat + uppercased. Defined
+// locally with the literal so this file stays pure — importing chain.ts would
+// drag the RPC layer into what must stay a pure netting module.
+const STAKING_CONTRACT_FLAT = 'NQ7700000000000000000000000000000001'
+
+/**
+ * Per contract, how much of its funding was staked out by the user in Pay:
+ * rows from the contract's own history whose sender is a contract this wallet
+ * funded and whose recipient is the staking contract (or `toType 3`, the
+ * staking contract type). Deduped by hash, so a row that arrives twice through
+ * two contract lists counts once.
+ */
+function stakedPerContract(rows: readonly NimiqTx[] | undefined): Map<string, bigint> {
+  const staked = new Map<string, bigint>()
+  if (!rows) return staked
+  const seen = new Set<string>()
+  for (const tx of rows) {
+    if (!tx?.hash || seen.has(tx.hash)) continue
+    seen.add(tx.hash)
+    if (tx.executionResult === false) continue
+    const v = Math.round(Number(tx.value))
+    if (!Number.isFinite(v) || v <= 0) continue
+    if (normAddress(tx.recipient) !== STAKING_CONTRACT_FLAT && tx.toType !== 3) continue
+    const c = normAddress(tx.sender)
+    if (!c) continue
+    staked.set(c, (staked.get(c) ?? 0n) + BigInt(v))
+  }
+  return staked
+}
+
 /**
  * Splits every transfer touching `ownAddress` into its real and internal parts,
  * keyed by tx hash. Txs that move nothing get no entry (read them as zeros):
@@ -48,11 +88,18 @@ interface Flow {
  * Netting runs over the whole list, so the order of `txs` does not matter.
  * `heldContracts` are contracts that still hold the wallet's NIM: their whole
  * funding counts as internal, not only the part that has come back.
+ * `contractTxs` are the merged rows of the wallet's own contracts (Nimiq Pay's
+ * contracts hold the wallet's money and spend out of it — see the header).
+ * Staking that left a contract counts as never having left the user, and is
+ * capped by the funding: a contract can only stake out what it was funded with
+ * (over-stakes, if the chain ever allowed one, would come back out of user
+ * spending, not out of nothing). Without `contractTxs` the netting is exactly
+ * what it was before Pay-contract history arrived.
  */
 export function splitHtlcFlows(
   txs: NimiqTx[],
   ownAddress: string,
-  opts?: { heldContracts?: Iterable<string> }
+  opts?: { heldContracts?: Iterable<string>; contractTxs?: readonly NimiqTx[] }
 ): Map<string, FlowSplit> {
   const own = normAddress(ownAddress)
 
@@ -85,14 +132,23 @@ export function splitHtlcFlows(
       returned.set(f.sender, (returned.get(f.sender) ?? 0n) + f.luna)
     }
   }
+  // Stakes the user made from each of those contracts in Pay (see header).
+  const staked = stakedPerContract(opts?.contractTxs)
 
   const held = new Set<string>()
   for (const a of opts?.heldContracts ?? []) held.add(normAddress(a))
-  // What has settled back against the funding: never more than was funded.
+  // What has come back against the funding: never more than was funded.
   const settled = (c: string): bigint => {
     const F = funded.get(c) ?? 0n
     const R = returned.get(c) ?? 0n
     return R < F ? R : F
+  }
+  // What of the funding is still the user's: refunded back plus staked out in
+  // Pay, capped by the funding itself.
+  const stillTheirs = (c: string): bigint => {
+    const F = funded.get(c) ?? 0n
+    const net = (returned.get(c) ?? 0n) + (staked.get(c) ?? 0n)
+    return net < F ? net : F
   }
 
   const out = new Map<string, FlowSplit>()
@@ -103,9 +159,10 @@ export function splitHtlcFlows(
       if (F === undefined) {
         leg.realOut = f.luna
       } else {
-        // Funding leg: the part still the user's (held, or settled back) stays internal.
-        const stillTheirs = held.has(f.recipient) ? F : settled(f.recipient)
-        leg.internalOut = share(f.luna, stillTheirs, F)
+        // Funding leg: the part still the user's (held, or settled back —
+        // refunded or staked out in Pay — see stillTheirs) stays internal.
+        const stillTheirsLuna = held.has(f.recipient) ? F : stillTheirs(f.recipient)
+        leg.internalOut = share(f.luna, stillTheirsLuna, F)
         leg.realOut = f.luna - leg.internalOut
       }
     } else {

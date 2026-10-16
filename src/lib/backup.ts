@@ -37,7 +37,9 @@ const CACHE_KEYS = ['nimbooks:txs', 'nimbooks:rates', 'nimbooks:prices365', 'nim
 // `nimbooks:txs:<address>` — the history cache is one slot per address, and
 // those slots are the megabytes: the bare `nimbooks:txs` above matches none of
 // them, so the prefix is what actually keeps a backup pasteable.
-const CACHE_PREFIXES = ['nimbooks:restake:', 'nimbooks:txs:']
+// `nimbooks:htlc-archive:<address>` — the settled-contract shelf is likewise
+// rebuilt from the chain on the next sync and also carries full tx lists.
+const CACHE_PREFIXES = ['nimbooks:restake:', 'nimbooks:txs:', 'nimbooks:htlc-archive:']
 
 // The cashlink shelf predates the `nimbooks:` convention and keeps the dotted
 // key it shipped with — renaming it now would strand every live link. It holds
