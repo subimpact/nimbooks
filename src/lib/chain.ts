@@ -81,6 +81,23 @@ export async function getRemoteAccountBalance(remoteAddress: string): Promise<st
   return getNimiqBalance(remoteAddress)
 }
 
+/**
+ * Just `{ type, balance }` of an account, for callers that only need to classify
+ * it (see payContracts.syncContractArchive: settled HTLC contracts read back as
+ * an empty basic account). `null` on anything unusable or any failure — callers
+ * treat null as "unprocessed", never as "settled".
+ */
+export async function getContractAccount(address: string): Promise<{ type: string; balance: number } | null> {
+  try {
+    const data = await rpcCall('getAccountByAddress', [cleanAddress(address)])
+    if (!data || typeof data.type !== 'string') return null
+    const balance = Number(data.balance)
+    return { type: data.type, balance: Number.isFinite(balance) ? balance : 0 }
+  } catch {
+    return null
+  }
+}
+
 // --- HTLC holdings (funds stored in a contract, discovered by scanning) ---
 
 // Nimiq Pay routes transfers through HTLC contracts: the wallet funds a
@@ -831,9 +848,12 @@ export async function broadcastRawTransaction(serializedTx: string): Promise<str
 }
 
 /**
- * Locate a just-sent transaction. Nimiq Pay returns a serialized transaction
- * rather than a hash, so the hash is recovered by matching recipient + value +
- * data against fresh (uncached) history pages.
+ * Locate a just-sent transaction. Nimiq Pay now resolves its send calls with
+ * the transaction hash, so this lookup is only the fallback for older Pay
+ * builds that returned a serialized transaction (the hash is recovered by
+ * matching recipient + value + data against fresh (uncached) history pages).
+ * It is also what a caller without any hash uses, e.g. when Pay rejected a
+ * send with "outcome unknown" and kept no staged hash.
  *
  * The sender's history is checked first — most sends index there. But when
  * Nimiq Pay funds the payment from the wallet's HTLC remote account (the

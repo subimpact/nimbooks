@@ -27,6 +27,9 @@ const LUNA_PER_NIM = 100000
 // Default for callers that name no held contracts. A shared constant keeps the
 // netting memo from recomputing on every render.
 const NO_HELD_CONTRACTS: readonly string[] = []
+// Module-level empty default so Analytics can be rendered without a
+// `contractTxs` prop and keep its memo identity stable.
+const NO_CONTRACT_TXS: readonly NimiqTx[] = []
 
 interface FlowPoint {
   key: string // YYYY-MM-DD (local)
@@ -257,6 +260,7 @@ export default function Analytics({
   nimRate,
   currency,
   heldContracts = NO_HELD_CONTRACTS,
+  contractTxs = NO_CONTRACT_TXS,
 }: {
   txs: NimiqTx[]
   currentBalanceNim: string | null
@@ -270,6 +274,10 @@ export default function Analytics({
   // Contracts that still hold the wallet's NIM. Their funding is the user's
   // money, so it nets as internal even before anything has come back.
   heldContracts?: readonly string[]
+  // The rows of the wallet's own contracts' histories (Nimiq Pay pays and
+  // stakes OUT of its contracts — see htlcFlows.ts header). Without it a stake
+  // made in Pay would count as real spending.
+  contractTxs?: readonly NimiqTx[]
 }) {
   const ownNorm = (ownAddress ?? '').replace(/\s+/g, '').toUpperCase()
   // Day key (YYYY-MM-DD) of the bar being drilled into, not an index: the
@@ -316,8 +324,8 @@ export default function Analytics({
   // Each transfer's real and internal parts, netted over the whole loaded list:
   // a contract funded last month and refunded today is still a round trip.
   const splits = useMemo(
-    () => splitHtlcFlows(txs, ownAddress ?? '', { heldContracts }),
-    [txs, ownAddress, heldContracts]
+    () => splitHtlcFlows(txs, ownAddress ?? '', { heldContracts, contractTxs }),
+    [txs, ownAddress, heldContracts, contractTxs]
   )
 
   const data = useMemo(() => {

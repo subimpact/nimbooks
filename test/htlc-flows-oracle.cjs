@@ -80,6 +80,51 @@ check('over-return: 100 internal + 60 real in', near(last[1].internalIn, 100e5) 
 const m4 = splitHtlcFlows([...txs].reverse(), OWN)
 check('order independent', JSON.stringify(sum(m4)) === JSON.stringify(sum(m)))
 
+// --- Pay-contract history (brief 2): stakes made in Pay go out of the contract ---
+const STAKE = 'NQ77 0000 0000 0000 0000 0000 0000 0000 0001'
+const C4 = 'NQ66 CCCC CCCC CCCC CCCC CCCC CCCC CCCC CCC4'
+const MERCH = 'NQ88 MMMM MMMM MMMM MMMM MMMM MMMM MMMM MMMM'
+
+// (a) Fund C 1000, C staked out 700, C returned 300: nothing was real spending.
+//     Without contract history the same rows still say realOut 700 (today's
+//     result), because the stake row exists only in the contract's history.
+const ta = [tx(OWN, C4, 1000, 2), tx(C4, OWN, 300)]
+const ct = [tx(C4, STAKE, 700, 3)]
+const ma = splitHtlcFlows(ta, OWN, { contractTxs: ct })
+check('staked: funding leg fully internal', ma.get(ta[0].hash).realOut === 0 && ma.get(ta[0].hash).internalOut === 1000e5, JSON.stringify(ma.get(ta[0].hash)))
+check('staked: return leg unchanged', ma.get(ta[1].hash).internalIn === 300e5 && ma.get(ta[1].hash).realIn === 0, JSON.stringify(ma.get(ta[1].hash)))
+const ma2 = splitHtlcFlows(ta, OWN)
+check('without contractTxs: realOut 700 (today)', ma2.get(ta[0].hash).realOut === 700e5 && ma2.get(ta[0].hash).internalOut === 300e5, JSON.stringify(ma2.get(ta[0].hash)))
+
+// (b) Fund 1000, contract paid a merchant 200 and staked 500, 300 came back:
+//     the 200 merchant payment is the only real spending.
+const tb = [tx(OWN, C4, 1000, 2), tx(C4, OWN, 300)]
+const ctb = [tx(C4, MERCH, 200), tx(C4, STAKE, 500, 3)]
+const mb = splitHtlcFlows(tb, OWN, { contractTxs: ctb })
+check('mixed: realOut 200', mb.get(tb[0].hash).realOut === 200e5 && mb.get(tb[0].hash).internalOut === 800e5, JSON.stringify(mb.get(tb[0].hash)))
+
+// (c) Stake rows from a contract this wallet never funded change nothing.
+const tc = [tx(OWN, C4, 1000, 2), tx(C4, OWN, 300)]
+const ctc = [tx(X, STAKE, 400, 3)]
+const mc = splitHtlcFlows(tc, OWN, { contractTxs: ctc })
+check('foreign contract stake: no effect', mc.get(tc[0].hash).realOut === 700e5 && mc.get(tc[0].hash).internalOut === 300e5, JSON.stringify(mc.get(tc[0].hash)))
+
+// (d) A failed contract -> staking row changes nothing.
+const td = [tx(OWN, C4, 1000, 2), tx(C4, OWN, 300)]
+const ctd = [tx(C4, STAKE, 700, 3, { executionResult: false })]
+const md = splitHtlcFlows(td, OWN, { contractTxs: ctd })
+check('failed stake row: no effect', md.get(td[0].hash).realOut === 700e5 && md.get(td[0].hash).internalOut === 300e5, JSON.stringify(md.get(td[0].hash)))
+
+// (e) The same stake row arriving twice (two contract lists) counts once.
+const cte = [tx(C4, STAKE, 700, 3), { ...tx(C4, STAKE, 700, 3) }]
+const me = splitHtlcFlows(td, OWN, { contractTxs: cte })
+check('duplicate stake rows count once', me.get(td[0].hash).realOut === 0 && me.get(td[0].hash).internalOut === 1000e5, JSON.stringify(me.get(td[0].hash)))
+
+// Staking can never exceed the funding: capped, not turned negative.
+const ctf = [tx(C4, STAKE, 5000, 3)]
+const mf = splitHtlcFlows(td, OWN, { contractTxs: ctf })
+check('over-stake capped at funding', mf.get(td[0].hash).realOut === 0 && mf.get(td[0].hash).internalOut === 1000e5, JSON.stringify(mf.get(td[0].hash)))
+
 fs.unlinkSync(out)
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)

@@ -21,6 +21,7 @@ import {
   stopHubStakingPrep,
   sendNim,
   errorText,
+  TxOutcomeUnknownError,
   stakeNim,
   unstakeDeactivate,
   unstakeRetire,
@@ -54,6 +55,8 @@ import {
   getHtlcHoldings,
   getHtlcInTransit,
   getRemoteAccountBalance,
+  getContractAccount,
+  getNimiqTransactions,
   getStakingHolding,
   peekCachedValidators,
   getVestingHoldings,
@@ -99,6 +102,7 @@ import {
   type ValidatorInfo,
   type VestingHolding,
 } from './lib/chain'
+import { isArchivedContract, ownFundedContracts, syncContractArchive } from './lib/payContracts'
 import { isValidNimiqAddress } from './lib/portfolio'
 import Portfolio from './Portfolio'
 import { isGrantedAddress, stakeGateStatus } from './lib/stakeGate'
@@ -315,6 +319,9 @@ type TxVerify = 'checking' | 'confirmed' | 'expired' | 'unknown'
 // that a dead one surfaces while the user is still looking at the panel. The
 // interval matches the auto-refresh cadence — nimiqwatch 429s on faster polls.
 const TX_VERIFY_TIMEOUT_MS = 90_000
+// Pay contract archive retry backoff after a failed (usually rate-limited) pass.
+const ARCHIVE_BACKOFF_MIN_MS = 15_000
+const ARCHIVE_BACKOFF_MAX_MS = 2 * 60_000
 const TX_VERIFY_INTERVAL_MS = 10_000
 // Longest a confetti piece can be on screen (0.15s delay + 1.6s fall, see
 // Confetti.tsx) plus a beat, after which the burst unmounts itself and leaves
@@ -540,6 +547,23 @@ export default function App() {
   // appear on the basic address list, so they are merged into History and
   // classified (see txLabel `remote` handling) instead of being hidden.
   const [remoteTxs, setRemoteTxs] = useState<NimiqTx[]>([])
+  // The archived histories of the user's *settled* Pay contracts (pruned to an
+  // empty basic account — see lib/payContracts.ts) plus the contracts Pay is
+  // currently still keeping live. Nimiq Pay recycles its Pay contract
+  // constantly, so one remote address covers only the latest chapter; without
+  // these, everything paid or staked out of earlier contracts is invisible.
+  const [archiveTxs, setArchiveTxs] = useState<NimiqTx[]>([])
+  const [liveContracts, setLiveContracts] = useState<string[]>([])
+  // refresh is a callback, so it reads the mirrors here rather than the state;
+  // both are written alongside their state on every sync.
+  const liveContractsRef = useRef<string[]>([])
+  const archiveFinalsRef = useRef<Set<string>>(new Set())
+  // Archive pass scheduling (see the sync in refresh): one pass at a time, an
+  // unfinished one re-runs when due, a failing one backs off.
+  const archiveBusyRef = useRef(false)
+  const archivePendingRef = useRef(false)
+  const archiveNextAtRef = useRef(0)
+  const archiveBackoffRef = useRef(ARCHIVE_BACKOFF_MIN_MS)
   // Staking rewards, synthesized as History rows (one per UTC day per
   // validator) from the v2 events API — the tx index doesn't carry them.
   const [rewardTxs, setRewardTxs] = useState<NimiqTx[]>([])
@@ -671,8 +695,17 @@ export default function App() {
   const [sendTo, setSendTo] = useState('')
   const [sendAmount, setSendAmount] = useState('')
   const [sendMemo, setSendMemo] = useState('')
-  const [sendState, setSendState] = useState<'idle' | 'sending' | 'locating' | 'sent'>('idle')
+  // 'unconfirmed' is the Pay "outcome unknown" limbo: a submit may already be
+  // on the chain, so the sheet can never invite a retry — sendBusy keeps it
+  // out of the button, and closeSend clears the form like the other
+  // post-send states. sendUnconfirmedChecked flips to true once the
+  // background chain lookup finished without finding it, which switches the
+  // card's copy from "checking" to "check History first".
+  const [sendState, setSendState] = useState<
+    'idle' | 'sending' | 'locating' | 'sent' | 'unconfirmed'
+  >('idle')
   const [sendError, setSendError] = useState<string | null>(null)
+  const [sendUnconfirmedChecked, setSendUnconfirmedChecked] = useState(false)
   const [sendHash, setSendHash] = useState<string | null>(null)
   // Confetti for a payment that actually landed — held as the hash it belongs
   // to, so a burst is always traceable to one transaction (see celebrateSend).
@@ -1295,19 +1328,49 @@ export default function App() {
         // it, and History merges the two lists tagged `remote` so the full
         // wallet picture is visible and classified.
         if (acc.remoteAddress) {
-          const remote = acc.remoteAddress
-          const remoteRead = heartbeat
-            ? refreshTransactionHead(remote, 1000)
-            : getNimiqTransactionHistory(remote, 1000)
-          remoteRead
-            .then((rows) => {
-              const next = rows.map((t) => ({ ...t, remote: true }))
+          // The contract Pay is currently using, plus every live contract the
+          // archive sync discovered. The current one is skipped when the sync
+          // has already settled it (pruned to an empty basic account): its
+          // rows then ride in via archiveTxs and a second read would only
+          // fetch an empty list. Deduped, flat, preserving order.
+          const baseFlat = acc.remoteAddress.replace(/\s+/g, '').toUpperCase()
+          const addresses: string[] =
+            archiveFinalsRef.current.has(baseFlat) || isArchivedContract(addr, acc.remoteAddress)
+            ? []
+            : [acc.remoteAddress]
+          const seenAddr = new Set(addresses.map((a) => a.replace(/\s+/g, '').toUpperCase()))
+          for (const c of liveContractsRef.current) {
+            const flat = c.replace(/\s+/g, '').toUpperCase()
+            if (seenAddr.has(flat)) continue
+            seenAddr.add(flat)
+            addresses.push(c)
+          }
+          // Still fired without awaiting — History lands when it lands, like
+          // the remote read before it; only now it may be several contracts.
+          void Promise.allSettled(
+            addresses.map((a) =>
+              (heartbeat ? refreshTransactionHead(a, 1000) : getNimiqTransactionHistory(a, 1000))
+                .then((rows) => rows.map((t) => ({ ...t, remote: true })))
+            )
+          ).then((settled) => {
+            const next: NimiqTx[] = []
+            const seenHash = new Set<string>()
+            for (const r of settled) {
+              if (r.status !== 'fulfilled') continue // allSettled: one failed contract, not a failure
+              for (const t of r.value) {
+                if (seenHash.has(t.hash)) continue
+                seenHash.add(t.hash)
+                next.push(t)
+              }
+            }
+            if (next.length > 0) {
               setRemoteTxs((prev) => (sameTxList(prev, next) ? prev : next))
-            })
-            .catch((e) => {
-              console.warn('Remote relay history lookup failed:', e)
+            } else {
+              // Every read failed (or there is nothing to read): today's
+              // behaviour, an empty list.
               setRemoteTxs((prev) => (prev.length === 0 ? prev : []))
-            })
+            }
+          })
         } else {
           setRemoteTxs((prev) => (prev.length === 0 ? prev : []))
         }
@@ -1360,7 +1423,8 @@ export default function App() {
         // it turns the 10s auto-refresh from ~20 calls a tick into zero, and
         // stops "Locked in swaps" blinking out while the sweep re-runs.
         const sweepKey = `${addr}:${txs.length}:${txs[0]?.hash ?? ''}`
-        if (contractSweepRef.current !== sweepKey) {
+        const sweepDue = contractSweepRef.current !== sweepKey
+        if (sweepDue) {
           let swept = true
           try {
             setHtlcHoldings(await getHtlcHoldings(addr, txs))
@@ -1392,6 +1456,66 @@ export default function App() {
           // Only a clean sweep is worth remembering — a failed one must retry
           // on the next tick rather than cache its empty result.
           if (swept) contractSweepRef.current = sweepKey
+        }
+        // Archive the history of every settled Pay contract and pick up the
+        // live ones (see lib/payContracts.ts). Deliberately NOT tied to the
+        // sweep's `swept` retry: the public RPC rate-limits bursts, and an
+        // archive pass that re-armed the whole sweep made every tick re-run
+        // ~20 holdings lookups plus the archive, which 429'd the next pass
+        // into the same state (measured: 200+ rejected calls a minute).
+        // It runs when the tx list changed, or when an unfinished pass is due:
+        // a pass that only ran out of budget continues on the next tick, one
+        // that hit a failed lookup backs off (15s; doubling to 2 min only while
+        // passes make no progress).
+        // Gated on a Pay session naming a remote address; Hub and demo have none.
+        if (
+          acc.remoteAddress &&
+          !archiveBusyRef.current &&
+          (sweepDue || (archivePendingRef.current && Date.now() >= archiveNextAtRef.current))
+        ) {
+          archiveBusyRef.current = true
+          try {
+            const synced = await syncContractArchive(addr, ownFundedContracts(txs, addr), {
+              fetchAccount: getContractAccount,
+              fetchTxs: (a) => getNimiqTransactions(a, 100, null),
+            })
+            // Progress = this pass archived at least one more contract. A pass
+            // that progressed and then hit a 429 retries soon; only passes
+            // that get nowhere back off harder.
+            const progressed = synced.finals.size > archiveFinalsRef.current.size
+            archiveFinalsRef.current = synced.finals
+            const nextArchive = synced.finalTxs.map((t) => ({ ...t, remote: true }))
+            setArchiveTxs((prev) => (sameTxList(prev, nextArchive) ? prev : nextArchive))
+            const firstLive = synced.live.slice(0, 3)
+            liveContractsRef.current = firstLive
+            setLiveContracts((prev) =>
+              prev.length === firstLive.length && prev.every((v, i) => v === firstLive[i])
+                ? prev
+                : firstLive
+            )
+            if (synced.complete) {
+              archivePendingRef.current = false
+              archiveBackoffRef.current = ARCHIVE_BACKOFF_MIN_MS
+            } else if (synced.failed) {
+              if (progressed) archiveBackoffRef.current = ARCHIVE_BACKOFF_MIN_MS
+              archivePendingRef.current = true
+              archiveNextAtRef.current = Date.now() + archiveBackoffRef.current
+              if (!progressed) {
+                archiveBackoffRef.current = Math.min(archiveBackoffRef.current * 2, ARCHIVE_BACKOFF_MAX_MS)
+              }
+            } else {
+              // Budget spent, nothing failed: carry on with the next tick.
+              archivePendingRef.current = true
+              archiveNextAtRef.current = 0
+            }
+          } catch (e) {
+            console.warn('Pay contract archive sync failed:', e)
+            archivePendingRef.current = true
+            archiveNextAtRef.current = Date.now() + archiveBackoffRef.current
+            archiveBackoffRef.current = Math.min(archiveBackoffRef.current * 2, ARCHIVE_BACKOFF_MAX_MS)
+          } finally {
+            archiveBusyRef.current = false
+          }
         }
         // Reward income lives in a separate v2 API (the tx index has no
         // staking activity at all). Additive and already failure-tolerant —
@@ -1492,8 +1616,17 @@ export default function App() {
     // *both* address indexes. Merged raw it becomes two History rows sharing a
     // React key, a duplicate CSV line, and double-counted sent/fees in the tax
     // statement. The basic-address row wins; the relay copy is the same tx.
+    // The remote side is the current Pay contract's history plus the archived
+    // settled ones (see lib/payContracts.ts). A contract that settles around
+    // its last read can appear in both lists — archive rows lose, deduped by
+    // hash against everything already merged.
     const seen = new Set(nimTxs.map((t) => t.hash))
-    const base = [...nimTxs, ...remoteTxs.filter((t) => !seen.has(t.hash))]
+    const base = [...nimTxs]
+    for (const t of [...remoteTxs, ...archiveTxs]) {
+      if (seen.has(t.hash)) continue
+      seen.add(t.hash)
+      base.push(t)
+    }
     // The on-demand older-history window rides in here, deduped against the
     // base rows — the loader dedupes against the localStorage cache, but that
     // cache is behind a TTL and can drift from the lists actually on screen.
@@ -1503,7 +1636,7 @@ export default function App() {
     }
     if (rewardTxs.length === 0) return base
     return [...base, ...rewardTxs].sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
-  }, [nimTxs, remoteTxs, rewardTxs, extendedHistory])
+  }, [nimTxs, remoteTxs, archiveTxs, rewardTxs, extendedHistory])
 
   // History adds one more source on top: the staking actions this wallet sent.
   // They are real mined transactions, but no address list returns them (see
@@ -1545,9 +1678,27 @@ export default function App() {
     () => [
       ...htlcHoldings.map((h) => h.address),
       ...(account?.remoteAddress ? [account.remoteAddress] : []),
+      // Pay contracts the sync found still live: they hold the wallet's money
+      // the same way the named remote account does. Analytics normalises and
+      // de-duplicates these internally, overlaps here are harmless.
+      ...liveContracts,
     ],
-    [htlcHoldings, account?.remoteAddress]
+    [htlcHoldings, account?.remoteAddress, liveContracts]
   )
+  // Analytics reads the contract-side rows (payments and stakes made inside
+  // Pay went straight out of the contract — they never touch the basic list).
+  // Merged and deduped here once; `txs` (the basic list) stays untouched, the
+  // contract rows ride in via the `contractTxs` netting input.
+  const contractTxsForAnalytics = useMemo(() => {
+    const seen = new Set<string>()
+    const out: NimiqTx[] = []
+    for (const t of [...remoteTxs, ...archiveTxs]) {
+      if (!t?.hash || seen.has(t.hash)) continue
+      seen.add(t.hash)
+      out.push(t)
+    }
+    return out
+  }, [remoteTxs, archiveTxs])
   // Delegated NIM, including the buckets on their way back out: inactive is
   // cooling down and retired is withdrawable, but both are still the user's.
   const stakedLuna =
@@ -1618,7 +1769,7 @@ export default function App() {
   const sendAmountOverBalance = !!sendLuna && Number(sendLuna) > sendMaxLuna
   const sendReady =
     sendToValid && !!sendLuna && !sendAmountOverBalance && sendMemoBytes <= MAX_TX_MEMO_BYTES
-  const sendBusy = sendState === 'sending' || sendState === 'locating'
+  const sendBusy = sendState === 'sending' || sendState === 'locating' || sendState === 'unconfirmed'
   // Every submit takes a ticket; only the current one may write back into the
   // sheet. Closing bumps it, so a hash lookup still running can never reopen
   // a sheet the user has dismissed (same idea as stakeVerifyRef below).
@@ -1760,14 +1911,10 @@ export default function App() {
     }
     setCashlinkHistory(loadCashlinks(from))
     noteUnbacked()
-    try {
-      const res = await sendNim({
-        recipient: fresh.address,
-        amountLuna: String(valueLuna),
-        memo: 'Cashlink',
-        extraData: FUNDING_DATA,
-        from,
-      })
+    // Everything the successful funding leg does, as one local step — shared
+    // with the Pay "outcome unknown" catch, which must behave as
+    // funded-in-flight (the money may be out) rather than as a failure.
+    const finalizeFunding = (initialHash: string | null) => {
       clearTxCache() // the funding must show up on the next History load
       if (account) void refresh(account)
       setCashlinkResult({
@@ -1778,24 +1925,25 @@ export default function App() {
         status: 'Funding…',
       })
       setCashlinkHistory(loadCashlinks(from))
-      // The hash is bookkeeping only (Nimiq Pay returns bytes, not a hash) —
-      // recover it in the background so the result card appears immediately.
+      // The hash is bookkeeping only (current Pay builds hand it back; older
+      // ones did not) — recover it in the background when missing so the
+      // result card appears immediately.
       void (async () => {
-        let hash = res.hash
-        if (!hash) {
-          try {
-            const found = await findSentTx(
-              from,
-              fresh.address,
-              String(valueLuna),
-              encodeMemo('Cashlink')
-            )
-            hash = found?.hash ?? null
-          } catch {
-            /* the funding is in flight either way; the shelf tracks by balance */
-          }
+        if (initialHash) {
+          updateCashlink(from, fresh.address, { fundingTx: initialHash })
+          return
         }
-        if (hash) updateCashlink(from, fresh.address, { fundingTx: hash })
+        try {
+          const found = await findSentTx(
+            from,
+            fresh.address,
+            String(valueLuna),
+            encodeMemo('Cashlink')
+          )
+          if (found?.hash) updateCashlink(from, fresh.address, { fundingTx: found.hash })
+        } catch {
+          /* the funding is in flight either way; the shelf tracks by balance */
+        }
       })()
       // Flip the label once the funding lands (two timed checks, no polling).
       const settle = (delays: number[]) => {
@@ -1824,16 +1972,34 @@ export default function App() {
         }, next)
       }
       settle([4000, 8000])
+    }
+    try {
+      const res = await sendNim({
+        recipient: fresh.address,
+        amountLuna: String(valueLuna),
+        memo: 'Cashlink',
+        extraData: FUNDING_DATA,
+        from,
+      })
+      finalizeFunding(res.hash)
     } catch (e) {
-      const message = errorText(e)
-      if (/cancel|denied|reject|abort/i.test(message)) {
-        // Nothing was sent — the unused key can go.
-        removeCashlink(from, fresh.address)
-        setCashlinkHistory(loadCashlinks(from))
-        setCashlinkError('Request cancelled — nothing was sent.')
+      if (e instanceof TxOutcomeUnknownError) {
+        // Pay could not say whether the funding went out. Treat it as
+        // funded-in-flight: run the same success path (Pay kept the staged
+        // hash when it has one), and keep the key — revert stays possible
+        // once the funding lands. Never removeCashlink on this error.
+        finalizeFunding(e.hash)
       } else {
-        // Keep the key: the send may still be in flight.
-        setCashlinkError(message || 'The cashlink could not be funded.')
+        const message = errorText(e)
+        if (/cancel|denied|reject|abort/i.test(message)) {
+          // Nothing was sent — the unused key can go.
+          removeCashlink(from, fresh.address)
+          setCashlinkHistory(loadCashlinks(from))
+          setCashlinkError('Request cancelled - nothing was sent.')
+        } else {
+          // Keep the key: the send may still be in flight.
+          setCashlinkError(message || 'The cashlink could not be funded.')
+        }
       }
     } finally {
       cashlinkSubmittingRef.current = false
@@ -1908,6 +2074,7 @@ export default function App() {
     sendTicketRef.current++
     setSendError(null)
     setSendHash(null)
+    setSendUnconfirmedChecked(false)
     // A reopen starts clean: the previous payment's burst must never decorate
     // a fresh, empty form.
     clearSendCelebration()
@@ -1932,10 +2099,12 @@ export default function App() {
     // signature, and its answer has to land somewhere the user can see.
     if (sendState === 'sending') return
     sendTicketRef.current++
-    // From 'locating' on, the payment is already broadcast — the form is spent,
-    // and clearing it is what stops the same amount going out a second time.
-    // A sheet closed without sending keeps what was typed.
-    if (sendState === 'locating' || sendState === 'sent') {
+    // From 'locating' on, the payment may already be broadcast — the form is
+    // spent, and clearing it is what stops the same amount going out a second
+    // time ('unconfirmed' is included on purpose: an unconfirmed Pay submit is
+    // exactly the case where a second send is the big risk). A sheet closed without
+    // sending keeps what was typed.
+    if (sendState === 'locating' || sendState === 'sent' || sendState === 'unconfirmed') {
       setSendTo('')
       setSendAmount('')
       setSendMemo('')
@@ -2017,8 +2186,9 @@ export default function App() {
         setSendState('sent')
         celebrateSend(ticket)
       }
-      // Nimiq Pay returns a serialized transaction, not a hash. Recover it in
-      // the background — it only upgrades the explorer link on the success
+      // Current Pay builds hand back the tx hash; only older ones (or a miss
+      // on Pay's side) leave it null, and then the history lookup recovers it
+      // in the background — it only upgrades the explorer link on the success
       // card when the indexer catches up; the celebration already fired.
       if (!hash) {
         void (async () => {
@@ -2033,6 +2203,59 @@ export default function App() {
         })()
       }
     } catch (e) {
+      // Pay's "outcome unknown": it may have signed and submitted this exact
+      // payment but cannot say so. Never invite a retry — drop the cached
+      // history (the tx may already be indexed), park the sheet on the
+      // unconfirmed card, and look the payment up on chain in the background,
+      // ticket-guarded like the other async upgrades so a closed or reused
+      // sheet never reads a stale result.
+      if (e instanceof TxOutcomeUnknownError && sendTicketRef.current === ticket) {
+        clearTxCache()
+        setSendError(null)
+        setSendState('unconfirmed')
+        setSendHash(null)
+        void (async () => {
+          let confirmed: string | null = null
+          if (e.hash) {
+            // Pay kept the staged hash: let the chain settle it. Ten minutes
+            // is far inside Nimiq's tx validity window, so 'expired' here
+            // genuinely reads as "not on the chain yet", not as proof of loss.
+            const result = await waitForTxMined(e.hash, {
+              intervalMs: 10_000,
+              timeoutMs: 10 * 60_000,
+            })
+            if (result === 'confirmed') confirmed = e.hash
+          } else {
+            try {
+              const found = await findSentTx(
+                from,
+                sendToClean,
+                luna,
+                memo ? encodeMemo(memo) : undefined,
+                24,
+                5000
+              )
+              if (found?.hash) confirmed = found.hash
+            } catch {
+              /* keep 'unconfirmed' — a failed lookup never proves absence */
+            }
+          }
+          if (sendTicketRef.current !== ticket) return
+          if (confirmed) {
+            // It went out after all: upgrade to the sent card with the same
+            // celebration a straight send would have earned.
+            setSendHash(confirmed)
+            setSendState('sent')
+            celebrateSend(ticket)
+          } else {
+            // Never back to 'idle': the user must not be able to resubmit a
+            // payment that may already be out. Just switch the card's copy.
+            setSendUnconfirmedChecked(true)
+          }
+        })()
+        if (account) await refresh(account)
+        return
+      }
       // A dismissed sheet has nowhere to put this — the wallet showed its own
       // rejection, and nothing left this address.
       if (sendTicketRef.current === ticket) {
@@ -3277,6 +3500,15 @@ export default function App() {
     // new account before its refresh resolves, so a leftover list would render
     // the previous wallet's rows in History (and export them) mid-fetch.
     setRemoteTxs([])
+    // The contract archive state is session data like the relay history: it
+    // belongs to the old wallet's contracts and must not bleed into the next.
+    setArchiveTxs([])
+    setLiveContracts([])
+    liveContractsRef.current = []
+    archiveFinalsRef.current = new Set()
+    archivePendingRef.current = false
+    archiveNextAtRef.current = 0
+    archiveBackoffRef.current = ARCHIVE_BACKOFF_MIN_MS
     setRewardTxs([])
     setHtlcHoldings([])
     setHtlcInTransit(0)
@@ -4517,6 +4749,7 @@ export default function App() {
               nimRate={shown.nim}
               currency={currency}
               heldContracts={analyticsHeldContracts}
+              contractTxs={contractTxsForAnalytics}
             />
           </section>
         )}
@@ -6282,6 +6515,34 @@ export default function App() {
                       </a>
                     )}
                   </>
+                ) : sendState === 'unconfirmed' ? (
+                  // Pay could not confirm the submit, so the form is gone —
+                  // only a lookup card and Close. No button can fire a second
+                  // send, and the amount/to rows mirror the sent card so the
+                  // user can still check what they signed.
+                  <div className="invoice-sent">
+                    <p className="warn">
+                      {sendUnconfirmedChecked ? 'Not on the chain yet' : 'Checking the chain…'}
+                    </p>
+                    <div className="invoice-confirm">
+                      <div className="row">
+                        <span>Amount</span>
+                        <span>{sendLuna ? formatLuna(sendLuna, lang) : sendAmount} NIM</span>
+                      </div>
+                      <div className="row">
+                        <span>To</span>
+                        <span className="mono">{sendToClean.slice(0, 14)}…</span>
+                      </div>
+                    </div>
+                    <p className="hint small">
+                      {sendUnconfirmedChecked
+                        ? 'It can still land for up to 2 hours. Check History before you send it again.'
+                        : 'Nimiq Pay could not confirm this payment, so NimBooks is looking for it on the chain. Do not send it again.'}
+                    </p>
+                    <button className="btn-secondary" onClick={closeSend}>
+                      Close
+                    </button>
+                  </div>
                 ) : (
                   <>
                     <button

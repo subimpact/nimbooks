@@ -18,6 +18,7 @@ import {
   waitForProviderReady,
   sendNim,
   signReceipt,
+  TxOutcomeUnknownError,
   type WalletAccount,
 } from './lib/wallet'
 import {
@@ -28,6 +29,7 @@ import {
   getNimiqTransactionByHash,
   getNimiqTransactions,
   encodeMemo,
+  waitForTxMined,
 } from './lib/chain'
 import {
   decodeInvoice,
@@ -41,7 +43,7 @@ import {
 } from './lib/invoice'
 import { encodeReceipt, type SignedReceipt } from './lib/receipt'
 
-type PayState = 'idle' | 'confirm' | 'sending' | 'locating' | 'sent'
+type PayState = 'idle' | 'confirm' | 'sending' | 'locating' | 'sent' | 'unconfirmed'
 
 // Addresses travel through the share link stripped of their spaces, so the
 // page regroups them for reading — the same four-character grouping the verify
@@ -209,7 +211,7 @@ export default function InvoicePage() {
       clearTxCache() // the new payment must show up on the next History load
       let hash = result.hash
       if (!hash) {
-        // Nimiq Pay hands back a serialized transaction — recover the hash from
+        // Older Pay builds hand back bytes instead of a hash — recover it from
         // the sender's history so the receipt and explorer links work.
         setPayState('locating')
         const found = await findSentTx(
@@ -232,6 +234,61 @@ export default function InvoicePage() {
         paidAt: Date.now(),
       })
     } catch (e) {
+      // Pay's "outcome unknown": the payment may already be signed and out.
+      // Never invite a second payment — check the chain in the background and
+      // either land on the sent card (payee's books mark it paid) or park on
+      // a no-retry notice.
+      if (e instanceof TxOutcomeUnknownError) {
+        clearTxCache()
+        setPayState('locating')
+        setError(
+          'Nimiq Pay could not confirm this payment. NimBooks is checking the chain - do not pay again.'
+        )
+        let confirmed: string | null = null
+        if (e.hash) {
+          // Pay kept the staged hash: let the chain settle it. Ten minutes is
+          // far inside Nimiq's tx validity window, so 'expired' here reads as
+          // "not on the chain yet", not as proof of loss.
+          const result = await waitForTxMined(e.hash, {
+            intervalMs: 10_000,
+            timeoutMs: 10 * 60_000,
+          })
+          if (result === 'confirmed') confirmed = e.hash
+        } else {
+          const found = await findSentTx(
+            account.nimiqAddress,
+            invoice.payee,
+            invoice.amountNim,
+            encodeMemo(memo),
+            24,
+            5000
+          )
+          confirmed = found?.hash ?? null
+        }
+        const isPayee =
+          account.nimiqAddress.replace(/\s+/g, '').toUpperCase() ===
+          invoice.payee.replace(/\s+/g, '').toUpperCase()
+        if (confirmed) {
+          // Went out after all: the same tail a straight success takes.
+          setTxHash(confirmed)
+          setPayState('sent')
+          setError(null)
+          upsertInvoice(account.nimiqAddress, {
+            ...invoice,
+            role: isPayee ? 'payee' : 'payer',
+            paid: true,
+            paidTxHash: confirmed,
+            paidAt: Date.now(),
+          })
+        } else {
+          // 'unconfirmed' is terminal for this attempt: no pay button is
+          // rendered, so the only way forward is History (or the chain). The
+          // "checking" banner goes: the card below says what is true now.
+          setError(null)
+          setPayState('unconfirmed')
+        }
+        return
+      }
       setPayState('confirm')
       setError('Payment failed: ' + (errorText(e) || 'The payment was rejected.'))
     }
@@ -530,6 +587,13 @@ export default function InvoicePage() {
               </>
             )}
           </>
+        ) : payState === 'unconfirmed' ? (
+          <div className="invoice-sent">
+            <p className="hint small">
+              Not on the chain yet. It can still land for up to 2 hours. Check your wallet history
+              before you pay again.
+            </p>
+          </div>
         ) : (
           <>
             <div className="invoice-confirm">

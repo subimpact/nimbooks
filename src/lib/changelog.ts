@@ -7,7 +7,7 @@
 // Badge text. Spelled out rather than built from a version constant so the exact
 // label ships as one string in the bundle (JSX would emit "v" as a separate node).
 // package.json carries the machine-readable version.
-export const APP_VERSION_LABEL = 'v1.28.0'
+export const APP_VERSION_LABEL = 'v1.29.0'
 
 export interface ChangelogEntry {
   version: string
@@ -16,6 +16,16 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '1.29.0',
+    date: '2026-10-17',
+    items: [
+      'No more double payments by accident: when Nimiq Pay cannot confirm whether a payment, stake or cashlink went out, NimBooks checks the chain for it instead of saying it failed, and the send sheet no longer offers to pay a second time',
+      'History now shows everything you paid and staked from Nimiq Pay. Pay moves your NIM into a new holding contract every few days, and NimBooks used to read only one of them',
+      'Analytics no longer counts NIM you staked from Nimiq Pay as money sent',
+      'The explorer link appears the moment a Nimiq Pay payment is sent, without waiting for the history to catch up',
+    ],
+  },
   {
     version: '1.28.0',
     date: '2026-10-15',
