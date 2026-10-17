@@ -1,0 +1,76 @@
+# NimBooks roadmap
+
+NimBooks helps Nimiq holders **earn on their NIM and keep the books**: what
+your stake earns and why, every reward in your history, and statements, tax
+files and proofs when you need them. It works inside Nimiq Pay and with Nimiq
+Wallet in any browser.
+
+_Last updated 17 October 2026. Dates are targets._
+
+## Shipped since Cycle 2 (v1.14 → v1.29)
+
+**Earning**
+- Earn card at the top of Overview: what your stake earns a year, or what idle NIM could earn at the median pool's rate (v1.28).
+- Yield calculator: any amount, pool and 1, 3 or 5 years, with compounding for restaking pools and the protocol's falling issuance (v1.28).
+- Staking from a browser through the Nimiq Hub: stake, unstake, retire and withdraw on desktop (v1.14).
+
+**Books and tax**
+- FIFO crypto tax with staking income, in your display currency, plus Koinly, CoinTracking and CryptoTaxCalculator CSVs (v1.21–1.22).
+- Tax-year statements that separate staking from real payments, with opening and closing balances anchored to live on-chain state (v1.21–1.23).
+- Older history on demand past the 1,000-transaction cap (v1.23).
+- Portfolio PDF across up to 11 addresses, including Nimiq Pay's (v1.24).
+- Analytics that tell Nimiq Pay's internal HTLC transfers apart from real payments (v1.23–1.25).
+- Every Nimiq Pay payment contract in History, not just the current one, and stakes made from Nimiq Pay counted as staking rather than money sent (v1.29).
+
+**Payments**
+- Cashlinks: NIM inside a claimable link, compatible with the Nimiq Hub (v1.14–1.15).
+- When Nimiq Pay cannot confirm a payment went through, NimBooks says so, blocks a second send and checks the chain (v1.29).
+
+**Trust and usability**
+- `nimbooks-mcp`: a local, read-only AI server that never signs (v1.15).
+- Guided tour of the sample wallet, and a landing page that explains every feature before you connect (v1.16, v1.25).
+- 10-second refresh that keeps history, statements, tax and portfolio current (v1.25).
+- An honest usage count, consent before counting, and "forget me" (v1.27).
+- Backup reminders, because receipts and cashlink keys live only on the device (v1.27).
+- Nimiq Pay SDK 0.2.4: wallet refusals show Pay's own reason (v1.27).
+
+## Cycle 3 (to 11 November 2026)
+
+### Week 2 · 22–28 October: reasons to come back
+- **Rewards since your last visit** on the Earn card.
+- **Earnings per validator**, and actual yield next to the estimate.
+- **"Stake it?" prompt** when a payment leaves NIM idle.
+- **Neutral validator list:** sorted by net yield and reliability. ImpactZero, the builder's own validator, is labelled as such and no longer pinned first.
+- **Partial unstakes** that would leave less than the protocol's 100 NIM minimum staked are explained before they're sent.
+- **Full-year staking rewards** in statements and tax. Today they cover only the last 90 days.
+- **`nimbooks-mcp` 1.1:** read-only `get_staking`, `list_validators`, `project_yield` and `get_rewards` tools, sharing the app's yield maths through a parity test, with the same full-year reward fix.
+
+### Week 3 · 29 October – 4 November: earning beyond the basics
+- **`draft_stake` in the MCP server:** it returns a NimBooks link that opens the stake panel pre-filled. It never signs; you confirm in your own wallet.
+- **Read-only yield comparison:** NIM staking next to the dollar yields Nimiq Pay users can reach on Polygon, with the risks stated. No custody and no relayer.
+- **Wider MCP reach:** listings in public MCP directories, and earning prompts on the `/mcp` page.
+
+### Week 4 · 5–11 November: polish and submit
+- **Submission material:** new screenshots and demo video (Nimiq Pay and Nimiq Wallet), plus the "Changes since Cycle 2" write-up.
+- **Accessibility and performance:** a pass on both, and a stake/unstake end-to-end check in both wallets.
+- **Submission:** targeted for 9 November, two days before the deadline.
+
+## After the competition
+
+These follow the prize payout schedule, so each milestone is public:
+- **Month 1:** fix every critical bug reported in the Telegram group or by email, and answer community feedback.
+- **Month 2:** at least one substantial update chosen by user feedback, plus a written status report.
+
+**Candidates:**
+- Reward alerts inside Nimiq Pay when it supports them.
+- Switching validator as one guided flow (unstake, cooldown, restake) instead of separate steps.
+- Encrypted, user-held sync for receipts across devices.
+- More tax-software formats.
+
+## Ideas we won't do
+
+- **Hold keys or custody funds.** NimBooks never signs for you.
+- **Add accounts, tracking or third-party analytics** beyond what [PRIVACY.md](PRIVACY.md) lists.
+- **Hide who runs a pool.** The builder's pool is always labelled.
+
+Feedback shapes this list: [Telegram](https://t.me/subimpactNET/6) · nimbooks@subimpact.net
