@@ -3618,7 +3618,13 @@ export default function App() {
           reportSoftFailure(e, 'Statement prices unavailable right now. Try again shortly.')
         }
         if (cancelled) return
-        const base = computeStatement(allTxs, own, statementYear, prices)
+        // Nimiq Pay contract funding and refunds are the wallet's own money
+        // moving, not payments: split them out the same way Analytics does,
+        // from data already in memory (no extra RPC).
+        const base = computeStatement(allTxs, own, statementYear, prices, {
+          heldContracts: analyticsHeldContracts,
+          contractTxs: contractTxsForAnalytics,
+        })
         // Replay can only see events, so genesis-seeded pre-PoS funds and
         // auto-compounded stake rewards are invisible to it and the closing
         // balance comes out too low. For the current year, and for 'all' time
@@ -3660,7 +3666,16 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [account?.nimiqAddress, allTxs, statementYear, nimBalance, stakingHolding, reportSoftFailure])
+  }, [
+    account?.nimiqAddress,
+    allTxs,
+    statementYear,
+    nimBalance,
+    stakingHolding,
+    reportSoftFailure,
+    analyticsHeldContracts,
+    contractTxsForAnalytics,
+  ])
 
   // Recalculate clears the figures and they are worked out again, and a currency
   // switch does the same, so the report always matches what it labels. Between
@@ -5289,6 +5304,15 @@ export default function App() {
                           ` · $${statement.totals.feeUsd.toFixed(2)}`}
                       </span>
                     </div>
+                    {(statement.totals.internalOutNim > 0 || statement.totals.internalInNim > 0) && (
+                      <div className="row">
+                        <span>Nimiq Pay internal transfers</span>
+                        <span>
+                          out {statement.totals.internalOutNim.toFixed(5)} NIM · back{' '}
+                          {statement.totals.internalInNim.toFixed(5)} NIM
+                        </span>
+                      </div>
+                    )}
                     {statement.totals.stakedNim > 0 && (
                       <div className="row">
                         <span>Staked (internal)</span>
@@ -5348,6 +5372,12 @@ export default function App() {
                       <span>{statement.totals.txCount}</span>
                     </div>
                   </div>
+                  {(statement.totals.internalOutNim > 0 || statement.totals.internalInNim > 0) && (
+                    <p className="hint small">
+                      Money moved into and out of Nimiq Pay's own payment contracts. It never left
+                      you, so it is not counted as sent or received.
+                    </p>
+                  )}
                   <div className="statement-actions">
                     {inNimiqPay ? (
                       <button
