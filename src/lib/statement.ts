@@ -11,11 +11,17 @@
 
 import { classifyTx, timestampToMs } from './chain'
 import type { NimiqTx } from './chain'
+import { splitHtlcFlows } from './htlcFlows'
 
 export interface DailyRow {
   date: string // YYYY-MM-DD (UTC)
   receivedNim: number
   sentNim: number
+  // Nimiq Pay HTLC round trips the wallet funded itself (see splitHtlcFlows):
+  // contract funding and refunds that never left the user. Only filled when
+  // computeStatement is called with opts; 0 otherwise.
+  internalInNim: number
+  internalOutNim: number
   rewardsNim: number
   feeNim: number
   stakedNim: number
@@ -32,6 +38,9 @@ export interface DailyRow {
 export interface StatementTotals {
   receivedNim: number
   sentNim: number
+  // See DailyRow: Nimiq Pay internal transfer figures (0 when unused).
+  internalInNim: number
+  internalOutNim: number
   rewardsNim: number
   feeNim: number
   stakedNim: number
@@ -178,10 +187,20 @@ export function computeStatement(
   txs: NimiqTx[],
   ownAddress: string,
   period: string, // 'all' or 'YYYY'
-  prices: Record<string, number>
+  prices: Record<string, number>,
+  opts?: { heldContracts?: Iterable<string>; contractTxs?: readonly NimiqTx[] }
 ): Statement {
   const own = ownAddress.replace(/\s+/g, '').toUpperCase()
   const dayMap = new Map<string, DailyRow>()
+
+  // Nimiq Pay HTLC split. When opts is given (even empty), every wallet
+  // transfer is split into its real and internal parts BEFORE the period
+  // filter: netting must see the whole history (a contract funded in one year
+  // and refunded in the next nets out across years), the period only picks
+  // which days land in the statement. Any opts object enables the split; with
+  // none, the gross legacy figures are kept exactly as before.
+  const splits =
+    opts !== undefined ? splitHtlcFlows(txs, own, opts) : undefined
 
   // Calculate opening balance before the selected period
   let openingBalanceNim: number | null = null
@@ -207,6 +226,8 @@ export function computeStatement(
         date: day,
         receivedNim: 0,
         sentNim: 0,
+        internalInNim: 0,
+        internalOutNim: 0,
         rewardsNim: 0,
         feeNim: 0,
         stakedNim: 0,
@@ -255,6 +276,20 @@ export function computeStatement(
       row.unstakedNim += Number.isFinite(value) ? value : 0
     } else if (sender === own && recipient === own) {
       // Self-transfer: only network fee paid
+    } else if (splits) {
+      // HTLC split on: the funding and refund legs of the wallet's own Pay
+      // contracts go into the internal columns, only real payments into sent
+      // and received. A tx without a split entry (failed, zero value, self
+      // transfer, unrelated) contributes nothing here.
+      const sp = splits.get(t.hash)
+      if (sp) {
+        row.sentNim += sp.realOut / 100000
+        row.internalOutNim += sp.internalOut / 100000
+        row.receivedNim += sp.realIn / 100000
+        row.internalInNim += sp.internalIn / 100000
+      }
+      // Rewards are income: unchanged, from the received side as today.
+      if (recipient === own && kind === 'reward') row.rewardsNim += Number.isFinite(value) ? value : 0
     } else if (sender === own) {
       row.sentNim += Number.isFinite(value) ? value : 0
     } else if (recipient === own) {
@@ -266,6 +301,8 @@ export function computeStatement(
   const totals: StatementTotals = {
     receivedNim: 0,
     sentNim: 0,
+    internalInNim: 0,
+    internalOutNim: 0,
     rewardsNim: 0,
     feeNim: 0,
     stakedNim: 0,
@@ -287,7 +324,10 @@ export function computeStatement(
 
   for (const day of ordered.sort()) {
     const row = dayMap.get(day)!
-    row.netNim = row.receivedNim - row.sentNim - row.feeNim
+    // Same net either way: real + internal = the legacy gross figure.
+    row.netNim = splits
+      ? row.receivedNim + row.internalInNim - row.sentNim - row.internalOutNim - row.feeNim
+      : row.receivedNim - row.sentNim - row.feeNim
     row.closeUsd = prices[day] ?? null
     if (row.closeUsd === null) usdAvailable = false
     row.receivedUsd = row.closeUsd !== null ? row.receivedNim * row.closeUsd : null
@@ -299,6 +339,8 @@ export function computeStatement(
 
     totals.receivedNim += row.receivedNim
     totals.sentNim += row.sentNim
+    totals.internalInNim += row.internalInNim
+    totals.internalOutNim += row.internalOutNim
     totals.rewardsNim += row.rewardsNim
     totals.feeNim += row.feeNim
     totals.stakedNim += row.stakedNim
@@ -366,6 +408,8 @@ export function buildStatementCsv(s: Statement, address: string): string {
       'feeUSD',
       'netUSD',
       'txCount',
+      'internalInNIM',
+      'internalOutNIM',
     ],
     ...s.rows.map((r) => [
       r.date,
@@ -382,6 +426,8 @@ export function buildStatementCsv(s: Statement, address: string): string {
       fmt(r.feeUsd),
       fmt(r.netUsd),
       r.txCount,
+      r.internalInNim.toFixed(5),
+      r.internalOutNim.toFixed(5),
     ]),
     [],
     [
@@ -399,6 +445,8 @@ export function buildStatementCsv(s: Statement, address: string): string {
       fmt(s.totals.feeUsd),
       fmt(s.totals.netUsd),
       s.totals.txCount,
+      s.totals.internalInNim.toFixed(5),
+      s.totals.internalOutNim.toFixed(5),
     ],
   ]
   const escape = (c: string | number) => `"${String(c).replace(/"/g, '""')}"`

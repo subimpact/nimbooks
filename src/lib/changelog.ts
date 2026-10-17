@@ -23,6 +23,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       'No more double payments by accident: when Nimiq Pay cannot confirm whether a payment, stake or cashlink went out, NimBooks checks the chain for it instead of saying it failed, and the send sheet no longer offers to pay a second time',
       'History now shows everything you paid and staked from Nimiq Pay. Pay moves your NIM into a new holding contract every few days, and NimBooks used to read only one of them',
       'Analytics no longer counts NIM you staked from Nimiq Pay as money sent',
+      "Statements now show what you really sent and received from Nimiq Pay. NIM moving into and back out of Pay's own payment contracts sits on its own line (and in two new CSV columns) instead of being counted as money sent and received, so a busy Pay wallet no longer looks like it spent three times what it did",
       'The explorer link appears the moment a Nimiq Pay payment is sent, without waiting for the history to catch up',
     ],
   },
