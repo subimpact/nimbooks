@@ -114,8 +114,8 @@ and staker record from `rpc.nimiqwatch.com`. Nimiq Pay pays out of an HTLC
 contract that it replaces often, so the app finds every contract the
 wallet itself funded, merges their histories into History, and archives each
 settled one on the device (it can no longer change, so it is read once).
-In Analytics, funding a contract and getting the NIM back are shown as
-internal transfers, not as payments, and stakes made from a contract count as
+In Analytics and in statements, funding a contract and getting the NIM back
+are shown as internal transfers, not as payments, and stakes made from a contract count as
 staking, not as money sent. If Nimiq Pay cannot say whether a payment went through, the app
 says so, locks the form against a second send and checks the chain. History
 refreshes on a 10-second heartbeat. Staking rewards come from Nimiq Watch's
