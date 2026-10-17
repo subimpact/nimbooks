@@ -47,7 +47,6 @@ _Last updated 17 October 2026. Dates are targets._
 
 ### Week 3 · 29 October – 4 November: earning beyond the basics
 - **`draft_stake` in the MCP server:** it returns a NimBooks link that opens the stake panel pre-filled. It never signs; you confirm in your own wallet.
-- **Read-only yield comparison:** NIM staking next to the dollar yields Nimiq Pay users can reach on Polygon, with the risks stated. No custody and no relayer.
 - **Wider MCP reach:** listings in public MCP directories, and earning prompts on the `/mcp` page.
 
 ### Week 4 · 5–11 November: polish and submit
@@ -64,6 +63,7 @@ These follow the prize payout schedule, so each milestone is public:
 **Candidates:**
 - Reward alerts inside Nimiq Pay when it supports them.
 - Switching validator as one guided flow (unstake, cooldown, restake) instead of separate steps.
+- A read-only comparison of NIM staking with the dollar yields Nimiq Pay users can reach on Polygon, with the risks stated. Moved out of Cycle 3 to keep the competition scope on NIM books and staking.
 - Encrypted, user-held sync for receipts across devices.
 - More tax-software formats.
 
