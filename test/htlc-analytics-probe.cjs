@@ -44,15 +44,18 @@ const num = (s) => Number(String(s).replace(/[^0-9.]/g, ''))
   console.log('Received card:', rec.replace(/\s+/g, ' '), '| Sent card:', sent.replace(/\s+/g, ' '))
   const recReal = num(rec.split('\n').find((l) => l.startsWith('+') && !/internal/.test(l)))
   const sentReal = num(sent.split('\n').find((l) => l.startsWith('−') && !/internal/.test(l)))
-  // Wallet moved 66,056.46 NIM each way since 2026-09-07. The split depends on
-  // which of its contracts are still locked (held = internal), so assert the
-  // conservation and the floor instead of one frozen figure.
+  // A relay wallet: every NIM it receives leaves again, so the period's
+  // received total (real + internal) equals the sent total. The totals grow as
+  // the wallet keeps moving (66,056.46 each way on 2026-09-07, 69,064.51 on
+  // 2026-10-17), so assert the invariants, never one frozen figure. History is
+  // append-only, so the real side can only grow from the 2026-09-07 floor.
   const recInt = num((rec.split('\n').find((l) => /internal/.test(l)) || '').replace('internal', ''))
   const sentInt = num((sent.split('\n').find((l) => /internal/.test(l)) || '').replace('internal', ''))
-  check('Received real + internal = 66,056.46', Math.abs(recReal + recInt - 66056.46) < 0.05, `${recReal}+${recInt}`)
-  check('Sent real + internal = 66,056.46', Math.abs(sentReal + sentInt - 66056.46) < 0.05, `${sentReal}+${sentInt}`)
-  check('Received real ~22,926.9 (not the inflated 66k)', Math.abs(recReal - 22926.9) < 1, recReal)
-  check('Sent real > 20,000 (not 0)', sentReal > 20000 && sentReal <= 22926.91, sentReal)
+  const recTotal = recReal + recInt
+  const sentTotal = sentReal + sentInt
+  check('Received total = Sent total (relay conserves)', recTotal > 66056 && Math.abs(recTotal - sentTotal) < 0.05, `${recTotal} vs ${sentTotal}`)
+  check('Received real >= 22,926.9 floor and well under the inflated total', recReal >= 22926.89 && recReal < recTotal * 0.6, `${recReal} of ${recTotal}`)
+  check('Sent real > 20,000 (not 0) and <= Received real', sentReal > 20000 && sentReal <= recReal + 0.01, `${sentReal} vs ${recReal}`)
   check('internal lines present on both cards', recInt > 40000 && sentInt > 40000, `${recInt} ${sentInt}`)
   check('Hide internal toggle shown', a.toggle)
   check('legend shown', /Payments/.test(a.legend) && /Internal HTLC transfers/.test(a.legend), a.legend)
@@ -65,7 +68,7 @@ const num = (s) => Number(String(s).replace(/[^0-9.]/g, ''))
   const b = await read()
   check('hidden: no faded bars', b.faded === 0, b.faded)
   check('hidden: no legend', b.legend === '')
-  check('hidden: headline unchanged', b.stats[0].split('\n').some((l) => Math.abs(num(l) - 22926.9) < 1 && l.startsWith('+')))
+  check('hidden: headline unchanged', b.stats[0].split('\n').some((l) => Math.abs(num(l) - recReal) < 0.01 && l.startsWith('+')), b.stats[0].replace(/\s+/g, ' '))
   check('hidden: no internal lines', !/internal/.test(b.stats[0] + b.stats[1]))
   await page.locator('.analytics').screenshot({ path: `${SHOTS}/htlc-analytics-hidden.png` })
   await page.locator('.htlc-toggle').click()
