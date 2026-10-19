@@ -271,11 +271,12 @@ function writeRestakeCache(key: string, entry: RestakeCacheEntry): void {
  * Every staking reward the public data has for an address, as History-shaped
  * rows: one per UTC day per validator, newest first, merged across the
  * calendar chunks of `restakeChunks`. Fresh chunks come straight from the
- * cache; stale or missing ones are fetched, and a successful fetch is cached
- * even when it answers empty (a non-staker's "no rewards" is real). A chunk
- * that fails to fetch is never cached and contributes only its expired cached
- * rows, if any - and `complete: false` so callers can say the total may be
- * short. Never throws.
+ * cache; stale or missing ones are fetched - all chunks concurrently, so a
+ * cold open sends its requests at once instead of in a queue - and a successful fetch is
+ * cached even when it answers empty (a non-staker's "no rewards" is real). A
+ * chunk that fails to fetch is never cached and contributes only its expired
+ * cached rows, if any - and `complete: false` so callers can say the total may
+ * be short. Never throws.
  */
 export async function getAllRestakeRewardTxs(
   address: string,
@@ -291,37 +292,41 @@ export async function getAllRestakeRewardTxs(
     /* storage unavailable - nothing to clean */
   }
 
-  let complete = true
-  const merged: NimiqTx[] = []
-  for (const chunk of restakeChunks(now)) {
-    const key = `${base}:${chunk.id}`
-    const cached = readRestakeCache(key)
-    const fresh =
-      cached !== null &&
-      cached.from === chunk.from &&
-      cached.to === chunk.to &&
-      now - cached.at < chunk.ttlMs
-    let rows: NimiqTx[]
-    if (fresh) {
-      rows = cached.txs
-    } else {
+  // All stale or missing chunks resolve concurrently - the same per-chunk
+  // logic the sequential walk had, just overlapping on the wire. Each chunk
+  // reports whether it is trustworthy so `complete` survives the fan-out.
+  const settled = await Promise.all(
+    restakeChunks(now).map(async (chunk): Promise<{ rows: NimiqTx[]; ok: boolean }> => {
+      const key = `${base}:${chunk.id}`
+      const cached = readRestakeCache(key)
+      const fresh =
+        cached !== null &&
+        cached.from === chunk.from &&
+        cached.to === chunk.to &&
+        now - cached.at < chunk.ttlMs
+      if (fresh) return { rows: cached.txs, ok: true }
       const got = await fetchRestakeGroups(address, dayStartMs(chunk.from), dayStartMs(chunk.to))
       if (got.ok) {
         // Rows keep one UTC day per validator; the fetcher already trimmed
         // the edge leaks, so abutting chunks cannot share a row.
-        rows = rollUpRestakeRewards(got.groups, address)
+        const rows = rollUpRestakeRewards(got.groups, address)
         writeRestakeCache(key, { from: chunk.from, to: chunk.to, at: now, txs: rows })
-      } else if (cached !== null && Array.isArray(cached.txs)) {
-        // The fetch failed: keep the expired rows standing in rather than
-        // dropping the period, and say the list is not the whole truth.
-        rows = cached.txs
-        complete = false
-      } else {
-        rows = []
-        complete = false
+        return { rows, ok: true }
       }
-    }
-    merged.push(...rows)
+      // The fetch failed: keep the expired rows standing in rather than
+      // dropping the period, and say the list is not the whole truth.
+      if (cached !== null && Array.isArray(cached.txs)) return { rows: cached.txs, ok: false }
+      return { rows: [], ok: false }
+    })
+  )
+
+  // `Promise.all` yields in input order, so the merge keeps chunk order and
+  // the final newest-first sort stays well-defined regardless of settle order.
+  const merged: NimiqTx[] = []
+  let complete = true
+  for (const s of settled) {
+    merged.push(...s.rows)
+    if (!s.ok) complete = false
   }
 
   merged.sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
