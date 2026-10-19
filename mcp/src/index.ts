@@ -38,7 +38,7 @@ import {
   spacedAddress,
   txLabel,
   getRestakeRewardTxs,
-  restakeWindow,
+  REWARDS_FLOOR_DAY,
   type NimiqTx,
 } from './chain.ts'
 import {
@@ -282,9 +282,12 @@ server.registerTool(
       ])
       // Restaking rewards never appear in the tx index — they are read from
       // the same v2 endpoint the app uses and folded in as rows, so a
-      // staker's balance trajectory is not silently missing its income.
-      const { fromMs, toMs } = restakeWindow()
-      const rewardTxs = REWARDS_DISABLED ? [] : await getRestakeRewardTxs(addr, fromMs, toMs)
+      // staker's balance trajectory is not silently missing its income. The
+      // window is the whole ask: `since`/`until` when given, every reward the
+      // public data has (back to January 2025) otherwise.
+      const rewardTxs = REWARDS_DISABLED
+        ? []
+        : await getRestakeRewardTxs(addr, from ?? Date.parse(REWARDS_FLOOR_DAY + 'T00:00:00Z'), to ?? Date.now())
       const txs = [...walk.txs, ...rewardTxs].sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
 
       let inLuna = 0n
@@ -465,9 +468,11 @@ server.registerTool(
       const bounds = periodBounds(year, month)
       const walk = await getTransactionHistory(addr, HISTORY_CAP, 200)
       // Restaking rewards are income too: the same v2 rows the app folds into
-      // its statement, so a staker's statement is not missing them.
-      const { fromMs, toMs } = restakeWindow()
-      const rewardTxs = REWARDS_DISABLED ? [] : await getRestakeRewardTxs(addr, fromMs, toMs)
+      // its statement, fetched for the statement period itself, so a staker's
+      // statement is not missing them (the tx index has none).
+      const rewardTxs = REWARDS_DISABLED
+        ? []
+        : await getRestakeRewardTxs(addr, bounds.from, Math.min(bounds.to, Date.now()))
       const txs = [...walk.txs, ...rewardTxs].sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
       const prices = await getDailyCloses(bounds.from, Math.min(bounds.to, Date.now()))
       const statement = computeStatement(txs, addr, bounds, prices)

@@ -672,9 +672,11 @@ function isRateLimitError(e: unknown): boolean {
 
 // The plain history loader self-caps at 1000 txs; anything that long is
 // almost certainly truncated, which is what makes the older-history button
-// worth showing.
+// worth showing. Only chain rows count toward the cap: the synthesized reward
+// rows ride in the same list in the hundreds, and a wallet with 700 real
+// transactions is not capped.
 export function historyHitCap(txs: NimiqTx[]): boolean {
-  return txs.length >= 1000
+  return txs.filter((t) => !t.synthetic).length >= 1000
 }
 
 export async function getNimiqExtendedTransactionHistory(

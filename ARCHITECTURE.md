@@ -119,8 +119,9 @@ are shown as internal transfers, not as payments, and stakes made from a contrac
 staking, not as money sent. If Nimiq Pay cannot say whether a payment went through, the app
 says so, locks the form against a second send and checks the chain. History
 refreshes on a 10-second heartbeat. Staking rewards come from Nimiq Watch's
-restake events and appear as one row per validator per day, for the last 90
-days.
+restake events and appear as one row per validator per day, back to January
+2025: fetched in calendar chunks (closed years, the year to date, the running
+month) with closed periods cached on the device.
 
 **Earning numbers.** A validator's net yield is one year of protocol emission
 ÷ total network stake × (1 − fee), the same formula Nimiq's own wallet uses

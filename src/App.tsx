@@ -131,7 +131,7 @@ import {
   type StoredInvoice,
 } from './lib/invoice'
 import { seedDemoData } from './lib/demoData'
-import { getRestakeRewardTxs, restakeWindow } from './lib/stakingEvents'
+import { getAllRestakeRewardTxs } from './lib/stakingEvents'
 import {
   isInNimiqPay,
   isMobileDevice,
@@ -567,6 +567,10 @@ export default function App() {
   // Staking rewards, synthesized as History rows (one per UTC day per
   // validator) from the v2 events API — the tx index doesn't carry them.
   const [rewardTxs, setRewardTxs] = useState<NimiqTx[]>([])
+  // False while a chunk of the rewards history failed to load: the statement
+  // and tax cards then say the total may be short instead of staying silent.
+  // Back to true once a refresh succeeds with every chunk loaded.
+  const [rewardsComplete, setRewardsComplete] = useState(true)
   const [htlcHoldings, setHtlcHoldings] = useState<HtlcHolding[]>([])
   // Luna sitting in HTLC contracts this address funded (Luna, 0 when none),
   // discovered by scanning the tx history. Nimiq Pay routes everything through
@@ -1518,12 +1522,13 @@ export default function App() {
           }
         }
         // Reward income lives in a separate v2 API (the tx index has no
-        // staking activity at all). Additive and already failure-tolerant —
-        // a non-staker simply has none.
+        // staking activity at all): every period back to January 2025, cached
+        // per chunk, additive and already failure-tolerant - a non-staker
+        // simply has none, and a failed chunk keeps its cached rows.
         try {
-          const { fromMs, toMs } = restakeWindow()
-          const rewards = await getRestakeRewardTxs(addr, fromMs, toMs)
-          setRewardTxs((prev) => (sameTxList(prev, rewards) ? prev : rewards))
+          const rewards = await getAllRestakeRewardTxs(addr)
+          setRewardTxs((prev) => (sameTxList(prev, rewards.txs) ? prev : rewards.txs))
+          setRewardsComplete(rewards.complete)
         } catch (e) {
           // A failed lookup keeps the reward rows already on screen.
           console.warn('Restake events lookup failed:', e)
@@ -3510,6 +3515,7 @@ export default function App() {
     archiveNextAtRef.current = 0
     archiveBackoffRef.current = ARCHIVE_BACKOFF_MIN_MS
     setRewardTxs([])
+    setRewardsComplete(true)
     setHtlcHoldings([])
     setHtlcInTransit(0)
     setRemoteAccountLuna(null)
@@ -4806,7 +4812,8 @@ export default function App() {
                   <strong>Reward</strong>: validator payouts on your stake. These are paid every
                   few minutes and restaked automatically, so NimBooks sums them into one row per
                   day per validator. They come from a separate staking index that closes each UTC
-                  day, so today's rewards appear tomorrow, and the last 90 days are covered.
+                  day, so today's rewards appear tomorrow. Rewards go back to January 2025, when
+                  the public rewards data starts.
                 </p>
               </div>
             )}
@@ -5329,6 +5336,18 @@ export default function App() {
                       <span>Rewards</span>
                       <span>{statement.totals.rewardsNim.toFixed(5)} NIM</span>
                     </div>
+                    {rewardTxs.length > 0 && !rewardsComplete && (
+                      <p className="hint small">
+                        Some staking rewards could not be loaded just now. They fill in on the
+                        next refresh.
+                      </p>
+                    )}
+                    {rewardTxs.length > 0 && statementYear === '2024' && (
+                      <p className="hint small">
+                        Staking rewards before January 2025 may be missing: the public rewards
+                        data NimBooks reads starts then.
+                      </p>
+                    )}
                     <div className="row">
                       <span>Net change</span>
                       <span>
@@ -5447,6 +5466,18 @@ export default function App() {
                         <div className="tax-year-figures">{`Gain ${formatTaxFiat(y.gainUsd)} · Income ${formatTaxFiat(y.incomeUsd)}`}</div>
                       </div>
                     ))}
+                    {rewardTxs.length > 0 && !rewardsComplete && (
+                      <p className="hint small">
+                        Some staking rewards could not be loaded just now. They fill in on the next
+                        refresh.
+                      </p>
+                    )}
+                    {rewardTxs.length > 0 && taxReport.years.some((y) => y.year === '2024') && (
+                      <p className="hint small">
+                        Staking rewards before January 2025 may be missing: the public rewards data
+                        NimBooks reads starts then.
+                      </p>
+                    )}
                   </div>
                   <div className="statement-controls">
                     <label className="hint small" htmlFor="taxFormat">
