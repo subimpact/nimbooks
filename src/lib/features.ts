@@ -151,7 +151,7 @@ export const FEATURES: FeatureDef[] = [
       'On this device: a two-minute copy of your transaction list, so a quick refresh does not read the whole chain again.',
     ],
     goodToKnow: [
-      "Rewards show one row per day per validator. Today's rewards appear tomorrow, and the last 90 days are covered.",
+      "Rewards show one row per day per validator. Today's rewards appear tomorrow. Rewards go back to January 2025, when the public rewards data starts.",
       'Only the latest 1,000 transactions load at first. Older history loads from the Export tab.',
       'Failed transactions are marked failed and left out of statements and tax.',
     ],

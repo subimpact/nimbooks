@@ -5,9 +5,9 @@ your stake earns and why, every reward in your history, and statements, tax
 files and proofs when you need them. It works inside Nimiq Pay and with Nimiq
 Wallet in any browser.
 
-_Last updated 17 October 2026. Dates are targets._
+_Last updated 19 October 2026. Dates are targets._
 
-## Shipped since Cycle 2 (v1.14 → v1.29)
+## Shipped since Cycle 2 (v1.14 → v1.30)
 
 **Earning**
 - Earn card at the top of Overview: what your stake earns a year, or what idle NIM could earn at the median pool's rate (v1.28).
@@ -21,6 +21,7 @@ _Last updated 17 October 2026. Dates are targets._
 - Portfolio PDF across up to 11 addresses, including Nimiq Pay's (v1.24).
 - Analytics that tell Nimiq Pay's internal HTLC transfers apart from real payments (v1.23–1.25).
 - Every Nimiq Pay payment contract in History, not just the current one, and stakes made from Nimiq Pay counted as staking rather than money sent (v1.29).
+- Full-year staking rewards: statements, tax and History count every reward back to January 2025, fetched in calendar chunks with closed periods cached (v1.30).
 
 **Payments**
 - Cashlinks: NIM inside a claimable link, compatible with the Nimiq Hub (v1.14–1.15).
@@ -42,8 +43,7 @@ _Last updated 17 October 2026. Dates are targets._
 - **"Stake it?" prompt** when a payment leaves NIM idle.
 - **Neutral validator list:** sorted by net yield and reliability. ImpactZero, the builder's own validator, is labelled as such and no longer pinned first.
 - **Partial unstakes** that would leave less than the protocol's 100 NIM minimum staked are explained before they're sent.
-- **Full-year staking rewards** in statements and tax. Today they cover only the last 90 days.
-- **`nimbooks-mcp` 1.1:** read-only `get_staking`, `list_validators`, `project_yield` and `get_rewards` tools, sharing the app's yield maths through a parity test, with the same full-year reward fix.
+- **`nimbooks-mcp` 1.1:** read-only `get_staking`, `list_validators`, `project_yield` and `get_rewards` tools, sharing the app's yield maths through a parity test.
 
 ### Week 3 · 29 October – 4 November: earning beyond the basics
 - **`draft_stake` in the MCP server:** it returns a NimBooks link that opens the stake panel pre-filled. It never signs; you confirm in your own wallet.

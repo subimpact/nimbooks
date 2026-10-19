@@ -298,6 +298,22 @@ function utcDay(ms: number): string {
   return new Date(ms).toISOString().slice(0, 10)
 }
 
+const DAY_MS = 86_400_000
+
+/** The 00:00 UTC instant that starts the day holding `ms`. */
+function dayStart(ms: number): number {
+  return Math.floor(ms / DAY_MS) * DAY_MS
+}
+
+/**
+ * The 00:00 UTC instant AFTER the day holding `ms`. As a wire `to`, which
+ * the endpoint reads exclusively, it runs a request through that whole day -
+ * including when `ms` sits exactly at that day's own 00:00.
+ */
+function dayAfter(ms: number): number {
+  return dayStart(ms) + DAY_MS
+}
+
 /**
  * Aggregated restaking reward events for a staker between two instants —
  * ported from the app's `getRestakeEvents` (src/lib/stakingEvents.ts), same
@@ -309,8 +325,13 @@ export async function getRestakeEvents(
   fromMs: number,
   toMs: number
 ): Promise<RestakeGroup[]> {
+  // Wire contract: `from` inclusive at 00:00 UTC, `to` EXCLUSIVE at 00:00
+  // UTC, never in the future. The arguments are instants: `fromMs` floors to
+  // its day; `toMs` is the last instant included in the ask, so the request
+  // runs through the END of its day (ceil to the next 00:00), capped at
+  // today's 00:00 because the API rejects a future `to`.
   const from = utcDay(fromMs)
-  const to = utcDay(Math.min(toMs, Date.now()))
+  const to = utcDay(Math.min(dayAfter(toMs), dayStart(Date.now())))
   if (from >= to) return []
 
   const controller = new AbortController()
@@ -339,12 +360,66 @@ export async function getRestakeEvents(
   }
 }
 
-/** History range for reward rows: the last 90 days, matching the app. */
-export const RESTAKE_WINDOW_DAYS = 90
-const DAY_MS = 24 * 60 * 60 * 1000
+/** The UTC day proof-of-stake mainnet launched - the earliest day worth asking for. */
+export const REWARDS_FLOOR_DAY = '2024-11-19'
 
-export function restakeWindow(now = Date.now()): { fromMs: number; toMs: number } {
-  return { fromMs: now - RESTAKE_WINDOW_DAYS * DAY_MS, toMs: now }
+/**
+ * Restaking rewards for an address as rows, covering `[fromMs, toMs]` with
+ * both ends INCLUSIVE instants.
+ *
+ * The range is clamped to the public data (floor day, now) and split into
+ * calendar-year requests - one request per calendar year, at most. The
+ * endpoint's `to` is exclusive at 00:00 UTC, so each request's wire `to` is
+ * the UTC day AFTER the day holding its last included instant - ceil to the
+ * next 00:00 - capped at today's 00:00 because the API rejects a future
+ * `to`. A `toMs` exactly at 00:00 of a day still counts as including that
+ * instant, and a window can sit exactly there, so the choice made here is to
+ * run the request through the END of that day (`to` = the day after, the
+ * trim below stays day-granular) and let the exact-timestamp filters
+ * downstream - `inWindow` (index.ts) and `computeStatement` (statement.ts) -
+ * drop the rows past the instant. Each response keeps only groups inside its
+ * own requested range (from-day 00:00 <= time_window < request to-day
+ * 00:00): the API leaks the last window before `from` and the first at/after
+ * `to` at its edges, and abutting ranges must never count a window twice. No
+ * cache here (this ships as a CLI: the asker holds the window), and the
+ * failure tolerance is the old one - a failing request contributes `[]`
+ * while the rest still count. Never throws.
+ */
+export async function getRestakeRewardTxs(
+  address: string,
+  fromMs: number,
+  toMs: number
+): Promise<NimiqTx[]> {
+  const from = Math.max(fromMs, Date.parse(REWARDS_FLOOR_DAY + 'T00:00:00Z'))
+  const to = Math.min(toMs, Date.now())
+  if (to < from) return []
+  const rows: NimiqTx[] = []
+  const firstYear = Number(utcDay(from).slice(0, 4))
+  const lastYear = Number(utcDay(to).slice(0, 4))
+  const today00 = dayStart(Date.now())
+  for (let y = firstYear; y <= lastYear; y++) {
+    const reqFrom = Math.max(from, Date.UTC(y, 0, 1))
+    // Slices are inclusive instants, so a seam slice ends 1ms before next
+    // New Year's midnight: the midnight instant itself belongs to the next
+    // year's slice, which keeps it exactly there.
+    const reqEnd = Math.min(to, Date.UTC(y + 1, 0, 1) - 1)
+    if (reqEnd < reqFrom) continue
+    const groups = await getRestakeEvents(address, reqFrom, reqEnd)
+    // getRestakeEvents already answers [] on failure. Trim the edge leaks to
+    // this request's own wire range, in case the caller's ranges abut.
+    const lo = dayStart(reqFrom)
+    const hi = Math.min(dayAfter(reqEnd), today00)
+    rows.push(
+      ...rollUpRestakeRewards(
+        groups.filter((g) => {
+          const t = Date.parse(g.time_window)
+          return Number.isFinite(t) && t >= lo && t < hi
+        }),
+        address
+      )
+    )
+  }
+  return rows.sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
 }
 
 /**
@@ -385,15 +460,6 @@ export function rollUpRestakeRewards(groups: RestakeGroup[], ownAddress: string)
       toType: 0,
       synthetic: 'reward' as const,
     }))
-}
-
-/** Restaking rewards for an address in the app's History shape. Never throws. */
-export async function getRestakeRewardTxs(
-  address: string,
-  fromMs: number,
-  toMs: number
-): Promise<NimiqTx[]> {
-  return rollUpRestakeRewards(await getRestakeEvents(address, fromMs, toMs), address)
 }
 
 export type TxKind = 'payment' | 'stake' | 'unstake' | 'reward' | 'fee' | 'unknown'
