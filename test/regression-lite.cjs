@@ -172,6 +172,14 @@ const STAKER_ADDR = 'NQ62 68D7 RQHN MSTR 1Y0T SY1P HU89 5QJ5 YV05';
 
       /* D3: tax card = year rows with Gain/Income figures, or "None in this history" */
       const taxDemo = taxCard(page);
+      // The first tax pass fetches the full price history (up to 8 DefiLlama
+      // pages) before any row renders: wait for rows or the "none" line.
+      for (let i = 0; i < 90; i++) {
+        const ready = (await taxDemo.locator('.tax-year-row').count()) > 0
+          || /none in this history/i.test(await taxDemo.innerText().catch(() => ''));
+        if (ready) break;
+        await page.waitForTimeout(500);
+      }
       const taxRows = await taxDemo.count() > 0
         ? await taxDemo.locator('.tax-year-row').evaluateAll((rows) =>
             rows.map((r) => ({
