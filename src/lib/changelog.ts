@@ -21,6 +21,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     date: '2026-10-19',
     items: [
       'Statements and the tax report now count every staking reward back to January 2025, not just the last 90 days, so a full tax year\'s staking income is all there. History shows the older rewards too',
+      'Tax figures now have a price for every day back to 2018. Days before late March 2025 used to come out unpriced, so older gains and staking income were left out of the totals',
     ],
   },
   {

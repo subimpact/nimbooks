@@ -7,9 +7,15 @@ export const LLAMA_PRICE_URL = 'https://coins.llama.fi/chart/coingecko:nimiq-2'
 
 const PRICES_TAX_KEY = 'nimbooks:pricestax'
 const PRICES_TAX_TTL = 24 * 60 * 60 * 1000 // 24h, daily closes are immutable history
+// A cached map only counts as fresh when it reaches at least this far back.
+// DefiLlama lists NIM from 2018-07-27, so 2018-12-31 is safely past the
+// listing yet years below what a single 500-day page covers; caches written
+// while the walk stepped back only 10 days per page start in late March 2025
+// and must refetch instead of looking fresh.
+const LLAMA_COVERAGE_FLOOR_DAY = '2018-12-31'
 // mirrors NIM_MAX_PLAUSIBLE_CLOSE_USD in statement.ts; local copy avoids a circular import
 const MAX_PLAUSIBLE_NIM_USD = 0.02
-const LLAMA_PAGES_MAX = 8 // safety cap, ~4000 days of history
+const LLAMA_PAGES_MAX = 8 // safety cap, 8 pages x 490 days reaches well before 2018
 const SPAN = 500
 const NIM = 1e5 // Luna -> NIM
 
@@ -27,8 +33,16 @@ export async function getAllDailyNimPrices(): Promise<Record<string, number>> {
     const raw = localStorage.getItem(PRICES_TAX_KEY)
     if (raw) {
       const entry = JSON.parse(raw) as PriceCache
+      // Fresh means within TTL AND reaching past the coverage floor: a cache
+      // written by a walk that stepped back too little starts years too late.
       if (typeof entry?.at === 'number' && entry.prices && Date.now() - entry.at < PRICES_TAX_TTL) {
-        return entry.prices
+        let earliestDay: string | null = null
+        for (const day of Object.keys(entry.prices)) {
+          if (earliestDay === null || day < earliestDay) earliestDay = day
+        }
+        if (earliestDay !== null && earliestDay <= LLAMA_COVERAGE_FLOOR_DAY) {
+          return entry.prices
+        }
       }
     }
   } catch {
@@ -92,7 +106,9 @@ export async function getAllDailyNimPrices(): Promise<Record<string, number>> {
     if (priorEarliestDay !== null && pageEarliestDay >= priorEarliestDay) break
     priorEarliestDay = pageEarliestDay
     if (!Number.isFinite(earliestTs)) break
-    start = Math.floor(earliestTs) - 10 * 86400
+    // Step back a whole page minus the 10-day overlap, so the next page's
+    // 500 points reach forward into that overlap and no day is skipped.
+    start = Math.floor(earliestTs) - (SPAN - 10) * 86400
   }
 
   const merged: Record<string, number> = { ...coinGecko, ...llama }
