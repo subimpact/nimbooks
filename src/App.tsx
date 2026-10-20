@@ -156,7 +156,9 @@ import Landing, { PhoneQr } from './Landing'
 import type { SampleEntry } from './lib/features'
 import { COUNT_NOTICE, consentFromLanding, getCountConsent, setCountConsent, type CountConsent } from './lib/connectCount'
 import { markBackedUp, markUnbackedChange, needsBackup } from './lib/backupNudge'
-import { typicalRate, compoundsFor } from './lib/yieldCalc'
+import { typicalRate, compoundsFor, projectStake } from './lib/yieldCalc'
+import { rewardsByValidator, rewardsSince, stakeNudge as pickStakeNudge, trailingYield } from './lib/earnInsights'
+import { splitHtlcFlows } from './lib/htlcFlows'
 import EarnCard from './EarnCard'
 import YieldCalculator from './YieldCalculator'
 import {
@@ -274,6 +276,13 @@ function mergeRates(base: FiatRates, cached?: Partial<FiatRates>): FiatRates {
 
 function cleanAddr(address: string): string {
   return address.replace(/\s+/g, '').toUpperCase()
+}
+
+// The storage a session preference lives in for the connected account: per tab
+// in demo mode (the sample address must never reach localStorage), on-device
+// otherwise.
+function demoStore(): Storage {
+  return isDemoMode() ? window.sessionStorage : window.localStorage
 }
 
 // Nimiq caps a basic transaction's data field at 64 bytes, and the memo travels
@@ -574,6 +583,16 @@ export default function App() {
   // and tax cards then say the total may be short instead of staying silent.
   // Back to true once a refresh succeeds with every chunk loaded.
   const [rewardsComplete, setRewardsComplete] = useState(true)
+  // When this account was last seen, read once when it connects and held in
+  // state for the session, so the Earn card can show what was earned since
+  // then. Written right back every load and on page hide, so the NEXT visit
+  // compares against this one. Demo mode keeps both markers per tab
+  // (sessionStorage) and never writes the sample address to localStorage.
+  // null = first visit: there is nothing to compare against.
+  const [previousVisitMs, setPreviousVisitMs] = useState<number | null>(null)
+  // Payment hashes the user has already declined to stake ('Not now'), newest
+  // last, capped at 50. Read per address alongside the visit marker above.
+  const [nudgeDismissed, setNudgeDismissed] = useState<string[]>([])
   const [htlcHoldings, setHtlcHoldings] = useState<HtlcHolding[]>([])
   // Luna sitting in HTLC contracts this address funded (Luna, 0 when none),
   // discovered by scanning the tx history. Nimiq Pay routes everything through
@@ -957,6 +976,79 @@ export default function App() {
     () => (account?.nimiqAddress ? `nimbooks:receipts:${account.nimiqAddress}` : 'nimbooks:receipts'),
     [account?.nimiqAddress]
   )
+
+  // Last-visit marker, per address (`nimbooks:last-visit:<address>`): read
+  // once when the account connects and written straight back, so the NEXT
+  // visit sees this session's start. `pagehide` and a hidden tab update too,
+  // so a wallet left running in Pay's WebView for hours still marks its last
+  // real moment of use. Demo mode reads the same key from sessionStorage and
+  // pretends the previous visit was 7 days ago when there is none, so the
+  // sample wallet always has rewards to show. First visit shows nothing.
+  useEffect(() => {
+    if (!account?.nimiqAddress) return
+    const flat = account.nimiqAddress.replace(/\s+/g, '')
+    const store = demoStore()
+    const key = `nimbooks:last-visit:${flat}`
+    let prev: number | null = null
+    try {
+      const raw = store.getItem(key)
+      if (raw !== null) {
+        const n = Number(raw)
+        if (Number.isFinite(n) && n > 0) prev = n
+      }
+    } catch {
+      /* storage unavailable - treated as a first visit */
+    }
+    if (prev === null && isDemoMode()) prev = Date.now() - 7 * 24 * 60 * 60 * 1000
+    setPreviousVisitMs(prev)
+    try {
+      store.setItem(key, String(Date.now()))
+    } catch {
+      /* storage full - the next visit compares against nothing */
+    }
+  }, [account?.nimiqAddress])
+
+  // Page hide keeps the marker honest: the next visit compares against the
+  // last time the wallet was actually in use, not when it was connected.
+  useEffect(() => {
+    if (!account?.nimiqAddress) return
+    const flat = account.nimiqAddress.replace(/\s+/g, '')
+    const key = `nimbooks:last-visit:${flat}`
+    const mark = () => {
+      try {
+        demoStore().setItem(key, String(Date.now()))
+      } catch {
+        /* storage unavailable or full */
+      }
+    }
+    const onPageHide = () => mark()
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') mark()
+    }
+    window.addEventListener('pagehide', onPageHide)
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => {
+      window.removeEventListener('pagehide', onPageHide)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+    }
+  }, [account?.nimiqAddress])
+
+  // Dismissed stake-it prompts, per address (`nimbooks:stake-nudge-dismissed:
+  // <address>`, a JSON array capped at 50 hashes: a preference, carried in
+  // backups). Fresh per tab in demo mode.
+  useEffect(() => {
+    if (!account?.nimiqAddress) return
+    const flat = account.nimiqAddress.replace(/\s+/g, '')
+    const key = `nimbooks:stake-nudge-dismissed:${flat}`
+    let list: string[] = []
+    try {
+      const parsed: unknown = JSON.parse(demoStore().getItem(key) ?? '[]')
+      if (Array.isArray(parsed)) list = parsed.filter((h): h is string => typeof h === 'string')
+    } catch {
+      /* unreadable marker - treat as empty */
+    }
+    setNudgeDismissed(list)
+  }, [account?.nimiqAddress])
 
   // Soft failures (stale rates, a rate-limited node) go to the auto-dismissing
   // toast; only a failure that actually leaves the app unusable earns the red
@@ -1707,6 +1799,29 @@ export default function App() {
     }
     return out
   }, [remoteTxs, archiveTxs])
+  // Real, third-party incoming payments: rows the Analytics netting (above)
+  // confirms actually landed in the wallet. Nimiq Pay moves NIM between its
+  // own HTLC contracts constantly; a return leg with realIn 0, a failed tx, a
+  // self transfer, and anything addressed elsewhere all stop at the gate.
+  // Reward rows are synthetic and never pass the `synthetic` check. This is
+  // the pool the "stake it?" nudge picks from - see lib/earnInsights.stakeNudge.
+  const incomingPayments = useMemo(() => {
+    const own = account?.nimiqAddress
+    if (!own) return []
+    const ownFlat = cleanAddr(own)
+    const remoteFlat = account.remoteAddress ? cleanAddr(account.remoteAddress) : null
+    const splits = splitHtlcFlows(allTxs, own, {
+      heldContracts: analyticsHeldContracts,
+      contractTxs: contractTxsForAnalytics,
+    })
+    return allTxs.filter((t) => {
+      if (!t?.hash || t.synthetic || t.executionResult === false) return false
+      const rec = cleanAddr(t.recipient)
+      if (rec !== ownFlat && (!remoteFlat || rec !== remoteFlat)) return false
+      const sp = splits.get(t.hash)
+      return !!sp && sp.realIn > 0
+    })
+  }, [allTxs, account?.nimiqAddress, account?.remoteAddress, analyticsHeldContracts, contractTxsForAnalytics])
   // Delegated NIM, including the buckets on their way back out: inactive is
   // cooling down and retired is withdrawable, but both are still the user's.
   const stakedLuna =
@@ -2611,6 +2726,79 @@ export default function App() {
       setStakeAmount(String(MIN_STAKE_NIM))
     }
     setStakeOpen(true)
+  }
+
+  // --- Reasons to come back (lib/earnInsights): all local, nothing sent. ---
+  // Actual yield over the trailing month, next to the estimate above: rewards
+  // the chain paid, divided by the active stake. Only for a staker - a past
+  // staker's idle balance no longer defines a live yield.
+  const actualYield = useMemo(() => {
+    if (!earning) return null
+    return trailingYield(rewardTxs, Math.round(activeStakeNim * 100000), Date.now())
+  }, [rewardTxs, activeStakeNim, earning])
+  // Per-validator totals, all time, largest first; names resolve against the
+  // validator list (the reward rows carry addresses, the list carries names).
+  const validatorEarnings = useMemo(() => {
+    const raw = rewardsByValidator(rewardTxs)
+    return raw.map((e) => {
+      const v = validators.find((x) => cleanAddr(x.address) === e.address)
+      return {
+        address: e.address,
+        name: v && v.name ? v.name : `${e.address.slice(0, 12)}…`,
+        nim: e.nim,
+        firstMs: e.firstMs,
+        lastMs: e.lastMs,
+      }
+    })
+  }, [rewardTxs, validators])
+  // Rewards since the previous visit, when this one has a stored previous
+  // visit and the history has arrived. The card hides the line until the
+  // number can be trusted (loaded and non-zero), same rule as it hides the
+  // idle line.
+  const rewardsSincePreviousVisit = useMemo(() => {
+    if (previousVisitMs === null) return null
+    return {
+      ms: previousVisitMs,
+      ...rewardsSince(rewardTxs, previousVisitMs),
+      loaded: rewardTxs.length > 0,
+      complete: rewardsComplete,
+    }
+  }, [previousVisitMs, rewardTxs, rewardsComplete])
+  // "Stake it?": the newest received payment of the last 7 days that left NIM
+  // idle, or null. Suppressed during the tour so the walkthrough never moves
+  // under the spotlight.
+  const stakeNudgeTx = useMemo(() => {
+    if (!account?.nimiqAddress || tourActive) return null
+    return pickStakeNudge({
+      incomingTxs: incomingPayments,
+      idleNim: stakeMaxNim,
+      hasStaker: earning,
+      minStakeNim: MIN_STAKE_NIM,
+      dismissedHashes: nudgeDismissed,
+      nowMs: Date.now(),
+    })
+  }, [account?.nimiqAddress, tourActive, incomingPayments, stakeMaxNim, earning, nudgeDismissed])
+
+  // "Not now": remember the payment's hash so it is never offered again
+  // (per address, capped at 50, per tab in demo mode).
+  const dismissStakeNudge = () => {
+    if (!stakeNudgeTx || !account?.nimiqAddress) return
+    const list = [...new Set([...nudgeDismissed, stakeNudgeTx.hash])].slice(-50)
+    setNudgeDismissed(list)
+    try {
+      demoStore().setItem(`nimbooks:stake-nudge-dismissed:${account.nimiqAddress.replace(/\s+/g, '')}`, JSON.stringify(list))
+    } catch {
+      /* storage full - the dismissal holds for this session only */
+    }
+  }
+
+  // Accepting the nudge opens the same stake panel as the Earn card's button,
+  // but pre-fills the received amount rather than every idle NIM.
+  const acceptStakeNudge = () => {
+    if (!stakeNudgeTx) return
+    openStake()
+    const amount = Math.floor(Math.min(stakeNudgeTx.nim, stakeMaxNim))
+    if (amount > 0) setStakeAmount(String(amount))
   }
 
   // A learn-page entry lands on the screen it named: its panel opens, and the
@@ -4465,7 +4653,32 @@ export default function App() {
                 if (stakeMaxNim > 0) setStakeAmount(String(Math.floor(stakeMaxNim)))
               }}
               onCalculator={() => setCalcOpen(true)}
+              lastVisitMs={previousVisitMs}
+              rewardsSinceVisit={rewardsSincePreviousVisit}
+              trailing={actualYield}
+              validatorEarnings={validatorEarnings}
             />
+
+            {/* "Stake it?" - the second reason to come back, one tap from the
+                Earn card it extends. Hidden while the tour moves the page. */}
+            {stakeNudgeTx && earnRate !== null && (
+              <div className="card stake-nudge" role="region" aria-label="Stake a received payment">
+                <p className="stake-nudge-line">
+                  You received {stakeNudgeTx.nim.toLocaleString(lang, { maximumFractionDigits: 2 })} NIM on{' '}
+                  {new Date(stakeNudgeTx.timestamp).toLocaleDateString(lang)}. Stake it? At{' '}
+                  {(earnRate * 100).toLocaleString(lang, { maximumFractionDigits: 2 })}% p.a. it could earn about{' '}
+                  {projectStake({ principalNim: stakeNudgeTx.nim, annualRateNow: earnRate, months: 12, compound: earnCompound }).firstYearNim.toLocaleString(lang, { maximumFractionDigits: 2 })} NIM a year.
+                </p>
+                <div className="stake-nudge-actions">
+                  <button className="btn-primary" onClick={acceptStakeNudge}>
+                    Stake it
+                  </button>
+                  <button className="btn-secondary" onClick={dismissStakeNudge}>
+                    Not now
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Quick actions: the two things a wallet is for, one thumb-reach
                 below the balance. Actions, not sections — they open sheets and

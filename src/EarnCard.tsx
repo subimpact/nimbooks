@@ -26,6 +26,10 @@ export default function EarnCard({
   lang,
   onStake,
   onCalculator,
+  lastVisitMs = null,
+  rewardsSinceVisit = null,
+  trailing = null,
+  validatorEarnings = [],
 }: {
   /** Active stake, NIM. */
   stakedNim: number
@@ -43,6 +47,14 @@ export default function EarnCard({
   lang: string
   onStake: () => void
   onCalculator: () => void
+  /** When this account was previously seen (ms). Null on a first visit: nothing to compare against. */
+  lastVisitMs?: number | null
+  /** Rewards earned since `lastVisitMs`, or null before the history has loaded; `complete` is false while a chunk failed. */
+  rewardsSinceVisit?: { ms: number; nim: number; days: number; loaded: boolean; complete: boolean } | null
+  /** Actual trailing yield, or null while too little reward history exists. */
+  trailing?: { rate: number; windowDays: number } | null
+  /** All-time earnings per validator, largest first. */
+  validatorEarnings?: readonly { address: string; name: string; nim: number; firstMs: number; lastMs: number }[]
 }) {
   const yearOf = (nim: number) =>
     rate === null ? null : projectStake({ principalNim: nim, annualRateNow: rate, months: 12, compound }).firstYearNim
@@ -61,6 +73,9 @@ export default function EarnCard({
         {rate !== null && (
           <span className="earn-rate">
             {pct(rate, lang)}% p.a.{hasStaker ? '' : ' typical'}
+            {trailing !== null && hasStaker && (
+              <span className="earn-actual">Actual: {pct(trailing.rate, lang)}% p.a. over the last {trailing.windowDays} days</span>
+            )}
           </span>
         )}
       </div>
@@ -75,6 +90,15 @@ export default function EarnCard({
             {nimFmt(stakedNim, lang)} NIM staked{validatorName ? ` with ${validatorName}` : ''}
             {stakedYear !== null && fiat(stakedYear) ? ` · ${fiat(stakedYear).trim()} a year at today's price` : ''}
           </p>
+          {/* Why to come back: what was earned since the previous visit. A
+              reward history still arriving (or a quiet week, 0 NIM) says
+              nothing rather than something wrong. */}
+          {rewardsSinceVisit && lastVisitMs !== null && rewardsSinceVisit.loaded && rewardsSinceVisit.nim > 0 && (
+            <p className="earn-since">
+              Since your last visit on {new Date(lastVisitMs).toLocaleDateString(lang)}: +{nimFmt(rewardsSinceVisit.nim, lang)} NIM in
+              rewards{rewardsSinceVisit.complete ? '' : ' (some reward history is still loading)'}
+            </p>
+          )}
         </>
       ) : canStartStaking ? (
         <>
@@ -94,6 +118,25 @@ export default function EarnCard({
           {rate !== null &&
             ` At a typical ${pct(rate, lang)}% p.a., ${minStakeNim} NIM earns about ${nimFmt(yearOf(minStakeNim) ?? 0, lang)} NIM a year.`}
         </p>
+      )}
+
+      {/* Where the rewards came from: one row per paying validator. */}
+      {validatorEarnings.length > 0 && (
+        <details className="earn-validators">
+          <summary>Earned per validator</summary>
+          <ul>
+            {validatorEarnings.map((v) => (
+              <li key={v.address}>
+                <span className="earn-validator-name">{v.name}</span>
+                <span className="earn-validator-amount">
+                  {nimFmt(v.nim, lang, 4)} NIM
+                  <span className="dim"> · </span>
+                  {new Date(v.firstMs).toLocaleDateString(lang)} to {new Date(v.lastMs).toLocaleDateString(lang)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </details>
       )}
 
       {hasStaker && showIdle && idleYear !== null && (
