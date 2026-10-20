@@ -350,6 +350,8 @@ const STAKING_ACTION_LABEL: Record<StakingActionKind, string> = {
 const MIN_STAKE_NIM = 100
 const MIN_STAKE_LUNA = MIN_STAKE_NIM * 100000
 const MIN_STAKE_COPY = 'Nimiq needs at least 100 NIM to open a stake.'
+// Hub signing warm-up retry while a staking surface is open.
+const HUB_PREP_RETRY_MS = 5000
 const MIN_REMAINDER_COPY = 'Your stake must stay ≥ 100 NIM'
 
 // The public RPC rate-limits bursts and our own fetches time out; the 10s
@@ -2806,11 +2808,16 @@ export default function App() {
   // the submit buttons stay disabled until ready; the height keeps refreshing
   // until the last surface closes.
   const [hubStakeReady, setHubStakeReady] = useState(false)
+  // A failed warm-up (wasm fetch or block height) used to leave the buttons
+  // dark on "Preparing…" until the panel was reopened. Now it retries on a
+  // short timer while a staking surface is open, and says it is retrying.
+  const [hubPrepFailed, setHubPrepFailed] = useState(false)
   const hubSession = account?.provider === 'hub'
   useEffect(() => {
     if (!hubSession) {
       stopHubStakingPrep()
       setHubStakeReady(false)
+      setHubPrepFailed(false)
       return
     }
     const surfaceOpen =
@@ -2820,11 +2827,19 @@ export default function App() {
       return
     }
     let cancelled = false
-    void prepareHubStaking().then((ready) => {
-      if (!cancelled) setHubStakeReady(ready)
-    })
+    let retry: ReturnType<typeof setTimeout> | null = null
+    const attempt = () => {
+      void prepareHubStaking().then((ready) => {
+        if (cancelled) return
+        setHubStakeReady(ready)
+        setHubPrepFailed(!ready)
+        if (!ready) retry = setTimeout(attempt, HUB_PREP_RETRY_MS)
+      })
+    }
+    attempt()
     return () => {
       cancelled = true
+      if (retry) clearTimeout(retry)
     }
   }, [hubSession, stakeOpen, unstakeActivity])
 
@@ -3900,6 +3915,28 @@ export default function App() {
     () => stakeGateStatus(stakingHolding, demoMode, grantedAccess),
     [stakingHolding, demoMode, grantedAccess]
   )
+
+  // Why the stake submit is dark, in words, for every case the panel doesn't
+  // already explain elsewhere (demo banner, empty-wallet card, the 100 NIM
+  // hint under the amount). Never preselects a validator to make it go away:
+  // the choice of pool stays the user's.
+  const stakeBlockedReason: string | null = (() => {
+    if (staking || demoMode) return null
+    if (!canStake()) return 'Connect your own wallet to stake.'
+    if (hubSession && !hubStakeReady) {
+      return hubPrepFailed
+        ? "Couldn't load the signing library yet. Check your connection - retrying automatically."
+        : 'Preparing the signing library…'
+    }
+    if (stakeMaxNim <= 0) return null
+    if (!hasStaker && stakeMaxNim < MIN_STAKE_NIM) return null
+    if (!validatorChosen) return 'Pick a validator above to stake.'
+    if (!stakeAmountValid) {
+      if (!hasStaker && stakeAmountNim > 0 && stakeAmountNim < MIN_STAKE_NIM) return null
+      return 'Choose an amount to stake.'
+    }
+    return null
+  })()
 
   const handleStakeFromGate = () => {
     setSelectedValidator(cleanAddr(PINNED_VALIDATOR_ADDRESS))
@@ -6008,6 +6045,16 @@ export default function App() {
               unstakeBeats(finishStake)
             ) : (
               <>
+                {/* Read-only up front, before the fields invite entry - the
+                    same rule as the send sheet (a visitor on the sample
+                    wallet reported a dark Stake button with the reason
+                    hidden below a long validator list). */}
+                {demoMode && (
+                  <p className="demo-banner">
+                    Demo preview: staking is disabled. Connect your own wallet to stake: Hub
+                    sign-in works in this browser, or open NimBooks in Nimiq Pay.
+                  </p>
+                )}
                 <span className="label stake-section">Validator</span>
                 {hasStaker && (
                   <p className="hint small">
@@ -6190,20 +6237,12 @@ export default function App() {
                       ? 'Add to stake'
                       : 'Stake'}
                 </button>
-                {hubSession && !hubStakeReady && (
-                  // The Hub popup must open from the submit click itself, so
-                  // the signing library and a block height warm up first; this
-                  // is brief and only shows for browser sessions.
-                  <p className="hint small">Preparing the signing library…</p>
-                )}
-                {demoMode && (
-                  // Read-only, and nothing here is faked: the validators, the
-                  // yields and the balances are live. wallet.stakeNim refuses
-                  // demo mode outright, so the button above stays disabled.
-                  <p className="hint small">
-                    Demo mode is read-only: this is the real validator list and the sample
-                    wallet's real numbers, but nothing here can sign. Connect your own wallet to
-                    stake: Hub sign-in works in this browser, or open NimBooks in Nimiq Pay.
+                {stakeBlockedReason && (
+                  // A dark button always says why. Demo is told by the banner
+                  // up top; the rest are said here, at the button the user is
+                  // looking at, rather than left for them to guess.
+                  <p className="hint small stake-blocked-reason" role="status">
+                    {stakeBlockedReason}
                   </p>
                 )}
                 {hasStaker && (

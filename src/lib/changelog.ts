@@ -7,7 +7,7 @@
 // Badge text. Spelled out rather than built from a version constant so the exact
 // label ships as one string in the bundle (JSX would emit "v" as a separate node).
 // package.json carries the machine-readable version.
-export const APP_VERSION_LABEL = 'v1.30.0'
+export const APP_VERSION_LABEL = 'v1.31.0'
 
 export interface ChangelogEntry {
   version: string
@@ -16,6 +16,14 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '1.31.0',
+    date: '2026-10-20',
+    items: [
+      "The Stake button now always says why it can't be pressed yet: pick a validator, choose an amount, or wait while the signing library loads. The sample wallet says it is read-only at the top of the panel instead of below a long validator list - found by Jethro Adamu",
+      'Browser sign-in: if the signing library fails to load, staking now retries on its own instead of staying stuck on "Preparing" until the panel is reopened',
+    ],
+  },
   {
     version: '1.30.0',
     date: '2026-10-19',
