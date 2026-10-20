@@ -314,7 +314,12 @@ const STAKER_ADDR = 'NQ62 68D7 RQHN MSTR 1Y0T SY1P HU89 5QJ5 YV05';
 
       // S3: statement year 2025, then poll for the Rewards row to fill in.
       const yearSel = stmt.locator('#statementYear');
-      const years = await yearSel.locator('option').evaluateAll((os) => os.map((o) => o.getAttribute('value')));
+      let years = [];
+      for (const end = Date.now() + 60000; Date.now() < end; ) {
+        years = await yearSel.locator('option').evaluateAll((os) => os.map((o) => o.getAttribute('value'))).catch(() => []);
+        if (years.includes('2025')) break;
+        await livePage.waitForTimeout(500);
+      }
       t('S3 setup: year 2025 offered in #statementYear', years.includes('2025'), JSON.stringify(years));
       let rewardsNim = 0, rewardsRow = '';
       if (years.includes('2025')) {
