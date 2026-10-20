@@ -102,6 +102,7 @@ import {
   type ValidatorInfo,
   type VestingHolding,
 } from './lib/chain'
+import { planUnstake } from './lib/unstakePlan'
 import { isArchivedContract, ownFundedContracts, syncContractArchive } from './lib/payContracts'
 import { isValidNimiqAddress } from './lib/portfolio'
 import Portfolio from './Portfolio'
@@ -2765,6 +2766,24 @@ export default function App() {
   const maxUnstakeableLuna = retireableLuna + inactiveLuna + retiredLuna
   const unstakeMaxNim = maxUnstakeableLuna / 100000
 
+  // What the currently typed/slid unstake amount would actually do, from the
+  // same helper the submit handler uses - this only draws the inline preview;
+  // nothing is decided here twice.
+  const unstakePreview = planUnstake({
+    requestedLuna: Math.round(Number(unstakeAmount) * 100000),
+    retiredLuna,
+    retireableLuna,
+    inactiveLuna,
+    minStakeLuna: MIN_STAKE_LUNA,
+  })
+  const unstakePreviewActive =
+    Number(unstakeAmount) > 0 && Number(unstakeAmount) * 100000 <= maxUnstakeableLuna &&
+    (unstakePreview.snapped || unstakePreview.fullOnly)
+  // What the active stake would be left at if the request went out untixed -
+  // the figure the snapped explainer shows before the fix.
+  const unstakeActiveAfter =
+    retireableLuna - (unstakePreview.askedDeactivateLuna ?? 0)
+
   // Anything in flight out of stake, whichever way we can know about it. The
   // pre-election limbo is only knowable from the local marker (no chain field
   // and no event exposes a submitted retire), but everything after the
@@ -2994,6 +3013,24 @@ export default function App() {
       )
       return
     }
+    // Work the request out once, before anything is signed, with the same
+    // helper the panel's inline explainer uses - the two can then never
+    // disagree about what will actually be deactivated.
+    const plan = planUnstake({
+      requestedLuna: Math.round(amountNim * 100000),
+      retiredLuna,
+      retireableLuna,
+      inactiveLuna,
+      minStakeLuna: MIN_STAKE_LUNA,
+    })
+    if (plan.fullOnly) {
+      // The whole active balance is at or under the minimum - nothing
+      // partial is legal here, only unstaking all of it.
+      setUnstakeError(
+        `${MIN_REMAINDER_COPY}. Unstake the full ${formatLuna(String(retireableLuna), lang)} NIM instead.`
+      )
+      return
+    }
     unstakingRef.current = true
     setUnstaking(true)
     setUnstakeError(null)
@@ -3041,28 +3078,16 @@ export default function App() {
         remainingNim = Math.max(0, remainingNim - removeNim)
       }
       // 2. Deactivate the rest of the ACTIVE stake (active → inactive). The
-      //    protocol only retires *inactive* stake, so this — not retire — is
+      //    protocol only retires *inactive* stake, so this - not retire - is
       //    the first step for live stake. `setActiveStake` sets an absolute
-      //    balance, so pass what stays staked, not what leaves.
-      if (remainingNim > 0 && retireableLuna > 0) {
-        let deactivateLuna = Math.min(Math.round(remainingNim * 100000), retireableLuna)
-        // A staker record may not sit below the 100 NIM minimum: leaving 40 NIM
-        // active is rejected outright, so snap the deactivation down until the
-        // remainder is exactly the minimum. Deactivating everything is fine —
-        // that closes the record rather than shrinking it below the floor.
-        const remainderLuna = retireableLuna - deactivateLuna
-        let snapped = false
-        if (remainderLuna > 0 && remainderLuna < MIN_STAKE_LUNA) {
-          deactivateLuna = retireableLuna - MIN_STAKE_LUNA
-          snapped = true
-          if (deactivateLuna <= 0) {
-            // The whole active balance is at or under the minimum — nothing
-            // partial is legal here, only unstaking all of it.
-            setUnstakeError(
-              `${MIN_REMAINDER_COPY}. Unstake the full ${formatLuna(String(retireableLuna), lang)} NIM instead.`
-            )
-            return
-          }
+      //    balance, so pass what stays staked, not what leaves. The numbers
+      //    come from the same plan the panel's inline explainer shows.
+      if (plan.deactivateLuna > 0) {
+        const deactivateLuna = plan.deactivateLuna
+        if (plan.snapped) {
+          // Leaving under the 100 NIM minimum is rejected outright, so the
+          // plan enlarged the deactivation to keep exactly the minimum
+          // staked; the summary card says so.
           notes.push(
             `${MIN_REMAINDER_COPY}. Deactivating ${formatLuna(String(deactivateLuna), lang)} NIM instead.`
           )
@@ -3086,10 +3111,10 @@ export default function App() {
           /* storage full — in-memory only */
         }
         verifyUnstakeTx(deactivate.hash, { kind: 'deactivate', amountNim: deactivateNim })
-        // When the amount was snapped to the minimum, the shortfall is staying
-        // staked on purpose — it is not "still cooling down" (step 3), so it
-        // must not be reported as such.
-        remainingNim = snapped ? 0 : remainingNim - deactivateNim
+        // When the plan snapped the amount to the minimum, the shortfall is
+        // staying staked on purpose - it is not "still cooling down" (step 3),
+        // so it must not be reported as such.
+        remainingNim = plan.snapped ? 0 : Math.max(0, remainingNim - deactivateNim)
       }
       // 3. Anything left is already cooling down (inactive). It still needs a
       //    retire transaction once the reporting window passes — that is the
@@ -6122,6 +6147,11 @@ export default function App() {
                               {fee ? ` · fee ${fee}` : ''}
                               {reliability ? ` · reliability ${reliability}` : ''}
                             </span>
+                            {isPinned && (
+                              <span className="badge builder" title="Run by the developer of NimBooks">
+                                Builder's pool
+                              </span>
+                            )}
                             {v.reliability === null && (
                               <span className="badge inactive">
                                 {isPinned ? 'new pool · score pending' : 'inactive: not producing rewards'}
@@ -6290,6 +6320,29 @@ export default function App() {
                             )}
                           </span>
                         </div>
+                        {/* A partial unstake that would shrink the active
+                            stake under the 100 NIM minimum explains itself
+                            here, before anything is sent - not only in the
+                            receipt afterwards. Numbers come from the same
+                            plan helper the submit handler uses. */}
+                        {unstakePreviewActive && (
+                          <>
+                            <p className="hint small warn unstake-snap-hint">
+                              {unstakePreview.snapped
+                                ? `Nimiq needs at least ${MIN_STAKE_NIM} NIM to stay staked. This would leave ${formatLuna(String(unstakeActiveAfter), lang)} NIM, so NimBooks will unstake ${formatLuna(String(unstakePreview.deactivateLuna), lang)} NIM and keep 100 NIM staked.`
+                                : `Nimiq needs at least ${MIN_STAKE_NIM} NIM to stay staked, and your active stake is ${formatLuna(String(retireableLuna), lang)} NIM. Only a full unstake is possible here.`}
+                            </p>
+                            {unstakeMaxNim > 0 && (
+                              <button
+                                type="button"
+                                className="btn-secondary unstake-fill-full"
+                                onClick={() => setUnstakeAmount(String(unstakeMaxNim))}
+                              >
+                                Unstake all {formatLuna(String(maxUnstakeableLuna), lang)} NIM
+                              </button>
+                            )}
+                          </>
+                        )}
                         <span className="hint small">
                           {inactiveLuna > 0
                             ? `${formatLuna(String(inactiveLuna), lang)} NIM cooling down. Finish it from the balance banner after the reporting window.`

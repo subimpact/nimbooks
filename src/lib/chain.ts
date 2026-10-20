@@ -1208,8 +1208,10 @@ interface ValidatorCacheEntry {
 }
 
 /**
- * Pinned validator: ImpactZero stake, the operator's own validator.
- * Pinned first in the picker by request.
+ * Builder's-pool marker: ImpactZero, the validator run by the developer of
+ * NimBooks. The list is sorted neutrally; nothing is pinned first any more,
+ * but the picker still needs the address to label the pool as the builder's,
+ * and the stake gate still needs to recognise it.
  */
 export const PINNED_VALIDATOR_ADDRESS = 'NQ08 ACT8 T0FE PTG8 P5RL H2S3 QGXH V15R NVXY'
 
@@ -1218,27 +1220,37 @@ export function isPinnedValidator(address: string): boolean {
 }
 
 /**
- * Best home for a stake first: reliability descending, non-producing pools
- * (null score) last, ties broken by name so the order is stable between loads.
+ * The validator order, as one pure comparator so tests can pin it down.
  *
- * ImpactZero (the operator's own validator) is pinned first by request,
- * unconditionally (scored or not).
+ * Producing pools (a reliability score this epoch) come first, ordered by net
+ * annual yield descending with any pool that publishes no yield last, then by
+ * reliability descending, then by name so the order is stable between loads.
+ * Non-producing pools (null reliability, not earning anything) come last,
+ * ordered the same inner way.
+ */
+export function compareValidators(a: ValidatorInfo, b: ValidatorInfo): number {
+  const ar = a.reliability
+  const br = b.reliability
+  // Producing before non-producing, either way.
+  if (ar === null && br !== null) return 1
+  if (br === null && ar !== null) return -1
+  const ay = a.annualReward
+  const by = b.annualReward
+  // Net yield descending within each group, no-yield pools last.
+  if (ay === null && by !== null) return 1
+  if (by === null && ay !== null) return -1
+  if (ay !== null && by !== null && ay !== by) return by - ay
+  // Reliability descending, for pools that share a yield.
+  if (ar !== null && br !== null && ar !== br) return br - ar
+  return a.name.localeCompare(b.name)
+}
+
+/**
+ * Neutral order: nothing is pinned first and the builder's pool ranks exactly
+ * like any other. See `compareValidators` for the precise order.
  */
 export function sortValidators(list: ValidatorInfo[]): ValidatorInfo[] {
-  const pinnedClean = cleanAddress(PINNED_VALIDATOR_ADDRESS).toUpperCase()
-  return [...list].sort((a, b) => {
-    const aPinned = cleanAddress(a.address).toUpperCase() === pinnedClean
-    const bPinned = cleanAddress(b.address).toUpperCase() === pinnedClean
-    if (aPinned && !bPinned) return -1
-    if (bPinned && !aPinned) return 1
-
-    const ar = a.reliability
-    const br = b.reliability
-    if (ar === null && br !== null) return 1
-    if (br === null && ar !== null) return -1
-    if (ar !== null && br !== null && ar !== br) return br - ar
-    return a.name.localeCompare(b.name)
-  })
+  return [...list].sort(compareValidators)
 }
 
 /**

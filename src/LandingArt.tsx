@@ -134,8 +134,8 @@ function Staking() {
   return (
     <>
       <rect className="la-card" x="14" y="10" width="292" height="28" rx="10" />
-      <rect className="la-pinned" x="22" y="18" width="68" height="13" rx="6.5" />
-      <text className="la-tagtxt la-onfill" x="56" y="28" textAnchor="middle">Pinned</text>
+      <rect className="la-pinned" x="22" y="18" width="70" height="13" rx="6.5" />
+      <text className="la-tagtxt la-onfill" x="57" y="28" textAnchor="middle">Builder</text>
       <rect className="la-line-fill" x="98" y="21" width="92" height="5" rx="2.5" />
       <rect className="la-green la-grow" x="236" y="20" width="58" height="6" rx="3" />
       <rect className="la-card" x="14" y="44" width="292" height="28" rx="10" />

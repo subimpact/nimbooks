@@ -62,7 +62,7 @@ export const FEATURES: FeatureDef[] = [
       },
       {
         title: 'Pick a validator',
-        body: 'A validator is a node that secures the network and pays rewards to the NIM staked with it. The list is live from Nimiq\'s public validator data. ImpactZero, the validator that keeps NimBooks running, is pinned first.',
+        body: 'A validator is a node that secures the network and pays rewards to the NIM staked with it. The list is live from Nimiq\'s public validator data, sorted by net yield and then reliability. ImpactZero, run by the developer of NimBooks, is labelled Builder\'s pool.',
       },
       {
         title: 'Stake',

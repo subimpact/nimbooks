@@ -3003,6 +3003,17 @@ a.btn-ghost.btn-link {
   color: var(--warn, #b26a00);
   border-radius: 999px;
 }
+/* The builder's own pool: always labelled, never hidden - the list itself
+   is sorted neutrally, so the label is what keeps the difference visible */
+.validator-list .badge.builder {
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 1px 7px;
+  font-size: 11px;
+  background: var(--accent-bg, rgba(233, 178, 19, 0.14));
+  color: var(--accent, #e9b213);
+  border-radius: 999px;
+}
 .option-row {
   display: flex;
   align-items: flex-start;
