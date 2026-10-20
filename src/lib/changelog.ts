@@ -7,7 +7,7 @@
 // Badge text. Spelled out rather than built from a version constant so the exact
 // label ships as one string in the bundle (JSX would emit "v" as a separate node).
 // package.json carries the machine-readable version.
-export const APP_VERSION_LABEL = 'v1.32.0'
+export const APP_VERSION_LABEL = 'v1.33.0'
 
 export interface ChangelogEntry {
   version: string
@@ -17,9 +17,11 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
-    version: '1.32.0',
+    version: '1.33.0',
     date: '2026-10-21',
     items: [
+      "The Earn card now gives you three reasons to come back: the rewards earned since your last visit, what the chain actually paid you over the last month next to the pool's estimate, and what each validator has earned you all time (per pool, collapsed until you open it)",
+      'A received payment that leaves NIM idle now asks "Stake it?" - with what it could earn in a year, one tap to stake just that payment, and Not now when you would rather not',
       "The validator picker now orders pools on its own: highest net yield first, then reliability, with pools that are not producing last. Nothing is pinned to the top any more, and the developer's own pool, ImpactZero, is always labelled Builder's pool so you always know who runs it",
       "A partial unstake that would leave less than the protocol's 100 NIM minimum staked is now explained before you send it, with the amount NimBooks will actually unstake and a one-tap Unstake all button, instead of only appearing in the receipt afterwards",
     ],

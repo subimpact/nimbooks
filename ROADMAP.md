@@ -7,13 +7,15 @@ Wallet in any browser.
 
 _Last updated 21 October 2026. Dates are targets._
 
-## Shipped since Cycle 2 (v1.14 → v1.32)
+## Shipped since Cycle 2 (v1.14 → v1.33)
 
 **Earning**
 - Earn card at the top of Overview: what your stake earns a year, or what idle NIM could earn at the median pool's rate (v1.28).
 - Yield calculator: any amount, pool and 1, 3 or 5 years, with compounding for restaking pools and the protocol's falling issuance (v1.28).
 - Staking from a browser through the Nimiq Hub: stake, unstake, retire and withdraw on desktop (v1.14).
 - **Partial unstakes** that would leave less than the protocol's 100 NIM minimum staked are explained before they're sent (v1.32).
+- **Reasons to come back:** the Earn card shows the rewards earned since your last visit, your actual yield over the last 30 days next to the pool's estimate, and what each validator has earned you all time (v1.33).
+- **"Stake it?" prompt** when a received payment leaves NIM idle (v1.33).
 
 **Books and tax**
 - FIFO crypto tax with staking income, in your display currency, plus Koinly, CoinTracking and CryptoTaxCalculator CSVs (v1.21–1.22).
@@ -40,9 +42,6 @@ _Last updated 21 October 2026. Dates are targets._
 ## Cycle 3 (to 11 November 2026)
 
 ### Week 2 · 22–28 October: reasons to come back
-- **Rewards since your last visit** on the Earn card.
-- **Earnings per validator**, and actual yield next to the estimate.
-- **"Stake it?" prompt** when a payment leaves NIM idle.
 - **`nimbooks-mcp` 1.1:** read-only `get_staking`, `list_validators`, `project_yield` and `get_rewards` tools, sharing the app's yield maths through a parity test.
 
 ### Week 3 · 29 October – 4 November: earning beyond the basics

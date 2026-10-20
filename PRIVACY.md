@@ -13,6 +13,8 @@ transactions NimBooks shows you; NimBooks just reads them for you.
 
 ## On your device
 
+_Last updated 21 October 2026 (v1.33.0)._
+
 Stored in browser storage (`localStorage`) under `nimbooks:` keys, for each
 address you connect:
 
@@ -28,10 +30,16 @@ address you connect:
 | Caches (history, prices, validators, rewards) | `nimbooks:txs:*`, `nimbooks:rates`, … |
 | Nimiq Pay's settled payment contracts, so their history loads once | `nimbooks:htlc-archive:<address>` |
 | Your counting choice and backup reminder | `nimbooks:connect-count`, `nimbooks:backup-state` |
+| When you last visited, so the Earn card can show your rewards since then | `nimbooks:last-visit:<address>` |
+| Payments you declined to stake ("Not now"), so they are never offered twice | `nimbooks:stake-nudge-dismissed:<address>` |
 
 The device ID comes from Nimiq Pay and never leaves your device. Caches,
 including the payment-contract archive, are left out of backups because they
-rebuild from the public chain.
+rebuild from the public chain. The last-visit marker and the dismissed-stake
+list are preferences, so a backup carries them; in demo mode the sample wallet
+keeps both per tab (sessionStorage) and never writes them to localStorage.
+Neither key is anything but a timestamp or list of transaction hashes, and
+neither ever leaves your device.
 
 None of this is sent anywhere. It also means **clearing site data, or signing
 out of Nimiq Pay, deletes it.** Export → Backup & restore gives you a copy to
