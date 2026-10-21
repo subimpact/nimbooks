@@ -1,233 +1,215 @@
-/* "New look (beta)": Tailwind v4, namespaced and scoped.
+/* "New look (beta)": the shadcn house kit on the decided colour scheme.
  *
  * Rules that keep the classic look pixel-exact for anyone who has not opted
  * in (and for every classic screen inside a beta session):
  *
- *  - No global preflight: only the theme and utilities stylesheets are
- *    imported, and all styling is scoped under .ui-beta, the root class every
- *    beta screen and portal carries. Preflight would restyle elements classic
- *    screens rely on, so it is never imported.
+ *  - No global preflight: the theme and utilities stylesheets only style
+ *    things reached through the `tw` prefix, and every beta screen and portal
+ *    carries .ui-beta, the root class the theme tokens (and the scoped base
+ *    rules below) hang on. Preflight would restyle elements classic screens
+ *    rely on, so it is never imported.
  *  - The `tw` prefix (`tw:flex`) means no Tailwind utility can collide with a
  *    classic class name. Tailwind emits its theme variables as --tw-* (the
  *    prefix applies to theme variables too, hence the prefix modifier on the
  *    theme import), so its :root tokens can shadow nothing App.css owns.
+ *    "prefix": "tw" is also set in components.json, so the shadcn CLI emits
+ *    prefixed classes in the generated components itself.
  *  - Classic users download nothing: this whole file ships inside the lazily
  *    imported beta chunk (src/beta/index.ts), separate from the main CSS.
  *
- * Tokens are the Nimiq palette from App.css under beta- names. They are set
- * on .ui-beta, not :root (nothing leaks globally), and utilities reference
- * them as arbitrary values (tw:bg-[var(--color-beta-card)]), which resolve
- * per element, so the light block below re-points them under the app's own
- * light selector.
+ * Colour scheme (option B of the beta colour rubric): the house neutral theme
+ * verbatim, with Nimiq gold as the accent. Gold is used as a fill with
+ * near-black text (10.22:1); white-on-gold is 1.94:1 and forbidden, and gold
+ * is never used as text on a light surface. No navy surfaces.
  */
 
 @layer theme, base, components, utilities;
 @import 'tailwindcss/theme.css' layer(theme) prefix(tw);
-@import 'tailwindcss/utilities.css' layer(utilities) prefix(tw);
+/* Utilities are imported UNLAYERED on purpose. App.css is unlayered and opens
+   with `* { margin: 0; padding: 0 }`; any unlayered rule beats every layered
+   one regardless of specificity, so layered utilities lost every padding and
+   margin to it (cards rendered with zero padding). Unlayered, a prefixed
+   utility (0,1,0) beats App.css's element rules (0,0,0 / 0,0,1). */
+@import 'tailwindcss/utilities.css' prefix(tw);
+@import 'shadcn/tailwind.css' prefix(tw);
+@import 'tw-animate-css' prefix(tw);
+@import '@fontsource-variable/geist';
 
-/* Scoped base, in place of Tailwind's global preflight: only what the beta
-   components actually need, never leaving .ui-beta. */
+/* The app's own theme attribute decides: dark is the default (<html> without
+   data-theme='light'), light is html[data-theme='light']. */
+@custom-variant dark (&:where(html:not([data-theme='light']) *));
+
+@theme inline {
+  --font-heading: var(--font-sans);
+  --font-sans: 'Geist Variable', sans-serif;
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/* House neutral theme, dark (the app's default), on .ui-beta - nothing leaks
+   globally. Only the accent tokens differ from the house theme: primary,
+   primary-foreground, ring, chart 1 to 4 and sidebar-primary. */
 .ui-beta {
-  /* Shadcn-style semantic tokens, the Nimiq palette (dark defaults). */
-  --color-beta-bg: #151833;
-  --color-beta-card: #1f2348;
-  --color-beta-card-2: #282d5c;
-  --color-beta-fg: #ffffff;
-  --color-beta-muted: rgba(255, 255, 255, 0.65);
-  --color-beta-border: rgba(255, 255, 255, 0.12);
-  --color-beta-primary: #e9b213;
-  --color-beta-primary-fg: #ffffff;
-  --color-beta-green: #21bca5;
-  --color-beta-red: #d94432;
-  --color-beta-blue: #0582ca;
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.7924 0.1593 85.61); /* Nimiq gold */
+  --primary-foreground: oklch(0.145 0 0); /* near-black on gold: 10.22:1 */
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.7924 0.1593 85.61); /* gold */
+  --chart-1: oklch(0.7924 0.1593 85.61); /* gold: the NIM series */
+  --chart-2: #21bca5; /* Nimiq green: money in */
+  --chart-3: #d94432; /* Nimiq red: money out */
+  --chart-4: oklch(0.708 0 0); /* neutral muted: internal HTLC */
+  --chart-5: oklch(0.68 0.11 300);
+  --radius: 0.625rem;
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.7924 0.1593 85.61); /* the same gold */
+  --sidebar-primary-foreground: oklch(0.145 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.7924 0.1593 85.61);
 
-  --beta-radius: 16px;
-  --beta-radius-sm: 10px;
-  --beta-gold-light: #f6bc41;
-  --beta-ring: 0 0 0 3px rgba(233, 178, 19, 0.35);
-
-  color: var(--color-beta-fg);
-  font-family: inherit;
-  line-height: 1.45;
+  font-family: var(--font-sans);
+  line-height: 1.5;
+  background-color: var(--background);
+  color: var(--foreground);
 }
-.ui-beta,
-.ui-beta *,
-.ui-beta *::before,
-.ui-beta *::after {
+
+/* Light: the house neutral light theme, same gold accents. */
+:root[data-theme='light'] .ui-beta {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.7924 0.1593 85.61);
+  --primary-foreground: oklch(0.145 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.7924 0.1593 85.61);
+  --chart-1: oklch(0.7924 0.1593 85.61);
+  --chart-2: #21bca5;
+  --chart-3: #d94432;
+  --chart-4: oklch(0.556 0 0);
+  --chart-5: oklch(0.55 0.12 300);
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.7924 0.1593 85.61);
+  --sidebar-primary-foreground: oklch(0.145 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.7924 0.1593 85.61);
+}
+
+/* Scoped base, in place of Tailwind's global preflight. Every selector is
+   wrapped in :where() so it has zero specificity: it still beats App.css's
+   equally weightless `*` reset (this file loads later) but never a utility.
+   Scoped base: border-style,
+   box-sizing and margins are reset for everything under .ui-beta EXCEPT
+   classic content, which renders inside .classic-in-beta and must keep
+   App.css's box model exactly as shipped. */
+:where(.ui-beta) :where(*:not(.classic-in-beta, .classic-in-beta *)) {
+  border-style: solid;
+  border-width: 0;
+  border-color: var(--border);
   box-sizing: border-box;
+  margin: 0;
 }
-.ui-beta button,
-.ui-beta input,
-.ui-beta select {
+:where(.ui-beta) :where(:is(button, input, select, textarea):not(.classic-in-beta, .classic-in-beta *)) {
   font: inherit;
+  letter-spacing: inherit;
   color: inherit;
 }
-.ui-beta button {
+:where(.ui-beta) :where(button:not(.classic-in-beta, .classic-in-beta *)) {
   cursor: pointer;
+  background: transparent;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
-.ui-beta button:focus-visible,
-.ui-beta [role='switch']:focus-visible {
-  outline: none;
-  box-shadow: var(--beta-ring);
-}
-.ui-beta a:focus-visible {
-  outline: none;
-  box-shadow: var(--beta-ring);
-  border-radius: 4px;
-}
-.ui-beta :focus:not(:focus-visible) {
-  box-shadow: none;
+
+/* Gold is never text on a light surface: links in beta use the plain
+   foreground colour with an underline. */
+:where(.ui-beta) :where(a:not(.classic-in-beta, .classic-in-beta *)) {
+  color: inherit;
+  text-decoration: underline;
 }
 
-/* Light theme: same semantic names under the app's own light selector. */
-:root[data-theme='light'] .ui-beta {
-  --color-beta-bg: #f2f4f8;
-  --color-beta-card: #ffffff;
-  --color-beta-card-2: #eef1f7;
-  --color-beta-fg: #1f2348;
-  --color-beta-muted: rgba(31, 35, 72, 0.65);
-  --color-beta-border: rgba(31, 35, 72, 0.1);
-
-  --beta-ring: 0 0 0 3px rgba(233, 178, 19, 0.25);
-}
-/* Switch states (see ui/Switch.tsx) */
-.ui-beta .beta-switch-track {
-  display: block;
-  position: relative;
-  width: 32px;
-  height: 28px;
-  border-radius: 9999px;
-  background: color-mix(in srgb, var(--color-beta-fg) 25%, transparent);
-  transition: background 0.2s var(--ease-nq);
-}
-.ui-beta .beta-switch[data-state='checked'] .beta-switch-track {
-  background: var(--gradient-gold);
-}
-.ui-beta .beta-switch-knob {
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  display: block;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: var(--color-beta-primary-fg);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-  transition: transform 0.2s var(--ease-nq);
-}
-.ui-beta .beta-switch[data-state='checked'] .beta-switch-knob {
-  transform: translateX(4px);
-}
-
-/* The beta shell's topbar stays the classic component, but carries one extra
-   class in beta only: the longer "... beta" badge needs a little width back
-   or the bar overflows a 390px viewport. Inert in classic: the class is only
-   set while beta is on, and this stylesheet only loads then. */
-.beta-shell .version-badge {
-  padding-inline: 6px;
-}
-
-/* The drawer's grab handle */
-.ui-beta .beta-drawer-handle {
-  display: block;
-  position: relative;
-  width: 36px;
-  height: 5px;
-  margin: 0 auto 12px;
-  border-radius: 9999px;
-  background: color-mix(in srgb, var(--color-beta-fg) 30%, transparent);
-  touch-action: pan-y;
-}
-
-/* Per-validator earnings disclosure on the beta Earn card */
-.ui-beta .beta-earn-validators {
-  margin: 12px 0;
-  font-size: 13px;
-}
-.ui-beta .beta-earn-validators summary {
-  font-weight: 600;
-  color: var(--color-beta-muted);
-  cursor: pointer;
-  min-height: 44px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  list-style: none;
-}
-/* display:flex drops the native disclosure marker, so draw one: without it the
-   collapsed label reads as an empty section. */
-.ui-beta .beta-earn-validators summary::-webkit-details-marker {
-  display: none;
-}
-.ui-beta .beta-earn-validators summary::after {
-  content: '';
-  width: 8px;
-  height: 8px;
-  margin-right: 4px;
-  border-right: 2px solid currentColor;
-  border-bottom: 2px solid currentColor;
-  transform: rotate(45deg);
-  transition: transform 150ms ease;
-}
-.ui-beta .beta-earn-validators[open] summary::after {
-  transform: rotate(-135deg);
-}
-.ui-beta .beta-earn-validators ul {
-  list-style: none;
-  padding: 0;
-  margin: 4px 0 0;
-}
-.ui-beta .beta-earn-validators li {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 6px 0;
-  border-bottom: 1px solid var(--color-beta-border);
-}
-.ui-beta .beta-earn-validators li span {
-  color: var(--color-beta-fg);
-  font-weight: 600;
-}
-.ui-beta .beta-earn-validators li span + span {
-  color: var(--color-beta-muted);
-  font-weight: 400;
-  text-align: right;
-}
-
-/* Calculator form controls: 16px text so iOS never zooms, 44px tall */
-.ui-beta .beta-input {
-  min-height: 44px;
-  padding: 10px 12px;
+/* 16px text on form controls so iOS never zooms, inside the beta kit only. */
+:where(.ui-beta) input,
+:where(.ui-beta) select {
   font-size: 16px;
-  border-radius: var(--beta-radius-sm);
-  border: 1px solid var(--color-beta-border);
-  background: var(--color-beta-card-2);
-  color: var(--color-beta-fg);
-  width: 100%;
 }
-.ui-beta .beta-input:focus-visible {
-  outline: none;
-  border-color: var(--color-beta-primary);
+/* The beta kit's own typeface (classic keeps Mulish). */
+.ui-beta {
+  font-family: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
 }
-.ui-beta .beta-calc-table {
-  width: 100%;
-  margin-top: 12px;
-  font-size: 14px;
-  border-collapse: collapse;
+.ui-beta .classic-in-beta {
+  font-family: var(--font-sans);
 }
-.ui-beta .beta-calc-table th,
-.ui-beta .beta-calc-table td {
-  padding: 6px 4px;
-  text-align: right;
-  border-bottom: 1px solid var(--color-beta-border);
-}
-.ui-beta .beta-calc-table th:first-child,
-.ui-beta .beta-calc-table td:first-child {
-  text-align: left;
-}
-.ui-beta .beta-calc-table th {
-  font-weight: 600;
-  color: var(--color-beta-muted);
+
+/* The beta shell is full width: the classic .app column (max-width 480px,
+   16px padding, 104px dock clearance) would squeeze the sidebar layout. This
+   file only loads in beta, so classic keeps its column. */
+.app.app--beta {
+  max-width: none;
+  padding: 0;
 }

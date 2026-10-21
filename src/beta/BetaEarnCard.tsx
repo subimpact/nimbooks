@@ -1,18 +1,25 @@
-// Beta Earn card: the "New look (beta)" port of EarnCard.tsx. Same props, same
-// numbers (projectStake via lib/yieldCalc), same conditions for every line:
-// since-last-visit, actual yield, per-validator earnings, the idle nudge, the
-// stake button and the link into the calculator. Only the presentation
-// differs: Tailwind classes on the beta tokens, all inside a .ui-beta root.
+// Beta Earn card content: the "New look (beta)" port of EarnCard.tsx on the
+// house shadcn kit. Same props, same numbers (projectStake via lib/yieldCalc),
+// same conditions for every line: since-last-visit, actual yield,
+// per-validator earnings (a Collapsible with a chevron), the idle nudge, the
+// stake button and the button into the calculator.
 //
-// The beta chunk also carries this card's markup, so this file must never
-// import anything that lives in the main bundle's render path beyond shared
-// libs (lib/chain, lib/yieldCalc) and the beta UI kit.
+// Only the presentation differs. The Card shell, the title, the rate Badge and
+// the collapse-to-a-summary behaviour live in BetaOverview (so the collapsible
+// state has one owner); this file renders the card's innards. The card stays
+// inside its own .ui-beta scope: it must import nothing beyond the shared libs
+// (lib/chain, lib/yieldCalc) and the beta kit.
 
+import { ChevronDownIcon } from 'lucide-react'
 import { formatFiat, type CurrencyCode } from '../lib/chain'
 import { projectStake } from '../lib/yieldCalc'
-import { Badge } from './ui/Badge'
-import { Button } from './ui/Button'
-import { Card, CardContent, CardHeader, CardLabel } from './ui/Card'
+import { Button } from './components/ui/button'
+import { CardContent } from './components/ui/card'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from './components/ui/collapsible'
 
 const nimFmt = (n: number, lang: string, max = 2) => n.toLocaleString(lang, { maximumFractionDigits: max })
 const pct = (r: number, lang: string) => (r * 100).toLocaleString(lang, { maximumFractionDigits: 2 })
@@ -67,112 +74,101 @@ export default function BetaEarnCard({
   // Below 1 NIM idle there is nothing worth suggesting; a first stake also
   // needs the protocol minimum.
   const canStartStaking = idleNim >= minStakeNim
-  const showIdle = idleYear !== null && (hasStaker ? idleNim >= 1 : canStartStaking)
+  const canStakeIdle = hasStaker ? idleNim >= 1 : canStartStaking
+  const showIdle = idleYear !== null && canStakeIdle
   const fiat = (nim: number) => (nimPrice > 0 ? ` ≈ ${formatFiat(nim * nimPrice, currency)}` : '')
 
   return (
-    <Card
-      className="ui-beta tw:w-full"
-      data-learn="earn"
-      data-tour="earn"
-    >
-      <CardHeader>
-        <CardLabel>{hasStaker ? 'Earning' : 'Earn with your NIM'}</CardLabel>
-        {rate !== null && (
-          <Badge variant="gold">
-            {pct(rate, lang)}% p.a.{hasStaker ? '' : ' typical'}
-          </Badge>
-        )}
-      </CardHeader>
-
+    <CardContent className="tw:flex tw:flex-col tw:gap-2">
       {hasStaker ? (
         <>
-          <CardContent>
-            <p className="tw:m-0 tw:text-[30px] tw:font-extrabold tw:leading-tight tw:text-[var(--color-beta-fg)]">
-              {stakedYear === null ? '…' : `≈ ${nimFmt(stakedYear, lang)} NIM`}
-              <span className="tw:text-[15px] tw:font-semibold tw:text-[var(--color-beta-muted)]"> a year</span>
+          <p className="tw:m-0 tw:text-3xl tw:font-semibold tw:tracking-tight" data-probe="earn-year">
+            {stakedYear === null ? '…' : `≈ ${nimFmt(stakedYear, lang)} NIM`}
+            <span className="tw:text-sm tw:font-normal tw:text-muted-foreground"> a year</span>
+          </p>
+          <p className="tw:m-0 tw:text-sm tw:text-muted-foreground">
+            {nimFmt(stakedNim, lang)} NIM staked{validatorName ? ` with ${validatorName}` : ''}
+            {stakedYear !== null && fiat(stakedYear) ? ` · ${fiat(stakedYear).trim()} a year at today's price` : ''}
+          </p>
+          {/* Why to come back: what was earned since the previous visit. A
+              reward history still arriving (or a quiet week, 0 NIM) says
+              nothing rather than something wrong. */}
+          {rewardsSinceVisit && lastVisitMs !== null && rewardsSinceVisit.loaded && rewardsSinceVisit.nim > 0 && (
+            <p className="tw:m-0 tw:text-sm tw:font-medium" data-probe="earn-since">
+              Since your last visit on {new Date(lastVisitMs).toLocaleDateString(lang)}: +{nimFmt(rewardsSinceVisit.nim, lang)} NIM in
+              rewards{rewardsSinceVisit.complete ? '' : ' (some reward history is still loading)'}
             </p>
-            <p className="tw:m-0 tw:mt-1 tw:text-[13px] tw:leading-relaxed tw:text-[var(--color-beta-muted)]">
-              {nimFmt(stakedNim, lang)} NIM staked{validatorName ? ` with ${validatorName}` : ''}
-              {stakedYear !== null && fiat(stakedYear) ? ` · ${fiat(stakedYear).trim()} a year at today's price` : ''}
+          )}
+          {trailing !== null && hasStaker && (
+            <p className="tw:m-0 tw:text-sm tw:text-muted-foreground">
+              Actual: {pct(trailing.rate, lang)}% p.a. over the last {trailing.windowDays} days
             </p>
-            {/* Why to come back: what was earned since the previous visit. A
-                reward history still arriving (or a quiet week, 0 NIM) says
-                nothing rather than something wrong. */}
-            {rewardsSinceVisit && lastVisitMs !== null && rewardsSinceVisit.loaded && rewardsSinceVisit.nim > 0 && (
-              <p className="tw:m-0 tw:mt-2 tw:text-[13px] tw:font-semibold tw:text-[var(--color-beta-green)]">
-                Since your last visit on {new Date(lastVisitMs).toLocaleDateString(lang)}: +
-                {nimFmt(rewardsSinceVisit.nim, lang)} NIM in rewards
-                {rewardsSinceVisit.complete ? '' : ' (some reward history is still loading)'}
-              </p>
-            )}
-            {trailing !== null && hasStaker && (
-              <p className="tw:m-0 tw:mt-2 tw:text-[13px] tw:text-[var(--color-beta-muted)]">
-                Actual: {pct(trailing.rate, lang)}% p.a. over the last {trailing.windowDays} days
-              </p>
-            )}
-          </CardContent>
+          )}
         </>
       ) : canStartStaking ? (
-        <CardContent>
-          <p className="tw:m-0 tw:text-[30px] tw:font-extrabold tw:leading-tight tw:text-[var(--color-beta-fg)]">
+        <>
+          <p className="tw:m-0 tw:text-3xl tw:font-semibold tw:tracking-tight" data-probe="earn-year">
             {idleYear === null ? '…' : `≈ ${nimFmt(idleYear, lang)} NIM`}
-            <span className="tw:text-[15px] tw:font-semibold tw:text-[var(--color-beta-muted)]"> a year</span>
+            <span className="tw:text-sm tw:font-normal tw:text-muted-foreground"> a year</span>
           </p>
-          <p className="tw:m-0 tw:mt-1 tw:text-[13px] tw:leading-relaxed tw:text-[var(--color-beta-muted)]">
+          <p className="tw:m-0 tw:text-sm tw:text-muted-foreground">
             What your {nimFmt(idleNim, lang)} NIM could earn staked
-            {idleYear !== null && fiat(idleYear) ? ` (${fiat(idleYear).trim()} at today's price)` : ''}. It stays
-            yours, and you can unstake any time.
+            {idleYear !== null && fiat(idleYear) ? ` (${fiat(idleYear).trim()} at today's price)` : ''}. It stays yours,
+            and you can unstake any time.
           </p>
-        </CardContent>
+        </>
       ) : (
-        <CardContent>
-          <p className="tw:m-0 tw:text-[13px] tw:leading-relaxed tw:text-[var(--color-beta-muted)]">
-            Staking starts at {minStakeNim} NIM.
-            {rate !== null &&
-              ` At a typical ${pct(rate, lang)}% p.a., ${minStakeNim} NIM earns about ${nimFmt(
-                yearOf(minStakeNim) ?? 0,
-                lang
-              )} NIM a year.`}
-          </p>
-        </CardContent>
+        <p className="tw:m-0 tw:text-sm tw:text-muted-foreground" data-probe="earn-year">
+          Staking starts at {minStakeNim} NIM.
+          {rate !== null &&
+            ` At a typical ${pct(rate, lang)}% p.a., ${minStakeNim} NIM earns about ${nimFmt(
+              yearOf(minStakeNim) ?? 0,
+              lang
+            )} NIM a year.`}
+        </p>
       )}
 
       {/* Where the rewards came from: one row per paying validator. */}
       {validatorEarnings.length > 0 && (
-        <details className="beta-earn-validators">
-          <summary>Earned per validator</summary>
-          <ul>
-            {validatorEarnings.map((v) => (
-              <li key={v.address}>
-                <span>{v.name}</span>
-                <span>
-                  {nimFmt(v.nim, lang, 4)} NIM · {new Date(v.firstMs).toLocaleDateString(lang)} to{' '}
-                  {new Date(v.lastMs).toLocaleDateString(lang)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </details>
+        <Collapsible className="tw:group/earn-validators tw:text-sm">
+          <CollapsibleTrigger className="tw:flex tw:min-h-[44px] tw:w-full tw:items-center tw:justify-between tw:gap-2 tw:text-muted-foreground">
+            Earned per validator
+            <ChevronDownIcon className="tw:size-4 tw:transition-transform tw:group-data-open/earn-validators:rotate-180" />
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <ul className="tw:mt-1 tw:divide-y tw:divide-border">
+              {validatorEarnings.map((v) => (
+                <li key={v.address} className="tw:flex tw:justify-between tw:gap-3 tw:py-2">
+                  <span className="tw:font-medium">{v.name}</span>
+                  <span className="tw:text-right tw:text-muted-foreground">
+                    {nimFmt(v.nim, lang, 4)} NIM
+                    <br />· {new Date(v.firstMs).toLocaleDateString(lang)} to {new Date(v.lastMs).toLocaleDateString(lang)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </CollapsibleContent>
+        </Collapsible>
       )}
 
       {hasStaker && showIdle && idleYear !== null && (
-        <p className="tw:m-0 tw:mb-3 tw:rounded-xl tw:bg-[var(--color-beta-card-2)] tw:px-3 tw:py-2 tw:text-[13px] tw:leading-relaxed tw:text-[var(--color-beta-muted)]">
-          <strong className="tw:text-[var(--color-beta-fg)]">{nimFmt(idleNim, lang)} NIM</strong> is sitting idle and
+        <p className="tw:m-0 tw:rounded-lg tw:bg-muted tw:px-3 tw:py-2 tw:text-sm tw:text-muted-foreground">
+          <strong className="tw:font-semibold tw:text-foreground">{nimFmt(idleNim, lang)} NIM</strong> is sitting idle and
           could add ≈ {nimFmt(idleYear, lang)} NIM a year.
         </p>
       )}
 
-      <div className="tw:mt-3 tw:flex tw:items-center tw:gap-3">
-        {(hasStaker ? idleNim >= 1 : canStartStaking) && (
-          <Button variant="primary" className="tw:flex-1" onClick={onStake}>
+      <div className="tw:flex tw:flex-wrap tw:items-center tw:gap-2">
+        {canStakeIdle && (
+          // The one gold action on this screen: staking.
+          <Button className="tw:min-h-[44px] tw:flex-1" onClick={onStake} data-probe="earn-stake">
             {hasStaker ? 'Stake idle NIM' : 'Start earning'}
           </Button>
         )}
-        <Button variant="link" onClick={onCalculator}>
+        <Button variant="outline" className="tw:min-h-[44px]" onClick={onCalculator} data-probe="earn-maths">
           See the maths
         </Button>
       </div>
-    </Card>
+    </CardContent>
   )
 }

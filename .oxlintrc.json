@@ -4,5 +4,17 @@
   "rules": {
     "react/rules-of-hooks": "error",
     "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
+  },
+  "overrides": [
+    {
+      // The generated shadcn kit files export variant tables and hooks beside
+      // components, and use-mobile legitimately sets state in an effect; the
+      // house kit carries the same warnings in its own repo.
+      "files": ["src/beta/**"],
+      "rules": {
+        "react/only-export-components": "off",
+        "react/set-state-in-effect": "off"
+      }
+    }
+  ]
 }
