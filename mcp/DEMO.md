@@ -140,6 +140,43 @@ reconciles its own books from the same chain data.
 
 ---
 
+## Beat 4 (optional): "What is my stake earning?"
+
+> **Prompt:** *"What is my stake earning? Then: if I staked 1,000 NIM for 3 years, what might I earn?"*
+
+Calls `get_staking`, then `project_yield`:
+
+```json
+{
+  "staked": true,
+  "activeNim": "700.65888",
+  "stakedNim": "700.65888",
+  "validator": {
+    "address": "NQ08 ACT8 T0FE PTG8 P5RL H2S3 QGXH V15R NVXY",
+    "name": "ImpactZero stake",
+    "feePercent": 0,
+    "netYieldPercent": 4.66,
+    "compounds": true,
+    "payout": "adds rewards to your stake",
+    "buildersPool": true
+  },
+  "estimate": { "firstYearRewardsNim": "32.62", "annualRatePercent": 4.66 }
+}
+```
+
+**Say:** the balances are exact Luna from the chain; the pool's fee and yield come from the
+same public validators list the app reads. The figure in `estimate` is labelled an estimate
+and says its assumptions out loud: emission falling along the protocol's supply curve is
+modelled, the network's total stake is held at today's level, and none of it is a promise.
+
+The projection returns one row per year (rewards that year, cumulative, balance) and the
+same three assumptions again, so the assistant cannot soften them away. No rate was passed,
+so the tool says where the rate came from: `rateSource` reads "the median of producing
+pools". Nothing in this beat signs or sends anything either: get_staking and project_yield
+are reads and a pure calculation.
+
+---
+
 ## The closing line
 
 > Six tools. About 1,600 lines. It talks to exactly two hosts — the public Nimiq RPC and
