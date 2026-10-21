@@ -351,8 +351,12 @@ async function buildFx(selectedCurrency: string | undefined): Promise<{ table: F
   }
   const usedCount = fs.filter((f) => f !== null).length
   if (usedCount > 0) {
-    writeFxCache({ table, at: Math.max(...fs.filter((f) => f).map((f) => (f as FxFetch).at)), source: tiers[usedCount - 1].source })
-    return { table, source: tiers[usedCount - 1].source, at: Math.max(...fs.filter((f) => f).map((f) => (f as FxFetch).at)) }
+    // The source label follows the FIRST tier that actually returned data -
+    // later tiers only patch gaps, so they are not "the" source.
+    const firstUsed = fs.findIndex((f) => f !== null)
+    const at = Math.max(...fs.filter((f) => f).map((f) => (f as FxFetch).at))
+    writeFxCache({ table, at, source: tiers[firstUsed].source })
+    return { table, at, source: tiers[firstUsed].source }
   }
   // All live FX tiers down: cached table, any age.
   const cached = readFxCache()
@@ -443,6 +447,7 @@ export async function getAllFiatRatesImpl(selectedCurrency?: string): Promise<Pr
     // none at all the tables stay NaN and the UI says Price unavailable.
     const nimCached = cachedUsd(cryptoCache, 'nim')
     if (nimCached) {
+      usdPrices.nim = nimCached.usd
       for (const k of ['usdt', 'eth', 'pol'] as const) {
         const c = cachedUsd(cryptoCache, k)
         if (c) usdPrices[k] = c.usd
