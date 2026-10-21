@@ -163,10 +163,13 @@ import EarnCard from './EarnCard'
 import YieldCalculator from './YieldCalculator'
 import { setUiMode, useUiMode } from './lib/uiMode'
 
-// The "New look (beta)" screens: shadcn-style ports behind a dynamic import, so
-// classic sessions (the default) never download Tailwind, Radix or vaul. The
-// classic component inside is the Suspense fallback while the chunk loads.
-const BetaEarnCard = lazy(() => import('./beta').then((m) => ({ default: m.BetaEarnCard })))
+// The "New look (beta)": the whole beta shell (the house shadcn layout, the
+// overview and the yield calculator) lives behind a dynamic import from
+// App.tsx, so classic sessions (the default) never download Tailwind, Radix or
+// the kit. The classic screen inside is the Suspense fallback while the chunk
+// loads.
+const BetaShell = lazy(() => import('./beta').then((m) => ({ default: m.BetaShell })))
+const BetaOverview = lazy(() => import('./beta').then((m) => ({ default: m.BetaOverview })))
 const BetaYieldCalculator = lazy(() =>
   import('./beta').then((m) => ({ default: m.BetaYieldCalculator }))
 )
@@ -4071,8 +4074,8 @@ export default function App() {
           <div className="beta-toggle-text">
             <span className="beta-toggle-label">New look (beta)</span>
             <span className="beta-toggle-hint">
-              Try the redesigned screens. The Earn card and yield calculator are ready; the rest still use
-              the classic look.
+              Try the redesigned layout. Overview and the yield calculator are ready; the other sections
+              keep their classic content for now.
             </span>
           </div>
           <button
@@ -4468,14 +4471,9 @@ export default function App() {
     trailing: actualYield,
     validatorEarnings: validatorEarnings,
   }
-  // In beta the classic card is the Suspense fallback while the beta chunk loads.
-  const earnCard = uiBeta ? (
-    <Suspense fallback={<EarnCard {...earnCardProps} />}>
-      <BetaEarnCard {...earnCardProps} />
-    </Suspense>
-  ) : (
-    <EarnCard {...earnCardProps} />
-  )
+  // In beta the earn card is rebuilt on the kit inside BetaOverview; the
+  // classic card only ever renders in the classic look.
+  const earnCard = <EarnCard {...earnCardProps} />
   const calcProps: ComponentProps<typeof YieldCalculator> = {
     validators: validators,
     loading: validatorsLoading,
@@ -4504,396 +4502,11 @@ export default function App() {
     <YieldCalculator {...calcProps} />
   )
 
-  return (
-    <div className="app">
-      <HeroBackground />
-      <header className={uiBeta ? 'topbar beta-shell' : 'topbar'}>
-        <div className="logo small">📒</div>
-        <h1>NimBooks</h1>
-        {versionBadge}
-        {mcpChip}
-        <button
-          className="btn-ghost"
-          onClick={toggleTheme}
-          title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-          aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-        >
-          {theme === 'dark' ? '☀️' : '🌙'}
-        </button>
-        <button
-          className="btn-ghost"
-          onClick={openStake}
-          title={demoMode ? 'Stake (read-only in demo mode)' : 'Stake'}
-          aria-label="Stake"
-          data-tour="stake"
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.52-4.48 10-10 10Z" />
-            <path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12" />
-          </svg>
-        </button>
-        <button className="btn-ghost refresh-btn" onClick={() => refresh(account)} disabled={loading} title="Refresh" aria-label="Refresh">
-          {loading ? (
-            <span className="spin">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M21 12a9 9 0 1 1-2.64-6.36" />
-                <path d="M21 3v6h-6" />
-              </svg>
-            </span>
-          ) : (
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M21 12a9 9 0 1 1-2.64-6.36" />
-              <path d="M21 3v6h-6" />
-            </svg>
-          )}
-          {!demoMode && account?.nimiqAddress && !loading && (
-            <span className="refresh-countdown">{countdown}</span>
-          )}
-        </button>
-        <button className="btn-ghost" onClick={disconnect} title="Disconnect wallet" aria-label="Disconnect wallet">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M12 2v10" />
-            <path d="M18.4 6.6a9 9 0 1 1-12.77.04" />
-          </svg>
-        </button>
-      </header>
-
-      {error && (
-        <div className="error-banner" role="alert" onClick={() => setError(null)}>
-          {error} <span className="dismiss" aria-hidden="true">✕</span>
-        </div>
-      )}
-      {toast && (
-        <div className="toast" role="status" aria-live="polite" onClick={() => setToast(null)}>
-          {toast}
-        </div>
-      )}
-
-      <nav className="tabs" aria-label="Sections">
-        <button
-          className={view === 'dashboard' ? 'tab active' : 'tab'}
-          aria-current={view === 'dashboard' ? 'page' : undefined}
-          onClick={() => setView('dashboard')}
-        >
-          {/* Icons are inline SVG on purpose: icon fonts and unicode glyphs
-              render as tofu in the WebViews this app runs inside. */}
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
-            <rect x="3" y="3" width="7" height="7" rx="1" />
-            <rect x="14" y="3" width="7" height="7" rx="1" />
-            <rect x="14" y="14" width="7" height="7" rx="1" />
-            <rect x="3" y="14" width="7" height="7" rx="1" />
-          </svg>
-          <span className="tab-label">Overview</span>
-        </button>
-        <button
-          className={view === 'history' ? 'tab active' : 'tab'}
-          aria-current={view === 'history' ? 'page' : undefined}
-          onClick={() => setView('history')}
-          data-tour="history-tab"
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
-            <circle cx="12" cy="12" r="9" />
-            <path d="M12 7v5l3 2" />
-          </svg>
-          <span className="tab-label">History</span>
-        </button>
-        <button
-          className={view === 'receipts' ? 'tab active' : 'tab'}
-          aria-current={view === 'receipts' ? 'page' : undefined}
-          onClick={() => setView('receipts')}
-          data-tour="receipts-tab"
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
-            <path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z" />
-            <path d="M14 8H8" />
-            <path d="M16 12H8" />
-          </svg>
-          <span className="tab-label">Receipts</span>
-        </button>
-        <button
-          className={view === 'request' ? 'tab active' : 'tab'}
-          aria-current={view === 'request' ? 'page' : undefined}
-          onClick={() => setView('request')}
-          data-tour="request-tab"
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
-            <path d="m22 2-7 20-4-9-9-4Z" />
-            <path d="M22 2 11 13" />
-          </svg>
-          <span className="tab-label">Request</span>
-        </button>
-        <button
-          className={view === 'export' ? 'tab active' : 'tab'}
-          aria-current={view === 'export' ? 'page' : undefined}
-          onClick={() => setView('export')}
-          data-tour="export-tab"
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-            <path d="m7 10 5 5 5-5" />
-            <path d="M12 15V3" />
-          </svg>
-          <span className="tab-label">Export</span>
-        </button>
-      </nav>
-
-      <main>
-        {view === 'dashboard' && (
-          <section className="dashboard">
-            <div className="stat-row">
-              <div className="card total" data-learn="total">
-                <div className="total-header">
-                  <span className="label label-with-info">
-                    Total value
-                    <InfoIcon text="Your NIM and EVM assets at the current market rate, in the display currency. Staked, unstaking and HTLC-in-transit funds are included. Everything that is yours." />
-                  </span>
-                  {/* Visible affordance for the currency picker — the value
-                      itself used to be the (invisible) button. */}
-                  <button
-                    type="button"
-                    className="currency-chip"
-                    onClick={() => setCurrencyOpen(true)}
-                    title="Change display currency"
-                  >
-                    <img
-                      className="chip-flag"
-                      src={`/flags/flag-${cur.flag}.svg`}
-                      alt=""
-                      width={16}
-                      height={16}
-                    />
-                    <span className="chip-code">{currency.toUpperCase()}</span>
-                    {/* Inline SVG, not a Unicode chevron — the glyph tofus on
-                        some Android builds. */}
-                    <svg
-                      className="chip-caret"
-                      viewBox="0 0 10 6"
-                      width={10}
-                      height={6}
-                      aria-hidden="true"
-                    >
-                      <path
-                        d="M1 1l4 4 4-4"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.5"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  </button>
-                </div>
-                <span className="value">{formatFiat(totalFiat, currency)}</span>
-              </div>
-
-              <div className="card nim-tile" data-tour="balance">
-                <span className="label label-with-info">
-                  NIM balance
-                  <InfoIcon text="Your NIM on the Nimiq chain: available, staked, unstaking, and funds held in HTLC swap contracts (shown as in transit)." />
-                </span>
-                {nimBalance === null ? (
-                  <span className="value dim">…</span>
-                ) : (
-                  <>
-                    <span className="value">{formatLuna(String(totalNimLuna), lang)} NIM</span>
-                    <span className="sub">
-                      ≈ {formatFiat((totalNimLuna / 100000) * shown.nim, currency, 4)}
-                    </span>
-                    {/* A relay-routed wallet reads 0 in its basic account, so
-                        say where the money actually is rather than let the
-                        total look like it came from nowhere. */}
-                    {htlcLuna > 0 && (
-                      <span className="sub dim">
-                        {formatLuna(String(htlcLuna), lang)} NIM in transit (HTLC)
-                      </span>
-                    )}
-                  </>
-                )}
-              </div>
-            </div>
-
-            {/* Connected, but the wallet host hasn't caught up and there is
-                nothing on screen yet — say why rather than let it read as an
-                empty wallet. Nothing is gated on this. */}
-            {payConsensus === false && totalNimLuna === 0 && allTxs.length === 0 && (
-              <p className="hint small dim">{PAY_SYNCING_COPY}</p>
-            )}
-
-            {/* A session restored from before the notice existed never saw it:
-                ask once, and count nothing until answered. */}
-            {account.provider !== 'demo' && countConsent === null && (
-              <div className="card count-consent" role="region" aria-label="Wallet count">
-                <p className="hint small">{COUNT_NOTICE}</p>
-                <div className="count-consent-actions">
-                  <button className="btn-secondary" onClick={() => chooseCount('yes')}>OK, count me</button>
-                  <button className="btn-secondary" onClick={() => chooseCount('no')}>Don't count me</button>
-                </div>
-              </div>
-            )}
-
-            {/* Earning comes first: what the wallet earns now, or could. */}
-            {earnCard}
-
-            {/* "Stake it?" - the second reason to come back, one tap from the
-                Earn card it extends. Hidden while the tour moves the page. */}
-            {stakeNudgeTx && earnRate !== null && (
-              <div className="card stake-nudge" role="region" aria-label="Stake a received payment">
-                <p className="stake-nudge-line">
-                  You received {stakeNudgeTx.nim.toLocaleString(lang, { maximumFractionDigits: 2 })} NIM on{' '}
-                  {new Date(stakeNudgeTx.timestamp).toLocaleDateString(lang)}. Stake it? At{' '}
-                  {(earnRate * 100).toLocaleString(lang, { maximumFractionDigits: 2 })}% p.a. it could earn about{' '}
-                  {projectStake({ principalNim: stakeNudgeTx.nim, annualRateNow: earnRate, months: 12, compound: earnCompound }).firstYearNim.toLocaleString(lang, { maximumFractionDigits: 2 })} NIM a year.
-                </p>
-                <div className="stake-nudge-actions">
-                  <button className="btn-primary" onClick={acceptStakeNudge}>
-                    Stake it
-                  </button>
-                  <button className="btn-secondary" onClick={dismissStakeNudge}>
-                    Not now
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Quick actions: the two things a wallet is for, one thumb-reach
-                below the balance. Actions, not sections — they open sheets and
-                leave the 5-tab dock alone. */}
-            <div className="card quick-actions" data-learn="quick-actions">
-              <span className="label">Quick actions</span>
-              <div className="quick-actions-row">
-                <button
-                  type="button"
-                  className="btn-primary quick-action"
-                  onClick={tourActive ? undefined : openSend}
-                  disabled={!account.nimiqAddress}
-                  data-tour="quick-send"
-                >
-                  {/* Inline SVG like every other icon here — a Unicode arrow
-                      tofus on some Android builds. */}
-                  <svg
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <path d="M12 19V5" />
-                    <path d="M5 12l7-7 7 7" />
-                  </svg>
-                  Send NIM
-                </button>
-                <button
-                  type="button"
-                  className="btn-secondary quick-action"
-                  onClick={tourActive ? undefined : () => setReceiveOpen(true)}
-                  data-tour="quick-receive"
-                >
-                  <svg
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <path d="M12 5v14" />
-                    <path d="M19 12l-7 7-7-7" />
-                  </svg>
-                  Receive NIM
-                </button>
-              </div>
-              {!account.nimiqAddress ? (
-                <p className="hint small">
-                  This connection has no Nimiq address. Connect a Nimiq wallet to send or receive
-                  NIM.
-                </p>
-              ) : demoMode ? (
-                <p className="hint small">
-                  Demo mode is read-only: receiving works, sending needs your own wallet.
-                </p>
-              ) : (
-                !canSend() && (
-                  <p className="hint small">
-                    This wallet can't sign transactions here. Receiving works either way.
-                  </p>
-                )
-              )}
-            </div>
-
-            {unstakeActivity && (
-              <div className="pending-unstake-banner" role="status">
-                <span className="pending-dot" aria-hidden="true" />
-                <span className="banner-text">
-                  {unstakeActivity.kind === 'pending' && (
-                    <>
-                      Deactivating {formatLuna(String(unstakeActivity.amountNim * 100000), lang)}{' '}
-                      NIM. Takes effect at the next election block (up to ~12h), then a
-                      reporting window before it's withdrawable.
-                    </>
-                  )}
-                  {unstakeActivity.kind === 'cooling' && (
-                    <>
-                      {formatLuna(String(unstakeActivity.amountNim * 100000), lang)} NIM is
-                      cooling down. Finish the unstake after the reporting window.
-                    </>
-                  )}
-                  {unstakeActivity.kind === 'ready' && (
-                    <>
-                      {formatLuna(String(unstakeActivity.amountNim * 100000), lang)} NIM is
-                      ready to withdraw. Move it to your balance.
-                    </>
-                  )}
-                </span>
-                {unstakeActivity.kind === 'cooling' &&
-                  (unstakeActivity.retireReady ? (
-                    <button
-                      type="button"
-                      className="btn-small"
-                      onClick={() => {
-                        if (!reopenBannerUnstake('retire')) void completeUnstake()
-                      }}
-                      disabled={!canStake() || staking || unstaking || (hubSession && !hubStakeReady)}
-                    >
-                      {unstaking ? 'Submitting…' : 'Complete unstake'}
-                    </button>
-                  ) : (
-                    // No button before the retire is valid — the chain would
-                    // reject the tx, so a click here is a dead click.
-                    <span className="banner-hint">
-                      {unstakeActivity.retireValidAt > 0 && currentBlock > 0
-                        ? `Complete unstake available in ~${Math.ceil(
-                            ((unstakeActivity.retireValidAt - currentBlock) * SECONDS_PER_BLOCK) /
-                              3600,
-                          )}h`
-                        : 'Complete unstake available after the reporting window'}
-                    </span>
-                  ))}
-                {unstakeActivity.kind === 'ready' && (
-                  <button
-                    type="button"
-                    className="btn-small"
-                    onClick={() => {
-                      if (!reopenBannerUnstake('withdraw')) void withdrawRetired()
-                    }}
-                    disabled={!canStake() || staking || unstaking || (hubSession && !hubStakeReady)}
-                  >
-                    {unstaking ? 'Submitting…' : 'Withdraw'}
-                  </button>
-                )}
-              </div>
-            )}
-
-            {/* Swapped, staked and vesting funds are still the user's — break
-                the total down so a 0 basic balance doesn't read as "no money".
-                With nothing off-balance the tile above is the whole story. */}
-            {nimBalance !== null && offBalanceLuna > 0 && (
+  // The classic Balance details card: in the classic dashboard it sits below
+  // the quick actions; in beta it lives inside the Balance card's Details
+  // collapsible. One JSX, two homes.
+  const renderBalanceDetails = () =>
+    nimBalance !== null && offBalanceLuna > 0 && (
               <div className="card">
                 <span className="label label-with-info">
                   Balance details
@@ -4950,30 +4563,10 @@ export default function App() {
                   )}
                 </div>
               </div>
-            )}
+  )
 
-            {evmBalances.length > 0 && (
-              <div className="card">
-                <span className="label label-with-info">
-                  EVM assets
-                  <InfoIcon text="Tokens on EVM chains connected through your wallet. Values are included in the Total value tile above." />
-                </span>
-                {evmBalances
-                  .filter((b) => Number.isFinite(Number(b.balance)) && Number(b.balance) > 0)
-                  .map((b) => (
-                    <div key={b.chainId + b.symbol} className="row">
-                      <span>
-                        {b.symbol} · {b.chainName}
-                      </span>
-                      <span>{formatUnits(b.balance, b.decimals, lang)}</span>
-                    </div>
-                  ))}
-                {evmBalances.every((b) => !(Number.isFinite(Number(b.balance)) && Number(b.balance) > 0)) && (
-                  <span className="sub">No EVM balances found</span>
-                )}
-              </div>
-            )}
-
+  // The classic Addresses card: same JSX as the Balance details card above.
+  const renderAddresses = () => (
             <div className="card">
               <span className="label label-with-info">
                 Addresses
@@ -5047,6 +4640,381 @@ export default function App() {
                 )
               })()}
             </div>
+  )  // "New look (beta)" + a connected session renders the beta shell; the
+  // landing and connect screens are always classic.
+  const betaShellOn = uiBeta && !!account
+
+  // The beta ("New look (beta)") wiring: one props object per beta screen,
+  // sourced from the same closures the classic sections read, so the two
+  // looks can never drift on inputs or actions.
+  const betaShellProps = {
+    view,
+    onNavigate: setView,
+    address: account.nimiqAddress ?? null,
+    versionLabel: `${APP_VERSION_LABEL} beta`,
+    onVersion: () => setChangelogOpen(true),
+    onDisconnect: disconnect,
+    theme,
+    onToggleTheme: toggleTheme,
+    onStake: openStake,
+    onRefresh: () => refresh(account),
+    refreshing: loading,
+    countdown: !demoMode && !loading && account.nimiqAddress ? countdown : null,
+    notices: (
+      <>
+        {error && (
+          <div className="error-banner" role="alert" onClick={() => setError(null)}>
+            {error} <span className="dismiss" aria-hidden="true">✕</span>
+          </div>
+        )}
+        {toast && (
+          <div className="toast" role="status" aria-live="polite" onClick={() => setToast(null)}>
+            {toast}
+          </div>
+        )}
+      </>
+    ),
+  }
+  const betaOverviewProps = {
+    lang,
+    currency,
+    currencyFlag: cur.flag,
+    onCurrencyPicker: () => setCurrencyOpen(true),
+    balanceHero:
+      nimBalance === null ? '…' : `${formatLuna(String(totalNimLuna), lang)} NIM`,
+    totalValueFiat: formatFiat(totalFiat, currency),
+    nimBalance,
+    // Luna, like every other figure on the balance card (the classic Balance
+    // details row shows the same retireable stake).
+    stakedLuna: retireableLuna,
+    inTransitLuna: htlcLuna,
+    earnProps: earnCardProps,
+    nudge:
+      stakeNudgeTx && earnRate !== null
+        ? {
+            receivedNim: stakeNudgeTx.nim,
+            dateMs: timestampToMs(stakeNudgeTx.timestamp),
+            rate: earnRate,
+            yearNim: projectStake({
+              principalNim: stakeNudgeTx.nim,
+              annualRateNow: earnRate,
+              months: 12,
+              compound: earnCompound,
+            }).firstYearNim,
+            onAccept: acceptStakeNudge,
+            onDismiss: dismissStakeNudge,
+          }
+        : null,
+    onSend: tourActive ? undefined : openSend,
+    sendDisabled: !account.nimiqAddress,
+    onReceive: () => setReceiveOpen(true),
+    quickNote: !account.nimiqAddress
+      ? 'This connection has no Nimiq address. Connect a Nimiq wallet to send or receive NIM.'
+      : demoMode
+        ? 'Demo mode is read-only: receiving works, sending needs your own wallet.'
+        : !canSend()
+          ? "This wallet can't sign transactions here. Receiving works either way."
+          : null,
+    details: (
+      <div className="classic-in-beta">
+        {renderBalanceDetails()}
+        {renderAddresses()}
+      </div>
+    ),
+  }
+
+  // The five sections render once: either inside the classic chrome (the
+  // default look) or inside the beta shell. Same JSX, same closures, two
+  // frames - beta only re-frames them, it never re-writes them.
+  const renderSections = () => (
+      <main className={betaShellOn ? 'classic-in-beta' : undefined}>
+        {view === 'dashboard' && (
+          <section className="dashboard">
+            {!uiBeta && (
+              <div className="stat-row">
+              <div className="card total" data-learn="total">
+                <div className="total-header">
+                  <span className="label label-with-info">
+                    Total value
+                    <InfoIcon text="Your NIM and EVM assets at the current market rate, in the display currency. Staked, unstaking and HTLC-in-transit funds are included. Everything that is yours." />
+                  </span>
+                  {/* Visible affordance for the currency picker — the value
+                      itself used to be the (invisible) button. */}
+                  <button
+                    type="button"
+                    className="currency-chip"
+                    onClick={() => setCurrencyOpen(true)}
+                    title="Change display currency"
+                  >
+                    <img
+                      className="chip-flag"
+                      src={`/flags/flag-${cur.flag}.svg`}
+                      alt=""
+                      width={16}
+                      height={16}
+                    />
+                    <span className="chip-code">{currency.toUpperCase()}</span>
+                    {/* Inline SVG, not a Unicode chevron — the glyph tofus on
+                        some Android builds. */}
+                    <svg
+                      className="chip-caret"
+                      viewBox="0 0 10 6"
+                      width={10}
+                      height={6}
+                      aria-hidden="true"
+                    >
+                      <path
+                        d="M1 1l4 4 4-4"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </button>
+                </div>
+                <span className="value">{formatFiat(totalFiat, currency)}</span>
+              </div>
+
+              <div className="card nim-tile" data-tour="balance">
+                <span className="label label-with-info">
+                  NIM balance
+                  <InfoIcon text="Your NIM on the Nimiq chain: available, staked, unstaking, and funds held in HTLC swap contracts (shown as in transit)." />
+                </span>
+                {nimBalance === null ? (
+                  <span className="value dim">…</span>
+                ) : (
+                  <>
+                    <span className="value">{formatLuna(String(totalNimLuna), lang)} NIM</span>
+                    <span className="sub">
+                      ≈ {formatFiat((totalNimLuna / 100000) * shown.nim, currency, 4)}
+                    </span>
+                    {/* A relay-routed wallet reads 0 in its basic account, so
+                        say where the money actually is rather than let the
+                        total look like it came from nowhere. */}
+                    {htlcLuna > 0 && (
+                      <span className="sub dim">
+                        {formatLuna(String(htlcLuna), lang)} NIM in transit (HTLC)
+                      </span>
+                    )}
+                  </>
+                )}
+              </div>
+              </div>
+            )}
+
+            {/* Connected, but the wallet host hasn't caught up and there is
+                nothing on screen yet — say why rather than let it read as an
+                empty wallet. Nothing is gated on this. */}
+            {payConsensus === false && totalNimLuna === 0 && allTxs.length === 0 && (
+              <p className="hint small dim">{PAY_SYNCING_COPY}</p>
+            )}
+
+            {/* A session restored from before the notice existed never saw it:
+                ask once, and count nothing until answered. */}
+            {account.provider !== 'demo' && countConsent === null && (
+              <div className="card count-consent" role="region" aria-label="Wallet count">
+                <p className="hint small">{COUNT_NOTICE}</p>
+                <div className="count-consent-actions">
+                  <button className="btn-secondary" onClick={() => chooseCount('yes')}>OK, count me</button>
+                  <button className="btn-secondary" onClick={() => chooseCount('no')}>Don't count me</button>
+                </div>
+              </div>
+            )}
+
+            {/* Earning comes first: what the wallet earns now, or could. In
+                beta this card is rebuilt on the kit inside BetaOverview. */}
+            {!uiBeta && earnCard}
+
+            {/* "Stake it?" - the second reason to come back, one tap from the
+                Earn card it extends. Hidden while the tour moves the page. */}
+            {!uiBeta && stakeNudgeTx && earnRate !== null && (
+              <div className="card stake-nudge" role="region" aria-label="Stake a received payment">
+                <p className="stake-nudge-line">
+                  You received {stakeNudgeTx.nim.toLocaleString(lang, { maximumFractionDigits: 2 })} NIM on{' '}
+                  {new Date(stakeNudgeTx.timestamp).toLocaleDateString(lang)}. Stake it? At{' '}
+                  {(earnRate * 100).toLocaleString(lang, { maximumFractionDigits: 2 })}% p.a. it could earn about{' '}
+                  {projectStake({ principalNim: stakeNudgeTx.nim, annualRateNow: earnRate, months: 12, compound: earnCompound }).firstYearNim.toLocaleString(lang, { maximumFractionDigits: 2 })} NIM a year.
+                </p>
+                <div className="stake-nudge-actions">
+                  <button className="btn-primary" onClick={acceptStakeNudge}>
+                    Stake it
+                  </button>
+                  <button className="btn-secondary" onClick={dismissStakeNudge}>
+                    Not now
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Quick actions: the two things a wallet is for, one thumb-reach
+                below the balance. Actions, not sections — they open sheets and
+                leave the 5-tab dock alone. */}
+            {!uiBeta && (
+            <div className="card quick-actions" data-learn="quick-actions">
+              <span className="label">Quick actions</span>
+              <div className="quick-actions-row">
+                <button
+                  type="button"
+                  className="btn-primary quick-action"
+                  onClick={tourActive ? undefined : openSend}
+                  disabled={!account.nimiqAddress}
+                  data-tour="quick-send"
+                >
+                  {/* Inline SVG like every other icon here — a Unicode arrow
+                      tofus on some Android builds. */}
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M12 19V5" />
+                    <path d="M5 12l7-7 7 7" />
+                  </svg>
+                  Send NIM
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary quick-action"
+                  onClick={tourActive ? undefined : () => setReceiveOpen(true)}
+                  data-tour="quick-receive"
+                >
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M12 5v14" />
+                    <path d="M19 12l-7 7-7-7" />
+                  </svg>
+                  Receive NIM
+                </button>
+              </div>
+              {!account.nimiqAddress ? (
+                <p className="hint small">
+                  This connection has no Nimiq address. Connect a Nimiq wallet to send or receive
+                  NIM.
+                </p>
+              ) : demoMode ? (
+                <p className="hint small">
+                  Demo mode is read-only: receiving works, sending needs your own wallet.
+                </p>
+              ) : (
+                !canSend() && (
+                  <p className="hint small">
+                    This wallet can't sign transactions here. Receiving works either way.
+                  </p>
+                )
+              )}
+            </div>
+            )}
+
+            {unstakeActivity && (
+              <div className="pending-unstake-banner" role="status">
+                <span className="pending-dot" aria-hidden="true" />
+                <span className="banner-text">
+                  {unstakeActivity.kind === 'pending' && (
+                    <>
+                      Deactivating {formatLuna(String(unstakeActivity.amountNim * 100000), lang)}{' '}
+                      NIM. Takes effect at the next election block (up to ~12h), then a
+                      reporting window before it's withdrawable.
+                    </>
+                  )}
+                  {unstakeActivity.kind === 'cooling' && (
+                    <>
+                      {formatLuna(String(unstakeActivity.amountNim * 100000), lang)} NIM is
+                      cooling down. Finish the unstake after the reporting window.
+                    </>
+                  )}
+                  {unstakeActivity.kind === 'ready' && (
+                    <>
+                      {formatLuna(String(unstakeActivity.amountNim * 100000), lang)} NIM is
+                      ready to withdraw. Move it to your balance.
+                    </>
+                  )}
+                </span>
+                {unstakeActivity.kind === 'cooling' &&
+                  (unstakeActivity.retireReady ? (
+                    <button
+                      type="button"
+                      className="btn-small"
+                      onClick={() => {
+                        if (!reopenBannerUnstake('retire')) void completeUnstake()
+                      }}
+                      disabled={!canStake() || staking || unstaking || (hubSession && !hubStakeReady)}
+                    >
+                      {unstaking ? 'Submitting…' : 'Complete unstake'}
+                    </button>
+                  ) : (
+                    // No button before the retire is valid — the chain would
+                    // reject the tx, so a click here is a dead click.
+                    <span className="banner-hint">
+                      {unstakeActivity.retireValidAt > 0 && currentBlock > 0
+                        ? `Complete unstake available in ~${Math.ceil(
+                            ((unstakeActivity.retireValidAt - currentBlock) * SECONDS_PER_BLOCK) /
+                              3600,
+                          )}h`
+                        : 'Complete unstake available after the reporting window'}
+                    </span>
+                  ))}
+                {unstakeActivity.kind === 'ready' && (
+                  <button
+                    type="button"
+                    className="btn-small"
+                    onClick={() => {
+                      if (!reopenBannerUnstake('withdraw')) void withdrawRetired()
+                    }}
+                    disabled={!canStake() || staking || unstaking || (hubSession && !hubStakeReady)}
+                  >
+                    {unstaking ? 'Submitting…' : 'Withdraw'}
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Swapped, staked and vesting funds are still the user's — break
+                the total down so a 0 basic balance doesn't read as "no money".
+                With nothing off-balance the tile above is the whole story. */}
+            {!uiBeta && renderBalanceDetails()}
+
+
+            {evmBalances.length > 0 && (
+              <div className="card">
+                <span className="label label-with-info">
+                  EVM assets
+                  <InfoIcon text="Tokens on EVM chains connected through your wallet. Values are included in the Total value tile above." />
+                </span>
+                {evmBalances
+                  .filter((b) => Number.isFinite(Number(b.balance)) && Number(b.balance) > 0)
+                  .map((b) => (
+                    <div key={b.chainId + b.symbol} className="row">
+                      <span>
+                        {b.symbol} · {b.chainName}
+                      </span>
+                      <span>{formatUnits(b.balance, b.decimals, lang)}</span>
+                    </div>
+                  ))}
+                {evmBalances.every((b) => !(Number.isFinite(Number(b.balance)) && Number(b.balance) > 0)) && (
+                  <span className="sub">No EVM balances found</span>
+                )}
+              </div>
+            )}
+
+            {!uiBeta && renderAddresses()}
+
 
             {/* A wallet that has never transacted has nothing to chart, and a
                 grid of zeros above an empty frame reads as "this app is
@@ -5930,6 +5898,161 @@ export default function App() {
           </section>
         )}
       </main>
+  );
+
+  const classicShell = (
+    <>
+      <HeroBackground />
+      <header className={uiBeta ? 'topbar beta-shell' : 'topbar'}>
+        <div className="logo small">📒</div>
+        <h1>NimBooks</h1>
+        {versionBadge}
+        {mcpChip}
+        <button
+          className="btn-ghost"
+          onClick={toggleTheme}
+          title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+        >
+          {theme === 'dark' ? '☀️' : '🌙'}
+        </button>
+        <button
+          className="btn-ghost"
+          onClick={openStake}
+          title={demoMode ? 'Stake (read-only in demo mode)' : 'Stake'}
+          aria-label="Stake"
+          data-tour="stake"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.52-4.48 10-10 10Z" />
+            <path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12" />
+          </svg>
+        </button>
+        <button className="btn-ghost refresh-btn" onClick={() => refresh(account)} disabled={loading} title="Refresh" aria-label="Refresh">
+          {loading ? (
+            <span className="spin">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+                <path d="M21 3v6h-6" />
+              </svg>
+            </span>
+          ) : (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+              <path d="M21 3v6h-6" />
+            </svg>
+          )}
+          {!demoMode && account?.nimiqAddress && !loading && (
+            <span className="refresh-countdown">{countdown}</span>
+          )}
+        </button>
+        <button className="btn-ghost" onClick={disconnect} title="Disconnect wallet" aria-label="Disconnect wallet">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M12 2v10" />
+            <path d="M18.4 6.6a9 9 0 1 1-12.77.04" />
+          </svg>
+        </button>
+      </header>
+
+      {error && (
+        <div className="error-banner" role="alert" onClick={() => setError(null)}>
+          {error} <span className="dismiss" aria-hidden="true">✕</span>
+        </div>
+      )}
+      {toast && (
+        <div className="toast" role="status" aria-live="polite" onClick={() => setToast(null)}>
+          {toast}
+        </div>
+      )}
+
+      <nav className="tabs" aria-label="Sections">
+        <button
+          className={view === 'dashboard' ? 'tab active' : 'tab'}
+          aria-current={view === 'dashboard' ? 'page' : undefined}
+          onClick={() => setView('dashboard')}
+        >
+          {/* Icons are inline SVG on purpose: icon fonts and unicode glyphs
+              render as tofu in the WebViews this app runs inside. */}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+            <rect x="3" y="3" width="7" height="7" rx="1" />
+            <rect x="14" y="3" width="7" height="7" rx="1" />
+            <rect x="14" y="14" width="7" height="7" rx="1" />
+            <rect x="3" y="14" width="7" height="7" rx="1" />
+          </svg>
+          <span className="tab-label">Overview</span>
+        </button>
+        <button
+          className={view === 'history' ? 'tab active' : 'tab'}
+          aria-current={view === 'history' ? 'page' : undefined}
+          onClick={() => setView('history')}
+          data-tour="history-tab"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 7v5l3 2" />
+          </svg>
+          <span className="tab-label">History</span>
+        </button>
+        <button
+          className={view === 'receipts' ? 'tab active' : 'tab'}
+          aria-current={view === 'receipts' ? 'page' : undefined}
+          onClick={() => setView('receipts')}
+          data-tour="receipts-tab"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+            <path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z" />
+            <path d="M14 8H8" />
+            <path d="M16 12H8" />
+          </svg>
+          <span className="tab-label">Receipts</span>
+        </button>
+        <button
+          className={view === 'request' ? 'tab active' : 'tab'}
+          aria-current={view === 'request' ? 'page' : undefined}
+          onClick={() => setView('request')}
+          data-tour="request-tab"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+            <path d="m22 2-7 20-4-9-9-4Z" />
+            <path d="M22 2 11 13" />
+          </svg>
+          <span className="tab-label">Request</span>
+        </button>
+        <button
+          className={view === 'export' ? 'tab active' : 'tab'}
+          aria-current={view === 'export' ? 'page' : undefined}
+          onClick={() => setView('export')}
+          data-tour="export-tab"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <path d="m7 10 5 5 5-5" />
+            <path d="M12 15V3" />
+          </svg>
+          <span className="tab-label">Export</span>
+        </button>
+      </nav>
+
+      {renderSections()}
+    </>
+  );
+
+  const betaNode = (
+    <Suspense fallback={classicShell}>
+      <BetaShell {...betaShellProps}>
+        {view === 'dashboard' && (
+          <Suspense fallback={null}>
+            <BetaOverview {...betaOverviewProps} />
+          </Suspense>
+        )}
+        {renderSections()}
+      </BetaShell>
+    </Suspense>
+  )
+
+  return (
+    <div className={betaShellOn ? 'app app--beta' : 'app'}>
+      {(() => (betaShellOn ? betaNode : classicShell))()}
 
       {changelogModal}
 

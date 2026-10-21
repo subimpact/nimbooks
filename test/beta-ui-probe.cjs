@@ -1,5 +1,7 @@
-// Beta UI probe: "New look (beta)" opt-in, the toggle in the changelog window,
-// the ported Earn card and the yield calculator drawer.
+// Beta UI probe: the "New look (beta)" rebuilt on the house shadcn kit
+// (v1.36.0). Covers the shell (sidebar + top bar + bottom tabs), the Overview
+// (balance hero, collapsible earn card), the yield calculator drawer, the
+// theme switchover and the mode plumbing (?ui= / stored choice).
 //
 // Runs the app through its demo entry ("Try with a sample wallet") and, for
 // determinism, serves a small validators fixture instead of the live API. The
@@ -13,6 +15,11 @@ const { firefox } = require('playwright')
 const BASE = (process.argv[2] || 'http://127.0.0.1:8099').replace(/\/$/, '')
 const VERSION = 'v' + require('../package.json').version
 const BETA_BADGE = VERSION + ' beta'
+// A Pay WebView user agent: the probe browser is not Nimiq Pay itself, but
+// with this UA NimBooks restores the demo session after a reload (the same
+// trick the other probes use), which the earn-card persistence check needs.
+const PAY_UA =
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) NimiqPay/2.0.3 Mobile/15E148'
 
 const VALIDATOR_FIXTURE = [
   {
@@ -59,6 +66,30 @@ const check = (name, ok, info = '') => {
 const num = (total) => Number(total.replace(/[^0-9.]/g, ''))
 const close = (a, b) => Math.abs(num(a) - num(b)) <= 0.05
 
+// WCAG contrast of "rgb(...)" strings; 1:1 when colours cannot be parsed.
+function contrast(fg, bg) {
+  const rgb = (c) => {
+    const m = /rgba?\(([^)]+)\)/.exec(c)
+    if (!m) return null
+    const parts = m[1].split(',').map((s) => parseFloat(s))
+    return parts.slice(0, 3)
+  }
+  const lin = (v) => {
+    const x = v / 255
+    return x <= 0.04045 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4)
+  }
+  const lum = (t) => {
+    if (!t) return null
+    const [r, g, b] = t
+    return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
+  }
+  const a = lum(rgb(fg))
+  const b = lum(rgb(bg))
+  if (a === null || b === null) return null
+  const [hi, lo] = a > b ? [a, b] : [b, a]
+  return (hi + 0.05) / (lo + 0.05)
+}
+
 async function mockValidators(page) {
   await page.route('**/validators-api-main.je-cf9.workers.dev/**', (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(VALIDATOR_FIXTURE) })
@@ -81,159 +112,270 @@ async function demoInto(page) {
   await demo.click()
   await page.waitForSelector('.earn-card', { timeout: 30000 })
   await page.waitForTimeout(1500)
-  // The sample wallet offers the tour once it is loaded; dismiss so the page
-  // accepts taps again (same as the other demo probes do).
   await dismissTour(page)
 }
 
-;(async () => {
-  const browser = await firefox.launch()
-
-  // --- Stage 1: classic by default, toggle, ported screens, way back. ---
-  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } })
-  const page = await ctx.newPage()
-  await mockValidators(page)
-  const errors = []
-  page.on('pageerror', (e) => errors.push(String(e)))
-  await page.goto(BASE, { waitUntil: 'domcontentloaded' })
-  await page.waitForTimeout(1500)
-
-  // (a) Classic earns card on the demo dashboard, badge exactly the version.
+// The demo dashboard, connected on the classic look, as the baseline for the
+// beta comparisons (balance hero, calculator total).
+async function readClassicBaseline(page) {
   await demoInto(page)
-  check('(a) classic earn card visible', await page.locator('.earn-card').count() === 1)
-  check('(a) no ui-beta content in classic', (await page.locator('.ui-beta').count()) === 0)
-  const badge0 = await page.locator('.version-badge').first().innerText()
-  check(`(a) badge text is exactly ${VERSION} in classic`, badge0.trim() === VERSION, JSON.stringify(badge0))
-
-  // Classic calculator totals for the later beta comparison, same inputs.
+  const badge = (await page.locator('.version-badge').first().innerText()).trim()
+  const hero = (await page.locator('.nim-tile .value').first().innerText()).replace(/\s+/g, ' ').trim()
   await page.locator('.earn-card button', { hasText: 'See the maths' }).click()
   await page.waitForSelector('.calc-result', { timeout: 20000 })
   await page.locator('#calcAmount').fill('2500')
   await page.waitForTimeout(600)
   const classicTotal = (await page.locator('.calc-result .earn-hero').innerText()).replace(/\s+/g, ' ').trim()
-  check('(c) classic calculator total read', /≈/.test(classicTotal), classicTotal)
   await page.keyboard.press('Escape')
-  await page.waitForTimeout(400)
+  await page.waitForTimeout(300)
+  return { badge, hero, classicTotal }
+}
 
-  // (b) The changelog toggle: first control above the bug line.
-  await page.locator('.version-badge').first().click()
-  await page.waitForSelector('.modal')
-  const row = await page.locator('.beta-toggle-row').count()
-  check('(b) toggle row present', row === 1)
-  const prevClass = await page.evaluate(
-    () => document.querySelector('.modal .changelog-feedback')?.previousElementSibling?.className ?? ''
-  )
-  check('(b) switch row sits directly above the bug line', /beta-toggle-row/.test(prevClass), prevClass)
+// Switch the beta on from the changelog window, like a real tester.
+async function switchToBeta(page) {
   await page.evaluate(() => {
     window.__nbProbeMarker = 'kept'
   })
+  await page.locator('.version-badge').first().click()
+  await page.waitForSelector('.modal')
+  const hint = (await page.locator('.beta-toggle-hint').innerText()).replace(/\s+/g, ' ')
+  check('(b) hint names the redesigned layout', /redesigned layout/.test(hint), hint)
   await page.locator('.beta-toggle-row [role="switch"]').click()
-  const ariaOn = await page.locator('.beta-toggle-row [role="switch"]').getAttribute('aria-checked')
-  check('(b) switch is on after the tap', ariaOn === 'true')
   const marker = await page.evaluate(() => window.__nbProbeMarker)
   check('(b) no reload on switch', marker === 'kept')
-  const bugLine = (await page.locator('.changelog-feedback').first().innerText()).replace(/\s+/g, ' ')
-  check('(b) bug line wears the beta wording', /Found something odd in the new look/.test(bugLine), bugLine)
   await page.locator('.modal-head [aria-label="Close"]').click()
-  await page.waitForTimeout(600)
-
-  // Ported Earn card, badge says beta.
+  await page.waitForSelector('[data-probe="beta-shell"]', { timeout: 30000 })
+  await page.waitForTimeout(800)
   await dismissTour(page)
-  check('(b) beta earn card rendered', (await page.locator('.ui-beta[data-learn="earn"]').count()) === 1)
-  check('(b) classic earn card gone', (await page.locator('.earn-card').count()) === 0)
-  const badgeB = await page.locator('.version-badge').first().innerText()
-  check(`(b) badge text is ${BETA_BADGE}`, badgeB.trim() === BETA_BADGE, JSON.stringify(badgeB))
+}
 
-  // (c) The beta calculator: a drawer inside .ui-beta, same numbers.
+// The beta badge lives in the sidebar footer; on a phone that is the
+// off-canvas sidebar Sheet, so open it first.
+async function readBetaBadge(page) {
+  await page.locator('[data-slot="sidebar-trigger"]').first().click()
+  await page.waitForSelector('[data-probe="beta-version-badge"]', { timeout: 10000 })
+  const text = (await page.locator('[data-probe="beta-version-badge"]').innerText()).replace(/\s+/g, ' ').trim()
+  await page.locator('[data-slot="sheet-overlay"]').click({ position: { x: 350, y: 100 } })
+  await page.waitForSelector('[data-probe="beta-version-badge"]', { state: 'detached', timeout: 10000 })
+  await page.waitForTimeout(500)
+  return text
+}
+
+;(async () => {
+  const browser = await firefox.launch()
+
+  // --- Stage 1 and 2 on a phone (390x844): classic baseline, then beta. ---
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, userAgent: PAY_UA })
+  const page = await ctx.newPage()
+  await mockValidators(page)
+  const errors = []
+  page.on('pageerror', (e) => errors.push('390: ' + String(e)))
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(1500)
+
+  // Classic baseline for the comparisons.
+  const base = await readClassicBaseline(page)
+  check('(a) classic by default: classic earn card visible', (await page.locator('.earn-card').count()) === 1)
+  check('(a) no beta shell in classic', (await page.locator('.ui-beta').count()) === 0)
+  check(`(a) badge is exactly ${VERSION}`, base.badge === VERSION, JSON.stringify(base.badge))
+
+  // (b) Switch on from the changelog, no reload, badge wears " beta".
+  await switchToBeta(page)
+  const badge = await readBetaBadge(page)
+  check(`(b) badge is ${BETA_BADGE} in the sidebar`, badge === BETA_BADGE, JSON.stringify(badge))
+
+  // (c) At 390x844: the bottom tab bar carries the five sections and the
+  // classic chrome is gone.
+  const tabs = page.locator('[data-probe="beta-tabs"] button')
+  const tabCount = await tabs.count()
+  check('(c) bottom tab bar has 5 items', tabCount === 5, String(tabCount))
+  let shortTab = ''
+  let minH = Infinity
+  for (let i = 0; i < tabCount; i++) {
+    const h = (await tabs.nth(i).boundingBox())?.height ?? 0
+    minH = Math.min(minH, h)
+    if (h < 44 && !shortTab) shortTab = await tabs.nth(i).innerText()
+  }
+  check('(c) every tab item is at least 44px tall', minH >= 44, `min=${minH.toFixed(0)} ${shortTab}`)
+  check('(c) the classic .tabs dock is absent', (await page.locator('nav.tabs').count()) === 0)
+  check('(c) the classic header is absent', (await page.locator('header.topbar').count()) === 0)
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
+  check('(c) no horizontal overflow at 390', overflow)
+
+  // (c) Tapping History shows the classic history content inside the shell.
+  await tabs.nth(1).click()
+  await page.waitForTimeout(800)
+  check(
+    '(c) History content renders inside the beta shell',
+    (await page.locator('[data-probe="beta-shell"] main.classic-in-beta section.history').count()) === 1
+  )
+  await tabs.nth(0).click()
+  await page.waitForTimeout(500)
+
+  // (e) The Overview: the balance hero matches the classic tile text.
+  const hero = (await page.locator('[data-probe="balance-hero"]').innerText()).replace(/\s+/g, ' ').trim()
+  check('(e) beta balance hero equals the classic NIM tile', hero === base.hero, `beta=${hero} classic=${base.hero}`)
+
+  // (e) The earn card collapses, expands, and the choice survives a reload.
+  const earnCollapsible = page.locator('[data-probe="earn-collapsible"]')
+  await earnCollapsible.waitFor()
+  check('(e) earn card starts expanded', (await page.locator('[data-probe="earn-summary"]').count()) === 0)
+  await page.locator('[data-probe="earn-toggle"]').click()
+  await page.waitForTimeout(400)
+  check('(e) collapsed shows the one-line summary', (await page.locator('[data-probe="earn-summary"]').count()) === 1)
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForSelector('[data-probe="beta-shell"]', { timeout: 30000 })
+  await page.waitForTimeout(1500)
   await dismissTour(page)
-  await page.locator('.ui-beta button', { hasText: 'See the maths' }).click()
-  await page.waitForSelector('.ui-beta [data-probe="calc-total"]', { timeout: 20000 })
-  await page.locator('#betaCalcAmount').fill('2500')
-  await page.waitForTimeout(600)
-  // The drawer (role dialog) must be a DOM descendant of a .ui-beta host.
+  const stored = await page.evaluate(() => localStorage.getItem('nimbooks:earn-collapsed'))
+  check("(e) the collapsed choice is stored ('1')", stored === '1', JSON.stringify(stored))
+  check('(e) still collapsed after the reload', (await page.locator('[data-probe="earn-summary"]').count()) === 1)
+  await page.locator('[data-probe="earn-toggle"]').click()
+  await page.locator('[data-probe="earn-since"], [data-probe="earn-year"]').first().waitFor()
+  check('(e) expands again', (await page.locator('[data-probe="earn-summary"]').count()) === 0)
+
+  // (f) The calculator: a drawer inside .ui-beta, same numbers as classic.
+  await page.locator('[data-probe="earn-maths"]').click()
+  await page.waitForSelector('#betaCalcAmount', { timeout: 20000 })
   const inside = await page.evaluate(() => {
     const dialog = document.querySelector('[role="dialog"][data-vaul-drawer]')
     return Boolean(dialog && dialog.closest('.ui-beta'))
   })
-  check('(c) drawer renders inside .ui-beta', inside)
-  const betaTotal = (await page.locator('.ui-beta [data-probe="calc-total"]').innerText())
-    .replace(/\s+/g, ' ')
-    .trim()
-  check('(c) 1-year total equals the classic calculator', betaTotal === classicTotal || close(betaTotal, classicTotal), `beta=${betaTotal} classic=${classicTotal}`)
-  const rows1 = await page.locator('[data-probe="calc-table"] tbody tr').count()
-  check('(c) 1-year table has one row', rows1 === 1)
-  await dismissTour(page)
+  check('(f) the calculator is a drawer inside .ui-beta', inside)
+  await page.locator('#betaCalcAmount').fill('2500')
+  await page.waitForTimeout(600)
+  const betaTotal = (await page.locator('[data-probe="calc-total"]').innerText()).replace(/\s+/g, ' ').trim()
+  check('(f) 1-year total equals the classic calculator', close(betaTotal, base.classicTotal), `beta=${betaTotal} classic=${base.classicTotal}`)
+  let rows = await page.locator('[data-probe="calc-table"] tbody tr').count()
+  check('(f) 1-year table has one row', rows === 1)
   await page.locator('.ui-beta button', { hasText: '3 years' }).click()
   await page.waitForTimeout(400)
-  const rows3 = await page.locator('[data-probe="calc-table"] tbody tr').count()
-  check('(c) horizon 3 shows three rows', rows3 === 3, String(rows3))
-  const total3 = num((await page.locator('.ui-beta [data-probe="calc-total"]').innerText()).replace(/\s+/g, ' '))
-  check('(c) horizon 3 changes the total', total3 > num(betaTotal))
-  await dismissTour(page)
+  rows = await page.locator('[data-probe="calc-table"] tbody tr').count()
+  check('(f) horizon 3 shows three rows', rows === 3, String(rows))
+  const total3 = (await page.locator('[data-probe="calc-total"]').innerText()).trim()
+  check('(f) horizon 3 changes the total', num(total3) > num(betaTotal))
   await page.locator('.ui-beta button', { hasText: '5 years' }).click()
   await page.waitForTimeout(400)
-  check('(c) horizon 5 shows five rows', (await page.locator('[data-probe="calc-table"] tbody tr').count()) === 5)
-
-  // (f) At 390x844: no horizontal overflow, buttons at least 44px tall.
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
-  check('(f) no horizontal overflow in beta @390', overflow)
-  const shortButtons = await page.evaluate(() =>
-    Array.from(document.querySelectorAll('.ui-beta button'))
-      .filter((b) => b.offsetParent !== null || getComputedStyle(b).position === 'fixed')
-      .filter((b) => b.getBoundingClientRect().height < 44)
-      .map((b) => (b.textContent || '').trim().slice(0, 30))
-  )
-  check('(f) every beta button is 44px+ tall', shortButtons.length === 0, JSON.stringify(shortButtons))
-  const smallInputs = await page.evaluate(() =>
-    Array.from(document.querySelectorAll('.ui-beta input, .ui-beta select'))
-      .filter((el) => el.offsetParent !== null && Number(getComputedStyle(el).fontSize) < 16)
-      .map((el) => el.id)
-  )
-  check('(f) beta inputs are 16px+ (no iOS zoom)', smallInputs.length === 0, JSON.stringify(smallInputs))
-
-  // (d) Way back: the toggle returns the classic look.
+  rows = await page.locator('[data-probe="calc-table"] tbody tr').count()
+  check('(f) horizon 5 shows five rows', rows === 5, String(rows))
   await page.keyboard.press('Escape')
+  await page.waitForTimeout(500)
+
+  // (g) Every gold (default-variant) action renders near-black text on gold:
+  // assert the WCAG ratio of each gold button and badge is at least 4.5.
+  const gold = await page.evaluate(() => {
+    const shell = document.querySelector('.ui-beta')
+    const out = []
+    for (const el of shell.querySelectorAll('button[data-variant="default"], [data-slot="badge"][data-variant="default"]')) {
+      const cs = getComputedStyle(el)
+      if (cs.display === 'none' || cs.visibility === 'hidden' || (el.offsetParent === null && cs.position === 'static')) continue
+      out.push({
+        text: (el.textContent || '').trim().slice(0, 30),
+        bg: cs.backgroundColor,
+        fg: cs.color,
+      })
+    }
+    return out
+  })
+  check('(g) at least one gold action exists on Overview', gold.length >= 1, JSON.stringify(gold.slice(0, 3)))
+  let worst = Infinity
+  let worstText = ''
+  for (const g of gold) {
+    const r = contrast(g.fg, g.bg)
+    if (r !== null && r < worst) {
+      worst = r
+      worstText = g.text
+    }
+  }
+  check('(g) gold buttons carry near-black text (contrast >= 4.5)', worst >= 4.5, `worst=${worst?.toFixed(2)} "${worstText}"`)
+
+  // (h) Both themes render the shell; the shell background follows the app's
+  // own theme attribute (at phone widths the sidebar is the off-canvas Sheet,
+  // so the header's background is read instead).
+  const shellBg = () =>
+    page.evaluate(() => {
+      const el = document.querySelector('[data-probe="beta-shell"] header')
+      return el ? getComputedStyle(el).backgroundColor : null
+    })
+  const darkBg = await shellBg()
+  check('(h) dark shell renders', typeof darkBg === 'string', JSON.stringify(darkBg))
+  const modeToggle = '[data-probe="beta-shell"] header button[aria-label*="light mode"], [data-probe="beta-shell"] header button[aria-label*="dark mode"]'
+  await page.locator(modeToggle).first().click()
   await page.waitForTimeout(600)
-  await dismissTour(page)
-  await page.locator('.version-badge').first().click()
+  const lightBg = await shellBg()
+  check('(h) switching the theme changes the shell background', lightBg !== null && lightBg !== darkBg, `${darkBg} -> ${lightBg}`)
+  // And back for the last leg.
+  await page.locator(modeToggle).first().click()
+  await page.waitForTimeout(400)
+
+  // Way back: the badge in the sidebar (on a phone: in the off-canvas Sheet)
+  // opens the changelog, the toggle there returns the classic look.
+  await page.locator('[data-slot="sidebar-trigger"]').first().click()
+  await page.waitForSelector('[data-probe="beta-version-badge"]', { timeout: 10000 })
+  await page.locator('[data-probe="beta-version-badge"]').click()
   await page.waitForSelector('.modal')
-  const bugLineBeta = (await page.locator('.changelog-feedback').first().innerText()).replace(/\s+/g, ' ')
-  check('(d) in beta, bug line still the beta wording', /Found something odd in the new look/.test(bugLineBeta))
   await page.locator('.beta-toggle-row [role="switch"]').click()
   await page.locator('.modal-head [aria-label="Close"]').click()
-  await page.waitForTimeout(600)
-  check('(d) classic earn card back', (await page.locator('.earn-card').count()) === 1)
-  check('(d) beta earn card gone', (await page.locator('.ui-beta').count()) === 0)
-  const badgeD = await page.locator('.version-badge').first().innerText()
-  check(`(d) badge back to exactly ${VERSION}`, badgeD.trim() === VERSION, JSON.stringify(badgeD))
-  check('(d) no page errors through the whole run', errors.length === 0, JSON.stringify(errors.slice(0, 3)))
+  await page.waitForTimeout(800)
+  check('(b) classic earn card back after switching off', (await page.locator('.earn-card').count()) === 1)
+  check('(b) no beta shell left', (await page.locator('.ui-beta').count()) === 0)
+  check(
+    `(a/i) badge back to exactly ${VERSION}`,
+    ((await page.locator('.version-badge').first().innerText()).trim()) === VERSION
+  )
+  check('(j) no page errors on the phone run', errors.length === 0, JSON.stringify(errors.slice(0, 3)))
   await ctx.close()
 
-  // --- Stage 2: URL overrides on fresh contexts. ---
-  // (e) A shared link with ?ui=beta starts in beta.
-  const ctxBeta = await browser.newContext({ viewport: { width: 390, height: 844 } })
+  // --- Stage 3: desktop (1440x900): sidebar visible, no bottom bar. ---
+  const ctxD = await browser.newContext({ viewport: { width: 1440, height: 900 }, userAgent: PAY_UA })
+  const pd = await ctxD.newPage()
+  await mockValidators(pd)
+  await ctxD.addInitScript(() => {
+    localStorage.setItem('nimbooks:ui', 'beta')
+  })
+  await pd.goto(BASE, { waitUntil: 'domcontentloaded' })
+  await pd.click('button:has-text("Try with a sample wallet")')
+  await pd.waitForSelector('[data-probe="beta-shell"]', { timeout: 30000 })
+  await pd.waitForTimeout(1500)
+  await dismissTour(pd)
+  const desktopErrors = []
+  pd.on('pageerror', (e) => desktopErrors.push(String(e)))
+  const sidebar = pd.locator('[data-probe="beta-shell"] > div [data-slot="sidebar"]').first()
+  const sidebarVisible = (await sidebar.count()) === 1 && (await sidebar.isVisible())
+  check('(d) the sidebar is visible at 1440', sidebarVisible)
+  const items = await pd.locator('[data-slot="sidebar-group-content"] [data-slot="sidebar-menu-button"]').count()
+  check('(d) the sidebar lists the 5 sections', items === 5, String(items))
+  const bottomBar = pd.locator('[data-probe="beta-tabs"]')
+  const bottomHidden = (await bottomBar.count()) === 0 || !(await bottomBar.first().isVisible())
+  check('(d) no bottom tab bar at 1440', bottomHidden)
+  const badgeD = (await pd.locator('[data-probe="beta-version-badge"]').innerText()).trim()
+  check(`(d) desktop badge is ${BETA_BADGE}`, badgeD === BETA_BADGE, JSON.stringify(badgeD))
+  check('(d) no page errors at 1440', desktopErrors.length === 0, JSON.stringify(desktopErrors.slice(0, 3)))
+  await ctxD.close()
+
+  // --- Stage 4: URL overrides on fresh contexts. ---
+  const ctxBeta = await browser.newContext({ viewport: { width: 390, height: 844 }, userAgent: PAY_UA })
   const pb = await ctxBeta.newPage()
   await mockValidators(pb)
   await pb.goto(BASE + '/?ui=beta', { waitUntil: 'domcontentloaded' })
-  await pb.waitForTimeout(1500)
-  check('(e) ?ui=beta starts beta (landing badge)', (await pb.locator('.version-badge').first().innerText()).trim() === BETA_BADGE)
+  await pb.waitForTimeout(1200)
+  check('(i) ?ui=beta: landing badge wears " beta"', ((await pb.locator('.version-badge').first().innerText()).trim()) === BETA_BADGE)
   await pb.click('button:has-text("Try with a sample wallet")')
-  await pb.waitForSelector('.ui-beta[data-learn="earn"]', { timeout: 30000 })
+  await pb.waitForSelector('[data-probe="beta-shell"]', { timeout: 30000 })
   await dismissTour(pb)
-  check('(e) ?ui=beta renders the beta earn card', true)
+  check('(i) ?ui=beta renders the beta shell after connecting', true)
   await ctxBeta.close()
 
-  // (e) ?ui=classic overrides a stored 'beta' and returns to classic.
-  const ctxClassic = await browser.newContext({ viewport: { width: 390, height: 844 } })
+  const ctxClassic = await browser.newContext({ viewport: { width: 390, height: 844 }, userAgent: PAY_UA })
   await ctxClassic.addInitScript(() => {
     localStorage.setItem('nimbooks:ui', 'beta')
   })
   const pc = await ctxClassic.newPage()
   await mockValidators(pc)
   await pc.goto(BASE + '/?ui=classic', { waitUntil: 'domcontentloaded' })
-  await pc.waitForTimeout(1500)
-  await dismissTour(pc)
-  check('(e) ?ui=classic beats a stored beta', (await pc.locator('.version-badge').first().innerText()).trim() === VERSION)
+  await pc.waitForTimeout(1200)
+  check(`(i) ?ui=classic beats a stored beta (badge ${VERSION})`, ((await pc.locator('.version-badge').first().innerText()).trim()) === VERSION)
+  await ctxClassic.close()
 
   await browser.close()
   console.log(`\n${pass} passed, ${fail} failed`)

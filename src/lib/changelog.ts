@@ -7,7 +7,7 @@
 // Badge text. Spelled out rather than built from a version constant so the exact
 // label ships as one string in the bundle (JSX would emit "v" as a separate node).
 // package.json carries the machine-readable version.
-export const APP_VERSION_LABEL = 'v1.35.0'
+export const APP_VERSION_LABEL = 'v1.36.0'
 
 export interface ChangelogEntry {
   version: string
@@ -17,11 +17,12 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
-    version: '1.35.0',
+    version: '1.36.0',
     date: '2026-10-21',
     items: [
+      'New look (beta) rebuilt on shadcn: a sidebar and bottom tab layout, a new Overview with a collapsible Earn card, and the yield calculator as a bottom sheet. Classic stays the default',
+      'Gold buttons, the active tab and the period chips are easier to read: dark text on gold instead of white (contrast 7.8:1, up from 1.9:1)',
       'Analytics is shorter: the daily net flow and your balance over time now share one chart card. The two small icons at its top right switch between the bars and the balance line, and NimBooks remembers your pick',
-      "New look (beta): a redesigned Earn card and yield calculator you can switch on at the top of this window. Classic stays the default, and you can switch back any time",
       "The Earn card now gives you three reasons to come back: the rewards earned since your last visit, what the chain actually paid you over the last month next to the pool's estimate, and what each validator has earned you all time (per pool, collapsed until you open it)",
       'A received payment that leaves NIM idle now asks "Stake it?" - with what it could earn in a year, one tap to stake just that payment, and Not now when you would rather not',
       "The validator picker now orders pools on its own: highest net yield first, then reliability, with pools that are not producing last. Nothing is pinned to the top any more, and the developer's own pool, ImpactZero, is always labelled Builder's pool so you always know who runs it",

@@ -48,6 +48,9 @@
   --toast-border: #1d4a2f;
   --tab-border: rgba(255, 255, 255, 0.12);
   --on-accent: #ffffff;
+  /* Text on a gold fill. White on Nimiq gold is 1.94:1 (fails WCAG AA);
+     Nimiq darkblue on gold is 7.79:1 in both themes. */
+  --on-gold: #1f2348;
   --total-grad-1: #2a2415;
   --total-grad-2: #1f2348;
   --total-border: rgba(233, 178, 19, 0.35);
@@ -433,7 +436,7 @@ a:focus-visible {
   height: 30px;
   border-radius: 50%;
   background: var(--gradient-gold);
-  color: #fff;
+  color: var(--on-gold);
   font-size: 13px;
   font-weight: 800;
 }
@@ -1349,7 +1352,7 @@ a:focus-visible {
 }
 .tab.active {
   background: var(--accent);
-  color: var(--on-accent);
+  color: var(--on-gold);
 }
 
 /* Cards */
@@ -1760,8 +1763,7 @@ a:focus-visible {
 /* Buttons */
 .btn-primary {
   background: var(--gradient-gold);
-  color: #ffffff;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  color: var(--on-gold);
   border: none;
   border-radius: var(--radius-pill);
   padding: 13px 28px;
@@ -1967,7 +1969,7 @@ a.btn-ghost.btn-link {
 }
 .period.active {
   background: var(--accent);
-  color: var(--on-accent);
+  color: var(--on-gold);
 }
 .period-sep {
   width: 1px;
