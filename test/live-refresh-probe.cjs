@@ -134,7 +134,7 @@ const synthRow = (timestamp) => ({
   const external = [] // price and rate hosts
   const inject = { on: false, failExtra: false, ts: 0 }
   page.on('request', (req) => {
-    if (/coingecko|llama\.fi/.test(req.url())) external.push({ t: Date.now(), url: req.url() })
+    if (/coingecko|llama\.fi|nim\.sh|firestore\.googleapis\.com|jsdelivr|open\.er-api\.com/.test(req.url())) external.push({ t: Date.now(), url: req.url() })
   })
   await page.route('**/rpc.nimiqwatch.com/**', async (route) => {
     const req = route.request()
