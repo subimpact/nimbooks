@@ -90,6 +90,21 @@ function contrast(fg, bg) {
   return (hi + 0.05) / (lo + 0.05)
 }
 
+
+// Computed colours from the kit come back as oklch(); the contrast maths
+// needs sRGB. Resolve any CSS colour in the page through a 1x1 canvas, and
+// read an element's effective background from the nearest opaque ancestor.
+// Without this, contrast() sees oklch, returns null and the check passes
+// vacuously (it did, until v1.36.0).
+const RESOLVE_COLOURS = `(() => {
+  const cv = document.createElement('canvas'); cv.width = cv.height = 1
+  const cx = cv.getContext('2d', { willReadFrequently: true })
+  window.__rgb = (c) => { cx.clearRect(0, 0, 1, 1); cx.fillStyle = '#000'; cx.fillStyle = c; cx.fillRect(0, 0, 1, 1)
+    const d = cx.getImageData(0, 0, 1, 1).data; return 'rgb(' + d[0] + ', ' + d[1] + ', ' + d[2] + ')' }
+  window.__alpha = (c) => { cx.clearRect(0, 0, 1, 1); cx.fillStyle = 'rgba(0,0,0,0)'; cx.fillStyle = c; cx.fillRect(0, 0, 1, 1); return cx.getImageData(0, 0, 1, 1).data[3] }
+  window.__bgOf = (el) => { for (let e = el; e; e = e.parentElement) { const b = getComputedStyle(e).backgroundColor; if (window.__alpha(b) > 200) return window.__rgb(b) } return 'rgb(255, 255, 255)' }
+})()`
+
 async function mockValidators(page) {
   await page.route('**/validators-api-main.je-cf9.workers.dev/**', (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(VALIDATOR_FIXTURE) })
@@ -263,6 +278,7 @@ async function readBetaBadge(page) {
 
   // (g) Every gold (default-variant) action renders near-black text on gold:
   // assert the WCAG ratio of each gold button and badge is at least 4.5.
+  await page.evaluate(RESOLVE_COLOURS)
   const gold = await page.evaluate(() => {
     const shell = document.querySelector('.ui-beta')
     const out = []
@@ -271,8 +287,8 @@ async function readBetaBadge(page) {
       if (cs.display === 'none' || cs.visibility === 'hidden' || (el.offsetParent === null && cs.position === 'static')) continue
       out.push({
         text: (el.textContent || '').trim().slice(0, 30),
-        bg: cs.backgroundColor,
-        fg: cs.color,
+        bg: window.__rgb(cs.backgroundColor),
+        fg: window.__rgb(cs.color),
       })
     }
     return out
@@ -282,7 +298,8 @@ async function readBetaBadge(page) {
   let worstText = ''
   for (const g of gold) {
     const r = contrast(g.fg, g.bg)
-    if (r !== null && r < worst) {
+    if (r === null) worst = 0
+    else if (r < worst) {
       worst = r
       worstText = g.text
     }
@@ -297,6 +314,21 @@ async function readBetaBadge(page) {
       const el = document.querySelector('[data-probe="beta-shell"] header')
       return el ? getComputedStyle(el).backgroundColor : null
     })
+  // (k) Unported classic sections inside the beta shell keep readable labels.
+  // Classic and the kit both define --muted (text vs background); unmapped,
+  // the analytics labels drew dark grey on a dark card at 1.6:1.
+  const classicLabels = async () => {
+    await page.evaluate(RESOLVE_COLOURS)
+    return page.evaluate(() => {
+      const els = [...document.querySelectorAll('.ui-beta .classic-in-beta .stat .label, .ui-beta .classic-in-beta .muted')]
+        .filter((e) => e.offsetParent !== null && (e.textContent || '').trim())
+      return els.slice(0, 40).map((e) => ({ t: e.textContent.trim().slice(0, 24), fg: window.__rgb(getComputedStyle(e).color), bg: window.__bgOf(e) }))
+    })
+  }
+  const worstOf = (list) => list.reduce((w, l) => { const r = contrast(l.fg, l.bg) ?? 0; return r < w.r ? { r, t: l.t } : w }, { r: Infinity, t: '' })
+  const darkLabels = await classicLabels()
+  const dW = worstOf(darkLabels)
+  check('(k) dark: classic labels inside beta are readable (>= 4.5)', darkLabels.length > 0 && dW.r >= 4.5, `n=${darkLabels.length} worst=${dW.r.toFixed(2)} "${dW.t}"`)
   const darkBg = await shellBg()
   check('(h) dark shell renders', typeof darkBg === 'string', JSON.stringify(darkBg))
   const modeToggle = '[data-probe="beta-shell"] header button[aria-label*="light mode"], [data-probe="beta-shell"] header button[aria-label*="dark mode"]'
@@ -304,6 +336,9 @@ async function readBetaBadge(page) {
   await page.waitForTimeout(600)
   const lightBg = await shellBg()
   check('(h) switching the theme changes the shell background', lightBg !== null && lightBg !== darkBg, `${darkBg} -> ${lightBg}`)
+  const lightLabels = await classicLabels()
+  const lW = worstOf(lightLabels)
+  check('(k) light: classic labels inside beta are readable (>= 4.5)', lightLabels.length > 0 && lW.r >= 4.5, `n=${lightLabels.length} worst=${lW.r.toFixed(2)} "${lW.t}"`)
   // And back for the last leg.
   await page.locator(modeToggle).first().click()
   await page.waitForTimeout(400)
