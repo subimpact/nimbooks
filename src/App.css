@@ -3531,13 +3531,41 @@ a.btn-ghost.btn-link {
 
 /* Currency picker — flag grid matching the Nimiq wallet's Reference
    currency selector (wallet.nimiq.com settings). */
+.currency-search {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 15px;
+  color: var(--text);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.currency-search:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+.currency-scroll {
+  max-height: 46vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  min-width: 0;
+}
+.currency-section {
+  margin: 10px 0 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
 .currency-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
   gap: 8px;
-  max-height: 44vh;
-  overflow-y: auto;
-  overscroll-behavior: contain;
 }
 .currency-tile {
   display: flex;
@@ -3577,6 +3605,43 @@ a.btn-ghost.btn-link {
 }
 .currency-code {
   line-height: 1;
+}
+/* Neutral round badge for the currencies without a flag file: the 3-letter
+   code inside a circle, same footprint as the flag images. */
+.currency-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--border);
+  color: var(--text);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  overflow: hidden;
+}
+.currency-name {
+  display: block;
+  max-width: 100%;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 1.2;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Tiny badge variant for the currency chip (16px). */
+.currency-badge.badge-sm,
+.chip-flag.currency-badge {
+  width: 16px;
+  height: 16px;
+  font-size: 6px;
+  flex: none;
 }
 .modal a.btn-primary.btn-link {
   width: 100%;

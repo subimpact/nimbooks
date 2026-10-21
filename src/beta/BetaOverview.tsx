@@ -55,6 +55,7 @@ export default function BetaOverview({
   onCurrencyPicker,
   balanceHero,
   totalValueFiat,
+  totalValueNote,
   nimBalance,
   stakedLuna,
   inTransitLuna,
@@ -68,14 +69,17 @@ export default function BetaOverview({
 }: {
   lang: string
   currency: CurrencyCode
-  /** Currency chip: the flag inside public/flags, used as an src value. */
-  currencyFlag: string
+  /** Currency chip: the flag inside public/flags; undefined for currencies
+   *  without a flag file (a neutral code badge renders instead). */
+  currencyFlag?: string
   onCurrencyPicker: () => void
 
   /** The hero line, exactly the text the classic balance tile shows. */
   balanceHero: string
   /** The value under the hero: the total value in the display currency. */
   totalValueFiat: string
+  /** Dated-price note ("as of HH:MM") for that value, or null when live. */
+  totalValueNote?: string | null
   /** Available NIM (the basic balance), or null while loading. */
   nimBalance: string | null
   /** Active stake, NIM. */
@@ -164,7 +168,13 @@ export default function BetaOverview({
               title="Change display currency"
               aria-label="Change display currency"
             >
-              <img src={`/flags/flag-${currencyFlag}.svg`} alt="" width={16} height={16} />
+              {currencyFlag ? (
+                <img src={`/flags/flag-${currencyFlag}.svg`} alt="" width={16} height={16} />
+              ) : (
+                <span className="currency-badge badge-sm" aria-hidden="true">
+                  {currency.toUpperCase()}
+                </span>
+              )}
               {currency.toUpperCase()}
             </Button>
           </CardAction>
@@ -173,7 +183,10 @@ export default function BetaOverview({
           <p className="tw:m-0 tw:text-3xl tw:font-semibold tw:tracking-tight" data-probe="balance-hero">
             {balanceHero}
           </p>
-          <p className="tw:m-0 tw:text-sm tw:text-muted-foreground">Total value {totalValueFiat}</p>
+          <p className="tw:m-0 tw:text-sm tw:text-muted-foreground">
+            Total value {totalValueFiat}
+            {totalValueNote ? ` (${totalValueNote})` : ''}
+          </p>
           <dl className="tw:m-0 tw:mt-1 tw:grid tw:grid-cols-[auto_1fr] tw:justify-items-end tw:text-sm">
             <dt className="tw:justify-self-start tw:text-muted-foreground">Staked</dt>
             <dd className="tw:m-0">{fmtNimLine(stakedLuna, lang)}</dd>

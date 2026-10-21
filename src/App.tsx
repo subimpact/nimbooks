@@ -78,6 +78,9 @@ import {
   formatUnits,
   formatFiat,
   currencySymbol,
+  hasRate,
+  WALLET_CURRENCIES,
+  TAX_CURRENCIES,
   formatValidatorFee,
   formatValidatorReward,
   formatValidatorReliability,
@@ -103,6 +106,7 @@ import {
   type VestingHolding,
 } from './lib/chain'
 import { planUnstake } from './lib/unstakePlan'
+import { readFxCached, type PriceChainResult } from './lib/prices'
 import { isArchivedContract, ownFundedContracts, syncContractArchive } from './lib/payContracts'
 import { isValidNimiqAddress } from './lib/portfolio'
 import Portfolio from './Portfolio'
@@ -250,8 +254,9 @@ const RATES_KEY = 'nimbooks:rates'
 // chain.ts reads the same key to scope per-device preferences.
 const DEVICE_ID_KEY = 'nimbooks:deviceId'
 
-// chain.ts owns this key and writes { asset: { rates: {usd,myr,eur,…}, at } }.
-// Read that schema for the no-flash initial state.
+// Written by lib/prices.ts: { asset: { rates: {usd,myr,eur,…}, at } } — the
+// per-asset rate cache the UI preloads from, plus 'nimbooks:fx' for the
+// USD->currency table.
 interface RateCache {
   [asset: string]: { rates?: Partial<FiatRates>; at?: number }
 }
@@ -272,7 +277,26 @@ type RateAsset = 'nim' | 'usdt' | 'eth' | 'pol'
 const EVM_CACHE_TTL = 60 * 1000
 const evmBalanceCache = new Map<string, { at: number; balances: EvmBalance[] }>()
 
-const ZERO_RATES: FiatRates = { usd: 0, myr: 0, eur: 0, sgd: 0, gbp: 0 }
+// No rates is NOT zero rates: an unknown price must never render as $0.00,
+// so the placeholder is an empty table and every code reads unknown (NaN)
+// until a price arrives. formatFiat and the "Price unavailable" tile take
+// it from there.
+const NO_RATES: FiatRates = { usd: NaN }
+
+// Picker sections: "Popular" is the Nimiq Wallet's own set in its order; the
+// rest of the 148 follow A to Z by code. Built once at module scope.
+const CURRENCY_BY_CODE = new Map(CURRENCIES.map((c) => [c.code, c]))
+const POPULAR_CURRENCIES: typeof CURRENCIES = WALLET_CURRENCIES.map(
+  (code) => CURRENCY_BY_CODE.get(code)
+).filter((c): c is NonNullable<typeof c> => !!c)
+const OTHER_CURRENCIES: typeof CURRENCIES = CURRENCIES.filter(
+  (c) => !WALLET_CURRENCIES.includes(c.code)
+)
+OTHER_CURRENCIES.sort((a, b) => a.code.localeCompare(b.code))
+
+// Neutral round badge for currencies without a flag file (used in the picker
+// tiles and the currency chip): the 3-letter code inside a circle, no new
+// image files. Style in App.css under .currency-badge.
 
 // Overlay whatever the cache holds onto the placeholder rates: a cache written
 // before a currency was added carries only the older keys.
@@ -642,16 +666,69 @@ export default function App() {
   const [currentBlock, setCurrentBlock] = useState<number>(0)
   const [vestingHoldings, setVestingHoldings] = useState<VestingHolding[]>([])
   const [evmBalances, setEvmBalances] = useState<EvmBalance[]>([])
-  // Full rate table per asset — one entry per display currency, so switching
-  // currency is instant and costs no extra request.
+  // Full rate table per asset - one entry per display currency, so switching
+  // currency is instant and costs no extra request. Unknown prices are NaN,
+  // never 0: zero is a real rate, NaN is "the price service has nothing yet"
+  // and renders as "Price unavailable" instead of a lying $0.00.
   const [fiat, setFiat] = useState<Record<RateAsset, FiatRates>>({
-    nim: ZERO_RATES,
-    usdt: { ...ZERO_RATES, usd: 1 },
-    eth: ZERO_RATES,
-    pol: ZERO_RATES,
+    nim: NO_RATES,
+    usdt: { ...NO_RATES, usd: 1 },
+    eth: NO_RATES,
+    pol: NO_RATES,
   })
+  // USD -> display-currency table from the FX ladder (see lib/prices.ts).
+  // Asset price times its currency rate is what the tables above hold.
+  const [fxTable, setFxTable] = useState<FiatRates>({})
+  // Where the price on screen came from and when the NIM price was observed:
+  // null until the chain has answered anything (cache included).
+  const [priceStatus, setPriceStatus] = useState<
+    { asOf: number | null; priceSource: string; fxSource: string } | null
+  >(null)
   const [currency, setCurrency] = useState<CurrencyCode>(loadCurrency)
   const [currencyOpen, setCurrencyOpen] = useState(false)
+  // Picker search: empty matches nothing and shows the two sections.
+  const [currencyQuery, setCurrencyQuery] = useState('')
+  // Fresh query every time the sheet opens.
+  useEffect(() => {
+    if (currencyOpen) setCurrencyQuery('')
+  }, [currencyOpen])
+  const currencyQueryLower = currencyQuery.trim().toLowerCase()
+  // Filters by code and by English name, case-insensitive ("peso" finds
+  // ARS, CLP, COP, DOP, MXN, PHP, UYU).
+  const currencyMatches = currencyQueryLower
+    ? CURRENCIES.filter(
+        (c) => c.code.includes(currencyQueryLower) || c.name.toLowerCase().includes(currencyQueryLower)
+      )
+    : null
+  // Tile reused by the two sections and the search results. Currencies
+  // without a flag file show a neutral code badge instead of an image.
+  const currencyTile = (c: typeof CURRENCIES[number]) => (
+    <button
+      key={c.code}
+      type="button"
+      role="radio"
+      aria-checked={c.code === currency}
+      className={c.code === currency ? 'currency-tile selected' : 'currency-tile'}
+      onClick={() => pickCurrency(c.code)}
+    >
+      <span className="currency-visual" aria-hidden="true">
+        {c.flag ? (
+          <img
+            className="currency-flag-img"
+            src={`/flags/flag-${c.flag}.svg`}
+            alt=""
+            loading="lazy"
+            width={28}
+            height={28}
+          />
+        ) : (
+          <span className="currency-badge">{c.label}</span>
+        )}
+      </span>
+      <span className="currency-code">{c.label}</span>
+      <span className="currency-name">{c.name}</span>
+    </button>
+  )
   const [changelogOpen, setChangelogOpen] = useState(false)
   const [deviceId, setDeviceId] = useState<string | null>(() => {
     try {
@@ -1104,17 +1181,39 @@ export default function App() {
   // retry waits a minute. getAllFiatRates answers from its own 5-minute cache, so
   // on most ticks this costs no request at all.
   const ratesRetryAtRef = useRef(0)
+  // The display currency at call time, without re-creating the callback (and
+  // thus re-running the seeding effect below) on every currency switch.
+  const currencyRef = useRef(currency)
+  currencyRef.current = currency
+  const keepBest = (prev: FiatRates, next: FiatRates): FiatRates =>
+    hasRate(next?.usd) ? next : prev
   const fetchRates = useCallback(
     async (opts?: { quiet?: boolean }) => {
       if (opts?.quiet && Date.now() < ratesRetryAtRef.current) return
       try {
-        const all = await getAllFiatRates()
-        // A zero NIM price means the response held no usable rate: keep the one on screen.
-        const nim = all.nim.usd > 0 ? all.nim : null
+        const all: PriceChainResult = await getAllFiatRates(currencyRef.current)
+        // An unknown NIM price means every source came back empty: keep the
+        // one on screen (it may be a stale cache the chain already fell back
+        // to, or - for a first visit - the explicit unknown state).
+        const nim = hasRate(all.nim.usd) ? all.nim : null
         if (opts?.quiet && !nim) ratesRetryAtRef.current = Date.now() + 60_000
         setFiat((prev) => {
-          const next = { nim: nim ?? prev.nim, usdt: all.usdt, eth: all.eth, pol: all.pol }
+          const next = {
+            nim: nim ?? prev.nim,
+            usdt: keepBest(prev.usdt, all.usdt),
+            eth: keepBest(prev.eth, all.eth),
+            pol: keepBest(prev.pol, all.pol),
+          }
           return JSON.stringify(next) === JSON.stringify(prev) ? prev : next
+        })
+        setFxTable((prev) => {
+          if (JSON.stringify(prev) === JSON.stringify(all.fx)) return prev
+          return all.fx
+        })
+        setPriceStatus({
+          asOf: all.asOf,
+          priceSource: all.priceSource,
+          fxSource: all.fxSource,
         })
       } catch (e) {
         console.warn('Rate fetch failed:', e)
@@ -1127,15 +1226,25 @@ export default function App() {
 
   useEffect(() => {
     setLang(getLanguage() ?? navigator.language.split('-')[0] ?? 'en')
-    // Load rates from localStorage cache immediately (no flash of $0)
+    // Load rates from localStorage cache immediately (no flash of $0). The
+    // cached tables' `at` also drives the "as of HH:MM" line: a price older
+    // than 30 minutes must say so, not pass as live.
     const cached = readRates()
+    const fxCache = readFxCached()
     setFiat((p) => ({
-      nim: mergeRates(ZERO_RATES, cached.nim?.rates),
+      nim: mergeRates(NO_RATES, cached.nim?.rates),
       usdt: mergeRates(p.usdt, cached.usdt?.rates),
-      eth: mergeRates(ZERO_RATES, cached.eth?.rates),
-      pol: mergeRates(ZERO_RATES, cached.pol?.rates),
+      eth: mergeRates(NO_RATES, cached.eth?.rates),
+      pol: mergeRates(NO_RATES, cached.pol?.rates),
     }))
-    // Fetch fresh rates (single consolidated request)
+    if (fxCache) setFxTable(fxCache.table)
+    const cachedNimAt = typeof cached.nim?.at === 'number' ? cached.nim.at : null
+    setPriceStatus({
+      asOf: cachedNimAt,
+      priceSource: 'cache',
+      fxSource: fxCache?.source ?? 'none',
+    })
+    // Fetch fresh rates (the price chain resolves tiers on its own)
     fetchRates()
   }, [fetchRates])
 
@@ -1145,13 +1254,15 @@ export default function App() {
     () => ({ nim: fiat.nim.usd, usdt: fiat.usdt.usd, eth: fiat.eth.usd, pol: fiat.pol.usd }),
     [fiat]
   )
-  // Display rates — the currency chosen by tapping the total value.
+  // Display rates - the currency chosen by tapping the total value. A code
+  // with no rate in the table is unknown, not 0: it renders as "Price
+  // unavailable" where it is needed (see totalFiat and formatFiat).
   const shown = useMemo(
     () => ({
-      nim: fiat.nim[currency] ?? 0,
-      usdt: fiat.usdt[currency] ?? 0,
-      eth: fiat.eth[currency] ?? 0,
-      pol: fiat.pol[currency] ?? 0,
+      nim: fiat.nim[currency] ?? NaN,
+      usdt: fiat.usdt[currency] ?? NaN,
+      eth: fiat.eth[currency] ?? NaN,
+      pol: fiat.pol[currency] ?? NaN,
     }),
     [fiat, currency]
   )
@@ -1161,7 +1272,6 @@ export default function App() {
     saveCurrency(code)
     setCurrencyOpen(false)
   }, [])
-
   // Toasts auto-dismiss after 4s (tap still dismisses immediately)
   useEffect(() => {
     if (!toast) return
@@ -1873,22 +1983,52 @@ export default function App() {
 
   const totalFiat = useMemo(() => {
     let total = 0
+    let unknown = false
     // Priced off the same effective total as the NIM tile, so the two can
-    // never disagree about how much the wallet holds.
-    if (nimBalance !== null) total += (totalNimLuna / 100000) * shown.nim
+    // never disagree about how much the wallet holds. An asset with a
+    // balance but no usable price makes the WHOLE total unknown - it can
+    // never silently become 0 and read as $0.00.
+    if (nimBalance !== null) {
+      if (hasRate(shown.nim)) total += (totalNimLuna / 100000) * shown.nim
+      else if (totalNimLuna > 0) unknown = true
+    }
     for (const b of evmBalances) {
       const val = Number(b.balance) / 10 ** b.decimals
       if (!Number.isFinite(val)) continue
-      if (b.symbol === 'USDT') total += val * shown.usdt
-      else if (b.symbol === 'POL') total += val * shown.pol
-      else total += val * shown.eth
+      if (b.symbol === 'USDT') {
+        if (hasRate(shown.usdt)) total += val * shown.usdt
+        else if (val > 0) unknown = true
+      } else if (b.symbol === 'POL') {
+        if (hasRate(shown.pol)) total += val * shown.pol
+        else if (val > 0) unknown = true
+      } else {
+        if (hasRate(shown.eth)) total += val * shown.eth
+        else if (val > 0) unknown = true
+      }
     }
+    if (unknown) return NaN
     return Number.isFinite(total) ? total : 0
   }, [nimBalance, totalNimLuna, evmBalances, shown])
 
   // Flag/label for the chip on the Total value tile. Falls back to the first
-  // entry so a stale saved code can never blank the chip.
+  // entry so a stale saved code can never blank the chip. Currencies without
+  // a flag file show a neutral code badge instead of a broken image.
   const cur = CURRENCIES.find((c) => c.code === currency) ?? CURRENCIES[0]
+
+  // "as of HH:MM" (local time) next to Total value, shown only when the price
+  // on screen is an old cached one (older than 30 minutes): better to date a
+  // number than present a stale one as live.
+  const PRICE_FRESH_MS = 30 * 60 * 1000
+  const totalFiatAsOf = priceStatus?.asOf ?? null
+  const totalFiatSubNote: string | null =
+    Number.isFinite(totalFiat) &&
+    totalFiatAsOf !== null &&
+    Date.now() - totalFiatAsOf > PRICE_FRESH_MS
+      ? `as of ${new Date(totalFiatAsOf).toLocaleTimeString(undefined, {
+          hour: '2-digit',
+          minute: '2-digit',
+        })}`
+      : null
 
   // --- Send / Receive (Overview quick actions) ---
 
@@ -3625,17 +3765,19 @@ export default function App() {
     if (kind === 'tax') {
       if (!taxReport) return null
       return {
-        filename: `nimbooks-tax-${taxFormat}-${currency}-${tag}.csv`,
+        // Filenames follow the currency the report was actually computed
+        // in (the display currency when it is tax-capable, USD otherwise).
+        filename: `nimbooks-tax-${taxFormat}-${taxCurrency}-${tag}.csv`,
         csv: buildTaxTransactionsCsv(
-          taxFormat, taxReport.rows, taxReport.incomeRows, account.nimiqAddress, currency.toUpperCase()
+          taxFormat, taxReport.rows, taxReport.incomeRows, account.nimiqAddress, taxCurrency.toUpperCase()
         ),
       }
     }
     if (kind === 'tax-summary') {
       if (!taxReport) return null
       return {
-        filename: `nimbooks-tax-summary-${currency}-${tag}.csv`,
-        csv: buildTaxSummaryCsv(taxReport, account.nimiqAddress, currency.toUpperCase()),
+        filename: `nimbooks-tax-summary-${taxCurrency}-${tag}.csv`,
+        csv: buildTaxSummaryCsv(taxReport, account.nimiqAddress, taxCurrency.toUpperCase()),
       }
     }
     if (!statement) return null
@@ -3929,20 +4071,20 @@ export default function App() {
   // Recalculate clears the figures and they are worked out again, and a currency
   // switch does the same, so the report always matches what it labels. Between
   // those, the report follows the books (see the effect below).
-  // FX rate: how many units of the chosen currency one USD buys. The USDT
-  // table carries most codes directly; anything else derives from NIM's two
-  // price legs, and USD itself is identity.
+  // The tax report stays on the 37 historical rates are published for (see
+  // TAX_CURRENCIES): any newer display currency computes and exports in USD
+  // until its historical daily FX exists. Everything else about the maths is
+  // unchanged.
+  const taxCurrency: CurrencyCode = TAX_CURRENCIES.includes(currency) ? currency : 'usd'
+  // FX rate: how many units of the reporting currency one USD buys. Read from
+  // the dedicated FX ladder (lib/prices.ts); USD itself is identity.
   const taxFxRate = useMemo(() => {
-    if (currency === 'usd') return 1.0
-    const direct = fiat.usdt[currency]
-    if (Number.isFinite(direct) && direct > 0) return direct
-    const nim = fiat.nim[currency]
-    const nimUsd = fiat.nim['usd']
-    if (Number.isFinite(nim) && nim > 0 && Number.isFinite(nimUsd) && nimUsd > 0) {
-      return nim / nimUsd
-    }
-    return 1.0
-  }, [fiat, currency])
+    if (taxCurrency === 'usd') return 1.0
+    const direct = fxTable[taxCurrency]
+    // A nonsensical or unknown rate never wipes out the figures: fall back to
+    // raw USD (rate 1), matching lib/tax's own guard.
+    return hasRate(direct) ? direct : 1.0
+  }, [fxTable, taxCurrency])
 
   // Crypto tax (FIFO). The first figures show a spinner. After that the report
   // follows the books: while the tax card is on screen, a change to the
@@ -3959,7 +4101,7 @@ export default function App() {
     if (view !== 'export') return
     const own = account?.nimiqAddress
     if (!own || taxBusy) return
-    const sameCurrency = taxReport?.currency === currency
+    const sameCurrency = taxReport?.currency === taxCurrency
     const built = taxBuiltRef.current
     if (sameCurrency && built && built.txs === allTxs && built.rate === taxFxRate) return
     // A report already on screen in this currency is replaced quietly.
@@ -3973,7 +4115,7 @@ export default function App() {
         if (run !== taxRunRef.current) return
         taxPricesRef.current = { ...taxPricesRef.current, ...fetched }
         taxBuiltRef.current = { txs, rate }
-        setTaxReport(computeFifoGains(txs, own, taxPricesRef.current, currency, rate))
+        setTaxReport(computeFifoGains(txs, own, taxPricesRef.current, taxCurrency, rate))
       })
       .catch(() => {
         if (!silent && run === taxRunRef.current) {
@@ -3983,7 +4125,7 @@ export default function App() {
       .finally(() => {
         if (!silent && run === taxRunRef.current) setTaxBusy(false)
       })
-  }, [view, account?.nimiqAddress, allTxs, taxReport, taxBusy, currency, taxFxRate])
+  }, [view, account?.nimiqAddress, allTxs, taxReport, taxBusy, currency, taxCurrency, taxFxRate])
 
   const exportStatementCsv = () => {
     const e = csvExport('statement')
@@ -4679,10 +4821,10 @@ export default function App() {
     lang,
     currency,
     currencyFlag: cur.flag,
-    onCurrencyPicker: () => setCurrencyOpen(true),
-    balanceHero:
+    onCurrencyPicker: () => setCurrencyOpen(true),    balanceHero:
       nimBalance === null ? '…' : `${formatLuna(String(totalNimLuna), lang)} NIM`,
     totalValueFiat: formatFiat(totalFiat, currency),
+    totalValueNote: totalFiatSubNote,
     nimBalance,
     // Luna, like every other figure on the balance card (the classic Balance
     // details row shows the same retireable stake).
@@ -4746,13 +4888,19 @@ export default function App() {
                     onClick={() => setCurrencyOpen(true)}
                     title="Change display currency"
                   >
-                    <img
-                      className="chip-flag"
-                      src={`/flags/flag-${cur.flag}.svg`}
-                      alt=""
-                      width={16}
-                      height={16}
-                    />
+                    {cur.flag ? (
+                      <img
+                        className="chip-flag"
+                        src={`/flags/flag-${cur.flag}.svg`}
+                        alt=""
+                        width={16}
+                        height={16}
+                      />
+                    ) : (
+                      <span className="chip-flag currency-badge badge-sm" aria-hidden="true">
+                        {currency.toUpperCase()}
+                      </span>
+                    )}
                     <span className="chip-code">{currency.toUpperCase()}</span>
                     {/* Inline SVG, not a Unicode chevron — the glyph tofus on
                         some Android builds. */}
@@ -4775,6 +4923,11 @@ export default function App() {
                   </button>
                 </div>
                 <span className="value">{formatFiat(totalFiat, currency)}</span>
+                {totalFiatSubNote && (
+                  <span className="sub dim" data-probe="price-asof">
+                    {totalFiatSubNote}
+                  </span>
+                )}
               </div>
 
               <div className="card nim-tile" data-tour="balance">
@@ -5757,11 +5910,16 @@ export default function App() {
               <span className="label">Crypto tax (FIFO)</span>
               <p className="hint small">
                 Realized gains on a first-in-first-out basis, priced at each day's close and
-                reported in {CURRENCIES.find((c) => c.code === currency)?.label ?? currency.toUpperCase()}.
+                reported in {CURRENCIES.find((c) => c.code === taxCurrency)?.label ?? taxCurrency.toUpperCase()}.
                 History: DefiLlama, recent: CoinGecko. Figures for your records, not tax advice - confirm
                 with your professional.
               </p>
-              <p className="hint small">Reporting in {currency.toUpperCase()} · change in Overview</p>
+              <p className="hint small">Reporting in {taxCurrency.toUpperCase()} · change in Overview</p>
+              {currency !== taxCurrency && (
+                <p className="hint small" data-probe="tax-usd-note">
+                  Tax reports use USD for {currency.toUpperCase()} until historical exchange rates are added.
+                </p>
+              )}
               {taxBusy && <p className="empty">Computing gains…</p>}
               {!taxBusy && !taxReport && (
                 <p className="empty">No tax figures yet - they load with the dashboard data.</p>
@@ -6271,34 +6429,38 @@ export default function App() {
                 ✕
               </button>
             </div>
-            <div className="currency-grid" role="radiogroup" aria-label="Display currency">
-              {CURRENCIES.map((c) => (
-                // Buttons rather than <input type="radio">: tapping the tile
-                // that is already selected has to dismiss the sheet too, and a
-                // radio fires no change event for that.
-                <button
-                  key={c.code}
-                  type="button"
-                  role="radio"
-                  aria-checked={c.code === currency}
-                  className={c.code === currency ? 'currency-tile selected' : 'currency-tile'}
-                  onClick={() => pickCurrency(c.code)}
-                >
-                  <span className="currency-flag" aria-hidden="true">
-                    <img
-                      src={`/flags/flag-${c.flag}.svg`}
-                      alt=""
-                      loading="lazy"
-                      width={28}
-                      height={28}
-                    />
-                  </span>
-                  <span className="currency-code">{c.label}</span>
-                </button>
-              ))}
+            <input
+              className="currency-search"
+              type="search"
+              placeholder="Search by code or name"
+              aria-label="Search display currencies"
+              value={currencyQuery}
+              onChange={(e) => setCurrencyQuery(e.target.value)}
+            />
+            <div className="currency-scroll">
+              {currencyMatches ? (
+                <div className="currency-grid" role="radiogroup" aria-label="Search results">
+                  {currencyMatches.map(currencyTile)}
+                </div>
+              ) : (
+                <>
+                  <h3 className="currency-section">Popular</h3>
+                  <div className="currency-grid" role="radiogroup" aria-label="Popular currencies">
+                    {POPULAR_CURRENCIES.map(currencyTile)}
+                  </div>
+                  <h3 className="currency-section">All currencies</h3>
+                  <div className="currency-grid" role="radiogroup" aria-label="All currencies">
+                    {OTHER_CURRENCIES.map(currencyTile)}
+                  </div>
+                </>
+              )}
+              {currencyMatches && currencyMatches.length === 0 && (
+                <p className="hint small">No currency matches "{currencyQuery.trim()}".</p>
+              )}
             </div>
             <p className="hint small">
-              Display only: CSV exports and the tax-year statement stay in USD.
+              Display only: CSV exports and the tax-year statement stay in USD. Exchange rates:
+              Nimiq, currency-api and ExchangeRate-API.
             </p>
           </div>
         </div>
@@ -6596,9 +6758,14 @@ export default function App() {
                     </div>
                     <span className="hint small">
                       {stakeAmountValid
-                        ? `≈ ${formatFiat(stakeAmountNim * shown.nim, currency)} · ${Math.round(
-                            stakeAmountNim * 100000
-                          ).toLocaleString(lang)} Luna`
+                        ? hasRate(shown.nim)
+                          ? `≈ ${formatFiat(stakeAmountNim * shown.nim, currency)} · ${Math.round(
+                              stakeAmountNim * 100000
+                            ).toLocaleString(lang)} Luna`
+                          : // Unknown price: the fiat approximation hides; the
+                            // Luna total still tells the amount, and no $0.00
+                            // may appear in its place.
+                            `${Math.round(stakeAmountNim * 100000).toLocaleString(lang)} Luna · price unavailable`
                         : !hasStaker && stakeMaxNim < MIN_STAKE_NIM
                           ? `${MIN_STAKE_COPY} This wallet holds ${formatLuna(String(stakeMaxLuna), lang)} NIM.`
                           : // A typed amount can land under the first-stake
@@ -6978,7 +7145,10 @@ export default function App() {
                 ) : (
                   <span className="hint small">
                     {sendLuna
-                      ? `≈ ${formatFiat((Number(sendLuna) / 100000) * shown.nim, currency)} · available ${formatLuna(String(sendMaxLuna), lang)} NIM`
+                      ? hasRate(shown.nim)
+                        ? `≈ ${formatFiat((Number(sendLuna) / 100000) * shown.nim, currency)} · available ${formatLuna(String(sendMaxLuna), lang)} NIM`
+                        : // Unknown price: no fiat approximation is invented.
+                          `Available to send: ${formatLuna(String(sendMaxLuna), lang)} NIM`
                       : `Available to send: ${formatLuna(String(sendMaxLuna), lang)} NIM`}
                   </span>
                 )}
