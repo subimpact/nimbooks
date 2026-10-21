@@ -7,7 +7,7 @@
 // Badge text. Spelled out rather than built from a version constant so the exact
 // label ships as one string in the bundle (JSX would emit "v" as a separate node).
 // package.json carries the machine-readable version.
-export const APP_VERSION_LABEL = 'v1.34.0'
+export const APP_VERSION_LABEL = 'v1.35.0'
 
 export interface ChangelogEntry {
   version: string
@@ -17,9 +17,10 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
-    version: '1.34.0',
+    version: '1.35.0',
     date: '2026-10-21',
     items: [
+      'Analytics is shorter: the daily net flow and your balance over time now share one chart card. The two small icons at its top right switch between the bars and the balance line, and NimBooks remembers your pick',
       "New look (beta): a redesigned Earn card and yield calculator you can switch on at the top of this window. Classic stays the default, and you can switch back any time",
       "The Earn card now gives you three reasons to come back: the rewards earned since your last visit, what the chain actually paid you over the last month next to the pool's estimate, and what each validator has earned you all time (per pool, collapsed until you open it)",
       'A received payment that leaves NIM idle now asks "Stake it?" - with what it could earn in a year, one tap to stake just that payment, and Not now when you would rather not',

@@ -306,6 +306,24 @@ export default function Analytics({
   // pure focus state — it is clamped to the new range on a period switch, not
   // carried by day. Only drawn while the chart holds focus, so the tap path
   // looks exactly as it did before.
+  // One chart card, two views: the daily net flow (bars) or the balance line.
+  // The choice is remembered on this device; bars are the default because the
+  // tour and the explainer walk through them.
+  const [chartView, setChartView] = useState<'flow' | 'balance'>(() => {
+    try {
+      return localStorage.getItem('nimbooks:analytics:chart') === 'balance' ? 'balance' : 'flow'
+    } catch {
+      return 'flow'
+    }
+  })
+  const pickChartView = (v: 'flow' | 'balance') => {
+    setChartView(v)
+    try {
+      localStorage.setItem('nimbooks:analytics:chart', v)
+    } catch {
+      /* storage unavailable: the choice lasts for this session */
+    }
+  }
   const [cursor, setCursor] = useState(-1)
   const [chartFocus, setChartFocus] = useState(false)
   // One clock for every derivation below, read once per mount instead of per
@@ -730,6 +748,42 @@ export default function Analytics({
   const TX_CAP = 50
   const TOP_N = 5
 
+  // The balance line needs at least two days; without them the card stays on
+  // the bars and the switch is not offered.
+  const canBalance = trajectory.length > 1
+  const view: 'flow' | 'balance' = canBalance ? chartView : 'flow'
+  const chartToggle = canBalance ? (
+    <div className="chart-toggle" role="group" aria-label="Chart view">
+      <button
+        type="button"
+        className={view === 'balance' ? 'chart-toggle-btn active' : 'chart-toggle-btn'}
+        aria-pressed={view === 'balance'}
+        aria-label="Balance over time (line chart)"
+        title="Balance over time"
+        onClick={() => pickChartView('balance')}
+      >
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M4 4v16h16" />
+          <path d="M7 15l4-5 3 3 5-6" />
+        </svg>
+      </button>
+      <button
+        type="button"
+        className={view === 'flow' ? 'chart-toggle-btn active' : 'chart-toggle-btn'}
+        aria-pressed={view === 'flow'}
+        aria-label="Daily net flow (bar chart)"
+        title="Daily net flow"
+        onClick={() => pickChartView('flow')}
+      >
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M6 20V11" />
+          <path d="M12 20V5" />
+          <path d="M18 20v-6" />
+        </svg>
+      </button>
+    </div>
+  ) : null
+
   return (
     <section className="analytics" data-learn="analytics">
       <div className="analytics-head">
@@ -804,11 +858,15 @@ export default function Analytics({
         </button>
       </div>
 
+      {view === 'flow' && (
       <div className="card chart-card">
+        <div className="chart-head">
         <span className="label label-with-info">
           Daily net flow (NIM)
           <InfoIcon text="Received minus sent per day, from your indexed transactions. Faded bars are Nimiq Pay's internal HTLC transfers: NIM that leaves for a contract and comes back to you. Tap a bar to see that day's transactions. Rewards and staking moves are not included." />
         </span>
+        {chartToggle}
+        </div>
         <svg
           viewBox={`0 0 ${W} ${H}`}
           className="chart chart-tappable"
@@ -945,13 +1003,17 @@ export default function Analytics({
         )}
         {flowFlat && <p className="hint small">No significant daily flow in this period</p>}
       </div>
+      )}
 
-      {trajectory.length > 1 && (
+      {view === 'balance' && (
         <div className="card chart-card">
+          <div className="chart-head">
           <span className="label label-with-info">
             Available balance trajectory (NIM, end of day)
             <InfoIcon text="Your available balance, including funds in transit (HTLC), at the end of each day. Reconstructed from your transaction history, one point per day, so a busy day reads as its net move. Staking rewards are not included." />
           </span>
+          {chartToggle}
+          </div>
           <svg viewBox={`0 0 ${W} ${H}`} className="chart" role="img" aria-label="Balance trajectory chart">
             <defs>
               <linearGradient id="trajFill" x1="0" y1="0" x2="0" y2="1">

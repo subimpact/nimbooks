@@ -178,7 +178,7 @@ export const FEATURES: FeatureDef[] = [
       },
       {
         title: 'Check who you deal with',
-        body: 'Top senders and top recipients list the five biggest counterparties, each with its share. The balance line shows your balance day by day.',
+        body: 'Top senders and top recipients list the five biggest counterparties, each with its share. The line icon at the top right of the chart switches it to your balance, day by day.',
       },
     ],
     behindTheScenes: [
