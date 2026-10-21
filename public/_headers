@@ -21,6 +21,11 @@
 #                            rpc.nimiqwatch.com          balances, history, staker records
 #                            v2.nimiqwatch.com           staking reward events
 #                            api.coingecko.com           fiat rates and daily closes
+#                            coins.llama.fi              prices (crypto tier and daily closes)
+#                            prices.nim.sh               Nimiq's own price service (crypto tier)
+#                            firestore.googleapis.com    Nimiq Wallet's FX table (FX tier)
+#                            cdn.jsdelivr.net           currency-api FX table (FX tier)
+#                            open.er-api.com            ExchangeRate-API FX table (FX tier)
 #                            validators-api-main…        validator list, fees, reliability
 #                            the five EVM public RPCs viem defaults to
 #                          plus 'self' for /api/shorten, /api/export-link,
@@ -31,4 +36,4 @@
 # Deliberately NO frame-ancestors: Nimiq Pay's WebView frames this app, and
 # restricting ancestors would break the mini app it ships as.
 /*
-  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://cloudflareinsights.com https://rpc.nimiqwatch.com https://v2.nimiqwatch.com https://api.coingecko.com https://coins.llama.fi https://validators-api-main.je-cf9.workers.dev https://polygon.drpc.org https://mainnet.base.org https://arb1.arbitrum.io https://mainnet.optimism.io https://ethereum.reth.rs; frame-src https://hub.nimiq.com; object-src 'none'; base-uri 'self'
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://cloudflareinsights.com https://rpc.nimiqwatch.com https://v2.nimiqwatch.com https://api.coingecko.com https://coins.llama.fi https://prices.nim.sh https://firestore.googleapis.com https://cdn.jsdelivr.net https://open.er-api.com https://validators-api-main.je-cf9.workers.dev https://polygon.drpc.org https://mainnet.base.org https://arb1.arbitrum.io https://mainnet.optimism.io https://ethereum.reth.rs; frame-src https://hub.nimiq.com; object-src 'none'; base-uri 'self'

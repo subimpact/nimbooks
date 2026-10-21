@@ -1,6 +1,6 @@
 # NimBooks privacy
 
-_Last updated 17 October 2026 (v1.29.0)._
+_Last updated 22 October 2026 (v1.37.0)._
 
 The short version:
 - **No account and no keys.** Your wallet signs everything; NimBooks never sees a private key.
@@ -27,7 +27,7 @@ address you connect:
 | An unstake you started, until the chain finishes it | `nimbooks:pendingUnstake:<address>` |
 | Portfolio address list, currency, theme, session | `nimbooks:portfolio:addresses`, `nimbooks:currency`, … |
 | Nimiq Pay's device ID, so your currency is remembered per device | `nimbooks:deviceId`, `nimbooks:d:<id>:currency` |
-| Caches (history, prices, validators, rewards) | `nimbooks:txs:*`, `nimbooks:rates`, … |
+| Caches (history, prices, validators, rewards) | `nimbooks:txs:*`, `nimbooks:rates`, `nimbooks:fx`, … |
 | Nimiq Pay's settled payment contracts, so their history loads once | `nimbooks:htlc-archive:<address>` |
 | Your counting choice and backup reminder | `nimbooks:connect-count`, `nimbooks:backup-state` |
 | When you last visited, so the Earn card can show your rewards since then | `nimbooks:last-visit:<address>` |
@@ -105,12 +105,20 @@ device calls it.
 | Google Fonts | the app's typefaces | that a page loaded the fonts |
 | `rpc.nimiqwatch.com`, `v2.nimiqwatch.com` | balances, history, staker record, rewards | the Nimiq addresses you look up |
 | Validators API | validator fees, reliability, yields | nothing about you |
-| CoinGecko, DefiLlama | prices | nothing about you |
+| CoinGecko, DefiLlama, `prices.nim.sh` | prices (Nimiq's own price service first, then DefiLlama and CoinGecko as backups) | nothing about you |
 | EVM public RPCs (Polygon, Base, Arbitrum, Optimism, Ethereum) | USDT and native balances | your EVM address |
 | Nimiq Hub (`hub.nimiq.com`) | browser sign-in and signing | what you sign there |
 | short.io | short links for receipts and payment requests you share | the shared link, including its contents |
 
 NimBooks sets no cookies of its own.
+
+FX rates for the display currencies come from a chain of three sources, tried
+in order: the Nimiq Wallet's own exchange-rate table
+(`firestore.googleapis.com`), then the currency-api data served by
+`cdn.jsdelivr.net`, then ExchangeRate-API (`open.er-api.com`). Each is a
+plain GET carrying nothing but the request itself - no address, no user data
+- and whichever answers first fills the table. ExchangeRate-API's terms ask
+for a credit: **FX rates from [ExchangeRate-API](https://www.exchangerate-api.com)**.
 
 ## Your wallet and your keys
 
