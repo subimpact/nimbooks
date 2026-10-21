@@ -376,7 +376,13 @@ async function buildFx(selectedCurrency: string | undefined): Promise<{ table: F
 export async function getAllFiatRatesImpl(selectedCurrency?: string): Promise<PriceChainResult> {
   const cryptoCache = readCryptoCache()
 
-  const fx = await buildFx(selectedCurrency)
+  // A fresh cached FX table (60 min) answers without the network, like the
+  // 5-minute crypto cache does for asset prices.
+  const fxCache = readFxCache()
+  const fx =
+    fxCache && Date.now() - fxCache.at < FX_CACHE_TTL && !hasGaps(fxCache.table)
+      ? { table: fxCache.table, source: fxCache.source, at: fxCache.at }
+      : await buildFx(selectedCurrency)
 
   // Crypto: a fresh full cache answers without touching the network.
   const fresh = (a: RateAsset) => {
