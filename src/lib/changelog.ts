@@ -7,7 +7,7 @@
 // Badge text. Spelled out rather than built from a version constant so the exact
 // label ships as one string in the bundle (JSX would emit "v" as a separate node).
 // package.json carries the machine-readable version.
-export const APP_VERSION_LABEL = 'v1.36.0'
+export const APP_VERSION_LABEL = 'v1.36.1'
 
 export interface ChangelogEntry {
   version: string
@@ -17,10 +17,11 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
-    version: '1.36.0',
+    version: '1.36.1',
     date: '2026-10-21',
     items: [
       'New look (beta) rebuilt on shadcn: a sidebar and bottom tab layout, a new Overview with a collapsible Earn card, and the yield calculator as a bottom sheet. Classic stays the default',
+      'New look (beta): the Analytics labels, chart title and footnote were nearly invisible (the beta and classic styles disagreed on one colour). They are readable again in both themes',
       'Gold buttons, the active tab and the period chips are easier to read: dark text on gold instead of white (contrast 7.8:1, up from 1.9:1)',
       'Analytics is shorter: the daily net flow and your balance over time now share one chart card. The two small icons at its top right switch between the bars and the balance line, and NimBooks remembers your pick',
       "The Earn card now gives you three reasons to come back: the rewards earned since your last visit, what the chain actually paid you over the last month next to the pool's estimate, and what each validator has earned you all time (per pool, collapsed until you open it)",

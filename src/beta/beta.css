@@ -204,6 +204,22 @@
 }
 .ui-beta .classic-in-beta {
   font-family: var(--font-sans);
+  /* Unported classic screens render inside the beta shell, but classic and
+     the shadcn kit share token names with different meanings. Kit --muted is
+     a background, classic --muted is label text: unmapped, classic labels
+     drew dark grey on a dark card (1.6:1). Map classic's names back to their
+     classic meaning, using the beta's neutral palette so no navy leaks in. */
+  --muted: var(--muted-foreground);
+  --text: var(--foreground);
+  --accent: var(--primary);
+  --accent-2: var(--primary);
+  --ring: 0 0 0 3px color-mix(in oklch, var(--primary) 35%, transparent);
+  --bg: var(--background);
+  --bg-elev: var(--card);
+  --card-2: var(--secondary);
+  --tab-border: var(--border);
+  --total-grad-2: var(--card);
+  color: var(--foreground);
 }
 
 /* The beta shell is full width: the classic .app column (max-width 480px,
