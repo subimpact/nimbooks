@@ -254,7 +254,7 @@ const RATES_KEY = 'nimbooks:rates'
 // chain.ts reads the same key to scope per-device preferences.
 const DEVICE_ID_KEY = 'nimbooks:deviceId'
 
-// Written by lib/prices.ts: { asset: { rates: {usd,myr,eur,…}, at } } — the
+// Written by lib/prices.ts: { asset: { rates: {usd,myr,eur,…}, at } } - the
 // per-asset rate cache the UI preloads from, plus 'nimbooks:fx' for the
 // USD->currency table.
 interface RateCache {
@@ -1986,11 +1986,14 @@ export default function App() {
     let unknown = false
     // Priced off the same effective total as the NIM tile, so the two can
     // never disagree about how much the wallet holds. An asset with a
-    // balance but no usable price makes the WHOLE total unknown - it can
-    // never silently become 0 and read as $0.00.
-    if (nimBalance !== null) {
-      if (hasRate(shown.nim)) total += (totalNimLuna / 100000) * shown.nim
-      else if (totalNimLuna > 0) unknown = true
+    // balance but no usable price makes the WHOLE total unknown - and when
+    // the price itself is unknown the total is unknown even while the
+    // balance is still loading: it can never silently become 0 and read as
+    // $0.00.
+    if (hasRate(shown.nim)) {
+      if (nimBalance !== null) total += (totalNimLuna / 100000) * shown.nim
+    } else if (nimBalance === null || totalNimLuna > 0) {
+      unknown = true
     }
     for (const b of evmBalances) {
       const val = Number(b.balance) / 10 ** b.decimals
