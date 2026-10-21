@@ -2884,6 +2884,76 @@ a.btn-ghost.btn-link {
 }
 
 /* Changelog modal */
+/* "New look (beta)" opt-in: the switch row at the top of the changelog
+   window, above the bug line, in both looks (it is the way back, so it
+   cannot live in the beta CSS). New class names only: classic screens are
+   untouched. */
+.beta-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.beta-toggle-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.beta-toggle-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+.beta-toggle-hint {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+/* The switch: a 48x28 track inside a 44px-tall tap target. */
+.beta-switch {
+  flex: none;
+  width: 48px;
+  height: 44px;
+  padding: 8px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  cursor: pointer;
+}
+.beta-switch-thumb {
+  display: block;
+  position: relative;
+  width: 32px;
+  height: 28px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--text) 25%, transparent);
+  transition: background var(--ease-nq) 0.2s;
+}
+.beta-switch-thumb::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--on-accent);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  transition: transform var(--ease-nq) 0.2s;
+}
+.beta-switch.on .beta-switch-thumb {
+  background: var(--gradient-gold);
+}
+.beta-switch.on .beta-switch-thumb::after {
+  transform: translateX(4px);
+}
+.beta-switch:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
 .changelog-feedback {
   font-size: 13px;
   line-height: 1.5;

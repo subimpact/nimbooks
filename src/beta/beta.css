@@ -1,0 +1,233 @@
+/* "New look (beta)": Tailwind v4, namespaced and scoped.
+ *
+ * Rules that keep the classic look pixel-exact for anyone who has not opted
+ * in (and for every classic screen inside a beta session):
+ *
+ *  - No global preflight: only the theme and utilities stylesheets are
+ *    imported, and all styling is scoped under .ui-beta, the root class every
+ *    beta screen and portal carries. Preflight would restyle elements classic
+ *    screens rely on, so it is never imported.
+ *  - The `tw` prefix (`tw:flex`) means no Tailwind utility can collide with a
+ *    classic class name. Tailwind emits its theme variables as --tw-* (the
+ *    prefix applies to theme variables too, hence the prefix modifier on the
+ *    theme import), so its :root tokens can shadow nothing App.css owns.
+ *  - Classic users download nothing: this whole file ships inside the lazily
+ *    imported beta chunk (src/beta/index.ts), separate from the main CSS.
+ *
+ * Tokens are the Nimiq palette from App.css under beta- names. They are set
+ * on .ui-beta, not :root (nothing leaks globally), and utilities reference
+ * them as arbitrary values (tw:bg-[var(--color-beta-card)]), which resolve
+ * per element, so the light block below re-points them under the app's own
+ * light selector.
+ */
+
+@layer theme, base, components, utilities;
+@import 'tailwindcss/theme.css' layer(theme) prefix(tw);
+@import 'tailwindcss/utilities.css' layer(utilities) prefix(tw);
+
+/* Scoped base, in place of Tailwind's global preflight: only what the beta
+   components actually need, never leaving .ui-beta. */
+.ui-beta {
+  /* Shadcn-style semantic tokens, the Nimiq palette (dark defaults). */
+  --color-beta-bg: #151833;
+  --color-beta-card: #1f2348;
+  --color-beta-card-2: #282d5c;
+  --color-beta-fg: #ffffff;
+  --color-beta-muted: rgba(255, 255, 255, 0.65);
+  --color-beta-border: rgba(255, 255, 255, 0.12);
+  --color-beta-primary: #e9b213;
+  --color-beta-primary-fg: #ffffff;
+  --color-beta-green: #21bca5;
+  --color-beta-red: #d94432;
+  --color-beta-blue: #0582ca;
+
+  --beta-radius: 16px;
+  --beta-radius-sm: 10px;
+  --beta-gold-light: #f6bc41;
+  --beta-ring: 0 0 0 3px rgba(233, 178, 19, 0.35);
+
+  color: var(--color-beta-fg);
+  font-family: inherit;
+  line-height: 1.45;
+}
+.ui-beta,
+.ui-beta *,
+.ui-beta *::before,
+.ui-beta *::after {
+  box-sizing: border-box;
+}
+.ui-beta button,
+.ui-beta input,
+.ui-beta select {
+  font: inherit;
+  color: inherit;
+}
+.ui-beta button {
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.ui-beta button:focus-visible,
+.ui-beta [role='switch']:focus-visible {
+  outline: none;
+  box-shadow: var(--beta-ring);
+}
+.ui-beta a:focus-visible {
+  outline: none;
+  box-shadow: var(--beta-ring);
+  border-radius: 4px;
+}
+.ui-beta :focus:not(:focus-visible) {
+  box-shadow: none;
+}
+
+/* Light theme: same semantic names under the app's own light selector. */
+:root[data-theme='light'] .ui-beta {
+  --color-beta-bg: #f2f4f8;
+  --color-beta-card: #ffffff;
+  --color-beta-card-2: #eef1f7;
+  --color-beta-fg: #1f2348;
+  --color-beta-muted: rgba(31, 35, 72, 0.65);
+  --color-beta-border: rgba(31, 35, 72, 0.1);
+
+  --beta-ring: 0 0 0 3px rgba(233, 178, 19, 0.25);
+}
+/* Switch states (see ui/Switch.tsx) */
+.ui-beta .beta-switch-track {
+  display: block;
+  position: relative;
+  width: 32px;
+  height: 28px;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--color-beta-fg) 25%, transparent);
+  transition: background 0.2s var(--ease-nq);
+}
+.ui-beta .beta-switch[data-state='checked'] .beta-switch-track {
+  background: var(--gradient-gold);
+}
+.ui-beta .beta-switch-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  display: block;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--color-beta-primary-fg);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  transition: transform 0.2s var(--ease-nq);
+}
+.ui-beta .beta-switch[data-state='checked'] .beta-switch-knob {
+  transform: translateX(4px);
+}
+
+/* The beta shell's topbar stays the classic component, but carries one extra
+   class in beta only: the longer "... beta" badge needs a little width back
+   or the bar overflows a 390px viewport. Inert in classic: the class is only
+   set while beta is on, and this stylesheet only loads then. */
+.beta-shell .version-badge {
+  padding-inline: 6px;
+}
+
+/* The drawer's grab handle */
+.ui-beta .beta-drawer-handle {
+  display: block;
+  position: relative;
+  width: 36px;
+  height: 5px;
+  margin: 0 auto 12px;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--color-beta-fg) 30%, transparent);
+  touch-action: pan-y;
+}
+
+/* Per-validator earnings disclosure on the beta Earn card */
+.ui-beta .beta-earn-validators {
+  margin: 12px 0;
+  font-size: 13px;
+}
+.ui-beta .beta-earn-validators summary {
+  font-weight: 600;
+  color: var(--color-beta-muted);
+  cursor: pointer;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  list-style: none;
+}
+/* display:flex drops the native disclosure marker, so draw one: without it the
+   collapsed label reads as an empty section. */
+.ui-beta .beta-earn-validators summary::-webkit-details-marker {
+  display: none;
+}
+.ui-beta .beta-earn-validators summary::after {
+  content: '';
+  width: 8px;
+  height: 8px;
+  margin-right: 4px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg);
+  transition: transform 150ms ease;
+}
+.ui-beta .beta-earn-validators[open] summary::after {
+  transform: rotate(-135deg);
+}
+.ui-beta .beta-earn-validators ul {
+  list-style: none;
+  padding: 0;
+  margin: 4px 0 0;
+}
+.ui-beta .beta-earn-validators li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--color-beta-border);
+}
+.ui-beta .beta-earn-validators li span {
+  color: var(--color-beta-fg);
+  font-weight: 600;
+}
+.ui-beta .beta-earn-validators li span + span {
+  color: var(--color-beta-muted);
+  font-weight: 400;
+  text-align: right;
+}
+
+/* Calculator form controls: 16px text so iOS never zooms, 44px tall */
+.ui-beta .beta-input {
+  min-height: 44px;
+  padding: 10px 12px;
+  font-size: 16px;
+  border-radius: var(--beta-radius-sm);
+  border: 1px solid var(--color-beta-border);
+  background: var(--color-beta-card-2);
+  color: var(--color-beta-fg);
+  width: 100%;
+}
+.ui-beta .beta-input:focus-visible {
+  outline: none;
+  border-color: var(--color-beta-primary);
+}
+.ui-beta .beta-calc-table {
+  width: 100%;
+  margin-top: 12px;
+  font-size: 14px;
+  border-collapse: collapse;
+}
+.ui-beta .beta-calc-table th,
+.ui-beta .beta-calc-table td {
+  padding: 6px 4px;
+  text-align: right;
+  border-bottom: 1px solid var(--color-beta-border);
+}
+.ui-beta .beta-calc-table th:first-child,
+.ui-beta .beta-calc-table td:first-child {
+  text-align: left;
+}
+.ui-beta .beta-calc-table th {
+  font-weight: 600;
+  color: var(--color-beta-muted);
+}

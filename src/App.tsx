@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from 'react'
 import './App.css'
 import HeroBackground from './HeroBackground'
 import Iqon from './Iqon'
@@ -161,6 +161,15 @@ import { rewardsByValidator, rewardsSince, stakeNudge as pickStakeNudge, trailin
 import { splitHtlcFlows } from './lib/htlcFlows'
 import EarnCard from './EarnCard'
 import YieldCalculator from './YieldCalculator'
+import { setUiMode, useUiMode } from './lib/uiMode'
+
+// The "New look (beta)" screens: shadcn-style ports behind a dynamic import, so
+// classic sessions (the default) never download Tailwind, Radix or vaul. The
+// classic component inside is the Suspense fallback while the chunk loads.
+const BetaEarnCard = lazy(() => import('./beta').then((m) => ({ default: m.BetaEarnCard })))
+const BetaYieldCalculator = lazy(() =>
+  import('./beta').then((m) => ({ default: m.BetaYieldCalculator }))
+)
 import {
   advanceNext,
   dismissOffer,
@@ -814,6 +823,9 @@ export default function App() {
   // here (see lib/stakingLog.ts). Address-scoped and reloaded on switch, like
   // the pending marker above.
   const [stakingLog, setStakingLog] = useState<StakingAction[]>([])
+  // "New look (beta)" opt-in: classic stays the default. The mode swaps the
+  // two ported screens in place (no reload) and flips the toggle and badge.
+  const uiBeta = useUiMode() === 'beta'
   useEffect(() => {
     const addr = account?.nimiqAddress
     setStakingLog(addr ? loadStakingLog(addr) : [])
@@ -4052,8 +4064,31 @@ export default function App() {
             ✕
           </button>
         </div>
+        {/* "New look (beta)" opt-in: at the top of this window, directly above
+            the bug line, in both looks. The switch is hand-rolled so it works
+            in classic too, before the beta chunk is ever loaded. */}
+        <div className="beta-toggle-row">
+          <div className="beta-toggle-text">
+            <span className="beta-toggle-label">New look (beta)</span>
+            <span className="beta-toggle-hint">
+              Try the redesigned screens. The Earn card and yield calculator are ready; the rest still use
+              the classic look.
+            </span>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={uiBeta}
+            aria-label="New look (beta)"
+            data-learn="beta"
+            className={uiBeta ? 'beta-switch on' : 'beta-switch'}
+            onClick={() => setUiMode(uiBeta ? 'classic' : 'beta')}
+          >
+            <span className="beta-switch-thumb" />
+          </button>
+        </div>
         <p className="changelog-feedback">
-          Report a bug or send feedback in the{' '}
+          {uiBeta ? 'Found something odd in the new look? Report it in the ' : 'Report a bug or send feedback in the '}
           <a href={FEEDBACK_TELEGRAM_URL} target="_blank" rel="noopener noreferrer">
             Telegram group
           </a>{' '}
@@ -4104,6 +4139,7 @@ export default function App() {
       aria-label="Version and changelog"
     >
       {APP_VERSION_LABEL}
+      {uiBeta ? ' beta' : ''}
     </button>
   )
 
@@ -4409,10 +4445,69 @@ export default function App() {
 
   const inNimiqPay = isInNimiqPay()
 
+  // One props object per ported screen, shared by the classic and the beta
+  // ("New look (beta)") render, so the two can never drift apart on inputs.
+  const earnCardProps: ComponentProps<typeof EarnCard> = {
+    stakedNim: activeStakeNim,
+    idleNim: stakeMaxNim,
+    hasStaker: earning,
+    rate: earnRate ?? null,
+    validatorName: earning ? (currentValidator?.name ?? null) : null,
+    compound: earnCompound,
+    minStakeNim: MIN_STAKE_NIM,
+    nimPrice: shown.nim,
+    currency: currency,
+    lang: lang,
+    onStake: () => {
+      openStake()
+      if (stakeMaxNim > 0) setStakeAmount(String(Math.floor(stakeMaxNim)))
+    },
+    onCalculator: () => setCalcOpen(true),
+    lastVisitMs: previousVisitMs,
+    rewardsSinceVisit: rewardsSincePreviousVisit,
+    trailing: actualYield,
+    validatorEarnings: validatorEarnings,
+  }
+  // In beta the classic card is the Suspense fallback while the beta chunk loads.
+  const earnCard = uiBeta ? (
+    <Suspense fallback={<EarnCard {...earnCardProps} />}>
+      <BetaEarnCard {...earnCardProps} />
+    </Suspense>
+  ) : (
+    <EarnCard {...earnCardProps} />
+  )
+  const calcProps: ComponentProps<typeof YieldCalculator> = {
+    validators: validators,
+    loading: validatorsLoading,
+    initialAmountNim: earning ? activeStakeNim : stakeMaxNim,
+    initialValidator: earning && currentValidator ? currentValidator.address : null,
+    nimPrice: shown.nim,
+    currency: currency,
+    lang: lang,
+    onClose: () => setCalcOpen(false),
+    availableNim: stakeMaxNim,
+    stakedNim: earning ? activeStakeNim : 0,
+    minStakeNim: MIN_STAKE_NIM,
+    onStake: (amountNim, validatorAddress) => {
+      setCalcOpen(false)
+      openStake()
+      setStakeAmount(String(amountNim))
+      // Only a first stake picks a pool; an existing staker keeps theirs.
+      if (!stakingHolding && validatorAddress) setSelectedValidator(cleanAddr(validatorAddress))
+    },
+  }
+  const calcUi = uiBeta ? (
+    <Suspense fallback={<YieldCalculator {...calcProps} />}>
+      <BetaYieldCalculator {...calcProps} />
+    </Suspense>
+  ) : (
+    <YieldCalculator {...calcProps} />
+  )
+
   return (
     <div className="app">
       <HeroBackground />
-      <header className="topbar">
+      <header className={uiBeta ? 'topbar beta-shell' : 'topbar'}>
         <div className="logo small">📒</div>
         <h1>NimBooks</h1>
         {versionBadge}
@@ -4637,27 +4732,7 @@ export default function App() {
             )}
 
             {/* Earning comes first: what the wallet earns now, or could. */}
-            <EarnCard
-              stakedNim={activeStakeNim}
-              idleNim={stakeMaxNim}
-              hasStaker={earning}
-              rate={earnRate ?? null}
-              validatorName={earning ? (currentValidator?.name ?? null) : null}
-              compound={earnCompound}
-              minStakeNim={MIN_STAKE_NIM}
-              nimPrice={shown.nim}
-              currency={currency}
-              lang={lang}
-              onStake={() => {
-                openStake()
-                if (stakeMaxNim > 0) setStakeAmount(String(Math.floor(stakeMaxNim)))
-              }}
-              onCalculator={() => setCalcOpen(true)}
-              lastVisitMs={previousVisitMs}
-              rewardsSinceVisit={rewardsSincePreviousVisit}
-              trailing={actualYield}
-              validatorEarnings={validatorEarnings}
-            />
+            {earnCard}
 
             {/* "Stake it?" - the second reason to come back, one tap from the
                 Earn card it extends. Hidden while the tour moves the page. */}
@@ -5858,28 +5933,7 @@ export default function App() {
 
       {changelogModal}
 
-      {calcOpen && (
-        <YieldCalculator
-          validators={validators}
-          loading={validatorsLoading}
-          initialAmountNim={earning ? activeStakeNim : stakeMaxNim}
-          initialValidator={earning && currentValidator ? currentValidator.address : null}
-          nimPrice={shown.nim}
-          currency={currency}
-          lang={lang}
-          onClose={() => setCalcOpen(false)}
-          availableNim={stakeMaxNim}
-          stakedNim={earning ? activeStakeNim : 0}
-          minStakeNim={MIN_STAKE_NIM}
-          onStake={(amountNim, validatorAddress) => {
-            setCalcOpen(false)
-            openStake()
-            setStakeAmount(String(amountNim))
-            // Only a first stake picks a pool; an existing staker keeps theirs.
-            if (!stakingHolding && validatorAddress) setSelectedValidator(cleanAddr(validatorAddress))
-          }}
-        />
-      )}
+      {calcOpen && calcUi}
 
       {extendedConfirmOpen && (
         <div className="modal-overlay" onClick={() => setExtendedConfirmOpen(false)}>
