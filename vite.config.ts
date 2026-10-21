@@ -1,5 +1,6 @@
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
+import tailwindcss from '@tailwindcss/vite'
 // @nimiq/core ships its wasm as an ES module import, which Vite only understands
 // with this plugin (the library's own `./vite` export — no extra dependency).
 // Only the lazily-imported Hub staking path pulls the wasm in; Pay users never
@@ -10,5 +11,5 @@ import { nimiq } from '@nimiq/core/vite'
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), nimiq()],
+  plugins: [react(), nimiq(), tailwindcss()],
 })

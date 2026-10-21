@@ -32,6 +32,7 @@ address you connect:
 | Your counting choice and backup reminder | `nimbooks:connect-count`, `nimbooks:backup-state` |
 | When you last visited, so the Earn card can show your rewards since then | `nimbooks:last-visit:<address>` |
 | Payments you declined to stake ("Not now"), so they are never offered twice | `nimbooks:stake-nudge-dismissed:<address>` |
+| Your choice of the New look (beta) or the classic look | `nimbooks:ui` |
 
 The device ID comes from Nimiq Pay and never leaves your device. Caches,
 including the payment-contract archive, are left out of backups because they
