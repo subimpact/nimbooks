@@ -1,5 +1,7 @@
 // Nimiq blockchain data client (RPC)
 
+import { CURRENCY_DATA } from './currencyData'
+
 const RPC_URL = 'https://rpc.nimiqwatch.com'
 
 export interface NimiqTx {
@@ -933,20 +935,27 @@ export async function getEvmBalances(address: string): Promise<EvmBalance[]> {
 
 // --- Fiat conversion ---
 
-// Display currencies offered by the currency switcher. CoinGecko returns all
-// of them in the one consolidated request, so an extra currency costs no extra
-// API call (and no extra 429 risk).
-// The same set as the Nimiq Wallet's currency picker (verified against
-// wallet.nimiq.com settings), minus CRC/GMD/GTQ/XOF — CoinGecko does not
-// publish those four, so they would always read 0.
-export type CurrencyCode =
-  | 'aed' | 'ars' | 'aud' | 'brl' | 'cad' | 'chf' | 'clp' | 'cny'
-  | 'czk' | 'dkk' | 'eur' | 'gbp' | 'hkd' | 'huf' | 'idr' | 'ils'
-  | 'inr' | 'jpy' | 'krw' | 'mxn' | 'myr' | 'ngn' | 'nok' | 'nzd'
-  | 'php' | 'pkr' | 'pln' | 'rub' | 'sek' | 'sgd' | 'thb' | 'try'
-  | 'twd' | 'uah' | 'usd' | 'vnd' | 'zar'
+// Display currencies offered by the currency switcher: all 148 rows of the
+// vetted list in currencyData.ts. The original 37 keep their exact label,
+// symbol and flag; every later row gets the uppercase code as its label, the
+// international symbol where it differs from the bare code ("AED " padding
+// where it does not, same pattern as the original AED entry), and no flag:
+// the picker and the chip render a neutral code badge for those instead of
+// an image that does not exist.
+export type CurrencyCode = string
 
-export const CURRENCIES: { code: CurrencyCode; label: string; symbol: string; flag: string }[] = [
+export interface CurrencyEntry {
+  code: CurrencyCode
+  label: string
+  symbol: string
+  flag?: string
+  name: string
+}
+
+// The original 37, in their long-standing order. Frozen exactly as shipped:
+// crypto prices were published for this set before the switch to the wider
+// list, and the tax report still speaks these codes (see TAX_CURRENCIES).
+const ORIGINAL_CURRENCIES: Omit<CurrencyEntry, 'name'>[] = [
   { code: 'aed', label: 'AED', symbol: 'AED ', flag: 'AE' },
   { code: 'ars', label: 'ARS', symbol: 'ARS ', flag: 'AR' },
   { code: 'aud', label: 'AUD', symbol: 'A$', flag: 'AU' },
@@ -986,7 +995,28 @@ export const CURRENCIES: { code: CurrencyCode; label: string; symbol: string; fl
   { code: 'zar', label: 'ZAR', symbol: 'R ', flag: 'ZA' },
 ]
 
-const VS_CURRENCIES = CURRENCIES.map((c) => c.code).join(',')
+/** Currencies tax reports can be computed in today (the original 37): the
+ *  historical daily FX needed for the wider list does not exist yet. */
+export const TAX_CURRENCIES: CurrencyCode[] = ORIGINAL_CURRENCIES.map((c) => c.code)
+
+// The Nimiq Wallet's own picker set (the 37 plus CRC/GMD/GTQ/XOF), kept in
+// its order: this is the "Popular" section of the currency picker.
+const WALLET_EXTRA: CurrencyCode[] = ['crc', 'gmd', 'gtq', 'xof']
+export const WALLET_CURRENCIES: CurrencyCode[] = [...TAX_CURRENCIES, ...WALLET_EXTRA]
+
+const ORIG_BY_CODE = new Map(ORIGINAL_CURRENCIES.map((c) => [c.code, c]))
+
+export const CURRENCIES: CurrencyEntry[] = CURRENCY_DATA.map((meta) => {
+  const orig = ORIG_BY_CODE.get(meta.code)
+  if (orig) return { ...orig, name: meta.name }
+  const up = meta.code.toUpperCase()
+  return {
+    code: meta.code,
+    label: up,
+    symbol: meta.intlSymbol !== up ? meta.intlSymbol : `${up} `,
+    name: meta.name,
+  }
+})
 
 export interface FiatRates {
   [code: string]: number
@@ -1037,7 +1067,10 @@ export function currencySymbol(code: CurrencyCode): string {
 // Currencies quoted without minor units — there is no such thing as 0.56 yen.
 // Rendering "¥1,234.56" is not a rounding nicety, it is the wrong number of
 // digits. Codes checked against the CURRENCIES list above.
-const ZERO_DECIMAL = new Set<CurrencyCode>(['clp', 'idr', 'jpy', 'krw', 'vnd'])
+const ZERO_DECIMAL = new Set<string>([
+  'clp', 'idr', 'jpy', 'krw', 'vnd',
+  ...CURRENCY_DATA.filter((c) => c.decimals === 0).map((c) => c.code),
+])
 
 /**
  * Money for display, grouped by the browser's locale so it lines up with the
@@ -1046,7 +1079,10 @@ const ZERO_DECIMAL = new Set<CurrencyCode>(['clp', 'idr', 'jpy', 'krw', 'vnd'])
  * pin the precision instead.
  */
 export function formatFiat(amount: number, code: CurrencyCode, decimals?: number): string {
-  const n = Number.isFinite(amount) ? amount : 0
+  // Unknown price (NaN from the rate chain) is never money: "$0.00" for a
+  // non-zero balance lies, "…" under-informs - say what is missing instead.
+  if (!Number.isFinite(amount)) return PRICE_UNAVAILABLE
+  const n = amount
   // Zero-decimal currencies ignore a pinned precision — a caller asking for 4
   // decimals wants "don't round this away", not "invent minor units for yen".
   // Below one whole unit they still get 2, since "¥0" for a real balance is
@@ -1062,10 +1098,29 @@ export function formatFiat(amount: number, code: CurrencyCode, decimals?: number
   })}`
 }
 
-const RATE_CACHE_KEY = 'nimbooks:rates'
-const CACHE_TTL = 5 * 60 * 1000 // 5 min
+/** Text shown wherever a price is wanted but the chain could not produce one. */
+export const PRICE_UNAVAILABLE = 'Price unavailable'
 
-function readRateCache(): Record<string, { rates: FiatRates; at: number }> {
+/** A usable rate: finite and positive. NaN or 0 marks "unknown" in the tables. */
+export function hasRate(rate: number | undefined | null): rate is number {
+  return typeof rate === 'number' && Number.isFinite(rate) && rate > 0
+}
+
+export const RATE_CACHE_KEY = 'nimbooks:rates'
+export const FX_CACHE_KEY = 'nimbooks:fx'
+export const CACHE_TTL = 5 * 60 * 1000 // 5 min
+
+// A live NIM price at or above this is a wrong-id response, not a rally: NIM
+// has never traded near a cent, and sits around $0.0004 today. The 365-day
+// statement uses a looser bound (lib/statement.ts) - it prices the past, where
+// a genuine high must not be silently dropped.
+export const NIM_MAX_PLAUSIBLE_USD = 0.01
+
+// The cache keys' format is shared with src/lib/prices.ts, which owns the
+// caches now (crypto per asset under 'nimbooks:rates', the FX table whole
+// under 'nimbooks:fx'). Reading the crypto cache is still needed here so the
+// UI can seed itself without a flash of $0.00.
+export function readRateCache(): Record<string, { rates: FiatRates; at: number }> {
   try {
     return JSON.parse(localStorage.getItem(RATE_CACHE_KEY) ?? '{}')
   } catch {
@@ -1073,83 +1128,14 @@ function readRateCache(): Record<string, { rates: FiatRates; at: number }> {
   }
 }
 
-function writeRateCache(cache: Record<string, { rates: FiatRates; at: number }>) {
-  try {
-    localStorage.setItem(RATE_CACHE_KEY, JSON.stringify(cache))
-  } catch {
-    /* storage unavailable */
-  }
+// The price chain itself (crypto tiers + FX ladder, caches included) lives in
+// src/lib/prices.ts. The name and the { nim, usdt, eth, pol } shape stay so
+// every caller keeps working; the result gains asOf and source info.
+export type { PriceChainResult } from './prices'
+export function getAllFiatRates(selectedCurrency?: CurrencyCode) {
+  return getAllFiatRatesImpl(selectedCurrency)
 }
-
-// Rates cached before a currency was added carry only the old keys; serving
-// them would leave the new currency reading 0 until the TTL expired.
-function hasAllCurrencies(rates: FiatRates | undefined): boolean {
-  return !!rates && CURRENCIES.every((c) => typeof rates[c.code] === 'number')
-}
-
-// A live NIM price at or above this is a wrong-id response, not a rally: NIM
-// has never traded near a cent, and sits around $0.0004 today. The 365-day
-// statement uses a looser bound (lib/statement.ts) — it prices the past, where
-// a genuine high must not be silently dropped.
-const NIM_MAX_PLAUSIBLE_USD = 0.01
-
-function pickRates(entry: any): FiatRates {
-  const rates: FiatRates = {}
-  for (const c of CURRENCIES) {
-    const v = entry?.[c.code]
-    rates[c.code] = typeof v === 'number' && Number.isFinite(v) ? v : 0
-  }
-  return rates
-}
-
-// Single consolidated CoinGecko request for all tracked assets — one call,
-// one cache entry. Prevents 429 rate-limit storms from 4 parallel requests.
-export async function getAllFiatRates(): Promise<Record<'nim' | 'usdt' | 'eth' | 'pol', FiatRates>> {
-  const cache = readRateCache()
-  const fresh = (a: string) => {
-    const c = cache[a]
-    return c && hasAllCurrencies(c.rates) && Date.now() - c.at < CACHE_TTL ? c.rates : null
-  }
-  const nim = fresh('nim')
-  const usdt = fresh('usdt')
-  const eth = fresh('eth')
-  const pol = fresh('pol')
-  if (nim && usdt && eth && pol) return { nim, usdt, eth, pol }
-
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 8000)
-  try {
-    const res = await fetch(
-      `https://api.coingecko.com/api/v3/simple/price?ids=nimiq-2,tether,ethereum,matic-network&vs_currencies=${VS_CURRENCIES}`,
-      { signal: controller.signal }
-    )
-    if (!res.ok) throw new Error(`CoinGecko HTTP ${res.status}`)
-    const json = await res.json()
-    const now = Date.now()
-    const out = {
-      nim: pickRates(json['nimiq-2']),
-      usdt: pickRates(json['tether']),
-      eth: pickRates(json['ethereum']),
-      pol: pickRates(json['matic-network']),
-    }
-    // Sanity clamp. CoinGecko's `nimiq` id (the retired NIM 1.0 listing) has
-    // served ~$0.0282 — 72× the real rate — and one bad id would put a 72×
-    // Total value in front of the user. NIM has never traded near a cent, so a
-    // USD price at or above that is bad data, not a rally: zero it, which the
-    // cache guard below reads as "no rates" and never stores.
-    if (!(out.nim.usd > 0 && out.nim.usd < NIM_MAX_PLAUSIBLE_USD)) out.nim = pickRates(null)
-    // Cache only if the response actually carried rates (avoid caching 429/empty)
-    if (out.nim.usd > 0) {
-      for (const k of ['nim', 'usdt', 'eth', 'pol'] as const) {
-        cache[k] = { rates: out[k], at: now }
-      }
-      writeRateCache(cache)
-    }
-    return out
-  } finally {
-    clearTimeout(timer)
-  }
-}
+import { getAllFiatRatesImpl } from './prices'
 
 // --- Validator registry (official Nimiq validators API) ---
 
