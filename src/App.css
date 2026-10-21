@@ -2036,6 +2036,44 @@ a.btn-ghost.btn-link {
   display: block;
   margin-top: 8px;
 }
+/* One chart card, two views: the label on the left, the line/bar switch on
+   the right (a small segmented pill, outline icons, the active side filled). */
+.chart-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.chart-toggle {
+  display: inline-flex;
+  flex-shrink: 0;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: transparent;
+}
+.chart-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.chart-toggle-btn.active {
+  background: var(--card-2);
+  color: var(--text);
+}
+.chart-toggle-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
 /* The whole plot area is the hit target — bars get down to ~3px wide on the
    "All" period, and zero-flow days draw no bar at all. */
 .chart-tappable {
