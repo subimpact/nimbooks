@@ -23,10 +23,11 @@ flowchart LR
     RPC["rpc.nimiqwatch.com<br/>balances, history, staker"]
     V2["v2.nimiqwatch.com<br/>staking reward events"]
     VAL["validators API<br/>fees, reliability, stake"]
-    PX["CoinGecko · DefiLlama<br/>prices"]
+    PX["prices.nim.sh · DefiLlama · CoinGecko<br/>crypto prices (tiered)"]
+    FX["Nimiq Wallet table · currency-api · er-api<br/>FX rates (tiered)"]
     EVM["EVM public RPCs<br/>USDT and native balances"]
   end
-  App --> RPC & V2 & VAL & PX & EVM
+  App --> RPC & V2 & VAL & PX & FX & EVM
 
   subgraph Edge["nimbooks.subimpact.net (Cloudflare Pages)"]
     FN["Functions<br/>/api/*, /export, /s"]
@@ -66,7 +67,9 @@ src/
 ├── Landing.tsx          Pre-connect feature explorer
 └── lib/
     ├── wallet.ts        The only file that talks to Pay or the Hub
-    ├── chain.ts         Nimiq RPC, prices, validators, tx classification, yield
+    ├── chain.ts         Nimiq RPC, price source names, validators, tx classification, yield
+    ├── prices.ts        The price chain: nim.sh -> DefiLlama -> CoinGecko crypto tiers;
+    │                    Nimiq Wallet table -> currency-api -> er-api FX tiers; NaN-as-unknown
     ├── yieldCalc.ts     Staking projection: compounding + issuance decline
     ├── stakingEvents.ts Reward rows from restake events
     ├── htlcFlows.ts     Nets Nimiq Pay's HTLC round trips out of real payments
@@ -108,6 +111,23 @@ Cloudflare Pages secrets and never reach the client bundle. What is kept, and
 why, is spelled out in [PRIVACY.md](PRIVACY.md).
 
 ## How the main flows work
+
+**Fiat prices.** `prices.ts` runs a tiered chain so the Total value tile is
+never reduced to $0.00 by one busy source. Crypto USD prices climb
+prices.nim.sh (Nimiq's own price service: NIM, ETH, MATIC, with USDT at
+$1), then DefiLlama in one consolidated call, then CoinGecko (USD only)
+- each tier is accepted only when it returns a plausible NIM price (any
+answer at or above $0.01 is bad data, not a rally), and assets a winning
+tier left out are filled from the next tier that has them. FX rates for the
+148 display currencies are the Nimiq Wallet's own exchange-rate table
+(Firestore), with anything missing filled from the currency-api data via
+jsDelivr, then ExchangeRate-API. A ~4 s timeout per request; every
+last-good result is cached with its timestamp (`nimbooks:rates` for
+per-asset tables, 5 minutes fresh; `nimbooks:fx` for the USD table, 60
+minutes fresh) and reused at any age when everything live fails - if the
+price is older than 30 minutes the tile shows "as of HH:MM". When no price
+exists at all, an unknown rate is stored as NaN, not 0, and the UI says
+"Price unavailable" instead of showing $0.00 for a non-zero balance.
 
 **Balances and history.** The app reads the address's balance, transactions
 and staker record from `rpc.nimiqwatch.com`. Nimiq Pay pays out of an HTLC

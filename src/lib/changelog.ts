@@ -7,7 +7,7 @@
 // Badge text. Spelled out rather than built from a version constant so the exact
 // label ships as one string in the bundle (JSX would emit "v" as a separate node).
 // package.json carries the machine-readable version.
-export const APP_VERSION_LABEL = 'v1.36.1'
+export const APP_VERSION_LABEL = 'v1.37.0'
 
 export interface ChangelogEntry {
   version: string
@@ -16,6 +16,16 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '1.37.0',
+    date: '2026-10-22',
+    items: [
+      "Total value never shows $0.00 when a price service is busy: the last known price stays on screen with its time, or the tile says Price unavailable",
+      'Prices now come from Nimiq\'s own price service first, with backups: DefiLlama and CoinGecko behind it, plus a ladder of exchange-rate tables for your display currency',
+      '148 display currencies with a searchable picker: type a code or a name ("peso" finds six), popular currencies first',
+      'Tax reports stay in USD for currencies added today until historical exchange rates are added',
+    ],
+  },
   {
     version: '1.36.1',
     date: '2026-10-21',

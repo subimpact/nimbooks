@@ -5,9 +5,14 @@ your stake earns and why, every reward in your history, and statements, tax
 files and proofs when you need them. It works inside Nimiq Pay and with Nimiq
 Wallet in any browser.
 
-_Last updated 21 October 2026. Dates are targets._
+_Last updated 22 October 2026. Dates are targets._
 
-## Shipped since Cycle 2 (v1.14 → v1.33)
+## Shipped since Cycle 2 (v1.14 → v1.37)
+
+**Prices and currencies (v1.37)**
+- Total value never shows $0.00 when a price service is busy: the last known price stays on screen, dated ("as of HH:MM") when older than 30 minutes, or "Price unavailable" when none exists.
+- Prices now come from Nimiq's own price service first (prices.nim.sh), with DefiLlama and CoinGecko as backups, and FX rates from the Nimiq Wallet's table with currency-api and ExchangeRate-API behind it.
+- 148 display currencies in a searchable picker (code or name), popular currencies first; tax reports stay in USD for currencies added today until historical exchange rates arrive.
 
 **Earning**
 - Earn card at the top of Overview: what your stake earns a year, or what idle NIM could earn at the median pool's rate (v1.28).
