@@ -1,6 +1,6 @@
 {
   "name": "nimbooks-mcp",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "description": "Read-only MCP server for your Nimiq books — balances, history, statements, and draft payment requests. Never signs.",
   "license": "MIT",
   "author": "Jeremy Lee",
@@ -36,7 +36,7 @@
   "scripts": {
     "prepublishOnly": "node build.mjs",
     "build": "node build.mjs",
-    "test": "node build.mjs && node build.mjs --tests && NIMBOOKS_MCP_NO_REWARDS=1 node --test dist-test/*.test.js",
+    "test": "node build.mjs && node build.mjs --tests && NIMBOOKS_MCP_NO_REWARDS=1 NIMBOOKS_MCP_NO_VALIDATORS=1 node --test dist-test/*.test.js",
     "smoke": "node build.mjs && node build.mjs --tests && NIMBOOKS_SMOKE=1 node dist-test/smoke.js",
     "typecheck": "tsc -p tsconfig.json"
   },

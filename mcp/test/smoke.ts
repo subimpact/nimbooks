@@ -158,6 +158,80 @@ await step('a bad address fails cleanly against the live endpoint', async () => 
   assert.match(text(res), /checksum/i)
 })
 
+// --- The 1.1 staking tools ---
+
+await step('get_staking reads the staked position', async () => {
+  const res = await client.callTool({ name: 'get_staking', arguments: {} })
+  assert.notEqual(res.isError, true, text(res))
+  const s = JSON.parse(text(res))
+  assert.equal(s.staked, true, 'the demo wallet is staked')
+  for (const k of ['activeLuna', 'inactiveLuna', 'retiredLuna', 'stakedLuna']) {
+    assert.ok(/^\d+$/.test(s[k]), `${k} is an integer Luna string: ${s[k]}`)
+    assert.ok(BigInt(s[k]) >= 0n, `${k} is >= 0`)
+  }
+  console.log(
+    `       active ${s.activeNim} NIM` +
+      (s.validator ? ` · ${s.validator.name}${s.validator.buildersPool ? ' (builders pool)' : ''}` : '') +
+      (s.estimate ? ` · first-year estimate ${s.estimate.firstYearRewardsNim} NIM` : '')
+  )
+  // Validity, not shape: if the pool details came back, the yield must be
+  // a positive number and ImpactZero must be recognised.
+  if (s.validator && s.validator.buildersPool !== null) {
+    assert.equal(typeof s.validator.netYieldPercent, 'number')
+    assert.equal(s.validator.buildersPool, true, 'the demo wallet stakes to the builders pool')
+  }
+})
+
+await step('list_validators returns the neutral order and the builders pool', async () => {
+  const res = await client.callTool({ name: 'list_validators', arguments: {} })
+  assert.notEqual(res.isError, true, text(res))
+  const s = JSON.parse(text(res))
+  assert.ok(Array.isArray(s.validators) && s.validators.length >= 10, 'at least 10 pools came back')
+  // The order obeys the rule: producing first, then descending yield, then
+  // non-producing; the name only breaks exact ties, so check the groups.
+  const firstNonProducing = s.validators.findIndex((v: any) => !v.producing)
+  if (firstNonProducing !== -1) {
+    assert.ok(s.validators.slice(0, firstNonProducing).every((v: any) => v.producing), 'producing pools come first')
+    const producing = s.validators.slice(0, firstNonProducing)
+    for (let i = 1; i < producing.length; i++) {
+      const a = producing[i - 1].netYieldPercent ?? -1
+      const b = producing[i].netYieldPercent ?? -1
+      assert.ok(a >= b, `producing order: ${a} >= ${b} (${producing[i - 1].name} then ${producing[i].name})`)
+    }
+  }
+  const pool = s.validators.find((v: any) => v.buildersPool === true)
+  assert.ok(pool, 'ImpactZero is in the list with buildersPool true')
+  assert.match(pool.name, /ImpactZero/)
+  await client.callTool({ name: 'list_validators', arguments: {} }) // memo path: the server must not refetch per call
+  console.log(
+    `       ${s.validators.length} pools · typical ${s.typicalYieldPercent}% · builders pool: ${pool.name} at rank ${pool.rank}`
+  )
+})
+
+await step('project_yield projects with the typical rate, offline-free', async () => {
+  const res = await client.callTool({ name: 'project_yield', arguments: { amountNim: '1000', years: 3 } })
+  assert.notEqual(res.isError, true, text(res))
+  const s = JSON.parse(text(res))
+  assert.equal(s.rateSource, 'the median of producing pools')
+  assert.ok(s.totals.totalRewardsNim > 0, 'a projection of 1000 NIM earns something')
+  assert.equal(s.perYear.length, 3)
+  console.log(
+    `       1000 NIM, 3 years, rate ${s.ratePercent}% (${s.rateSource}): ${s.totals.totalRewardsNim} NIM`
+  )
+})
+
+await step('get_rewards sums the year for the demo wallet', async () => {
+  const res = await client.callTool({ name: 'get_rewards', arguments: {} })
+  assert.notEqual(res.isError, true, text(res))
+  const s = JSON.parse(text(res))
+  assert.ok(s.rewardDays >= 1, 'at least one reward day: this is the staked demo wallet')
+  assert.ok(BigInt(s.totalRewardsLuna) > 0n, 'the year has rewards')
+  console.log(
+    `       ${s.rewardDays} reward days, ${s.totalRewardsNim} NIM` +
+      (s.actualYield?.percent != null ? ` · actual ${s.actualYield.percent}% over ${s.actualYield.windowDays} days` : ` · actual: ${s.actualYield?.reason ?? 'null'}`)
+  )
+})
+
 await client.close()
 
 console.log(`\n${passed} passed, ${failed} failed`)

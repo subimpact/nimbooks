@@ -11,7 +11,9 @@
 //   - phone home. The only hosts this process contacts are the public Nimiq
 //     RPC (rpc.nimiqwatch.com), the public Nimiq Watch analytics API
 //     (v2.nimiqwatch.com — for staking rewards, the same second API the
-//     NimBooks app reads) and CoinGecko's public price API. There is no
+//     NimBooks app reads), the validator list the app reads for its stake
+//     panel (validators-api-main.je-cf9.workers.dev: names, fees,
+//     reliability) and CoinGecko's public price API. There is no
 //     NimBooks server — the app has none either — and this server never calls
 //     nimbooks.subimpact.net. Links it mints contain that address the way a
 //     printed invoice carries a street address: it is data, not a request.
@@ -31,15 +33,18 @@ import {
   decodeMemo,
   explorerTxUrl,
   getBalance,
+  getBlockHeight,
   getStaking,
   getTransactionHistory,
   memoForRow,
   normalizeAddress,
   spacedAddress,
   txLabel,
-  getRestakeRewardTxs,
+  getRestakeRewardTxsReport,
+  getValidatorsSnapshot,
   REWARDS_FLOOR_DAY,
   type NimiqTx,
+  type StakingHolding,
 } from './chain.ts'
 import {
   encodeInvoice,
@@ -54,8 +59,22 @@ import {
 } from './invoice.ts'
 import { listBackupInvoices, readBackupFile, type BackupFile } from './backup.ts'
 import { computeStatement, getDailyCloses, periodBounds, priceCoverageNote } from './statement.ts'
+import {
+  BLOCKS_PER_EPOCH,
+  MIN_STAKE_NOTE,
+  chooseCompound,
+  chooseRate,
+  compoundsFor,
+  isBuildersPool,
+  matchValidator,
+  projectStake,
+  rewardsByValidator,
+  trailingYield,
+  typicalRate,
+  type ValidatorInfo,
+} from './staking.ts'
 
-const VERSION = '1.0.3'
+const VERSION = '1.1.0'
 
 // How far back a tool will walk the transaction index. The RPC pages 50 at a
 // time and is rate-limited, so these are budgets, not guesses — every tool
@@ -190,6 +209,23 @@ function iso(ms: number | undefined): string | null {
   }
 }
 
+/**
+ * The rewards caveats the app shows: a year Nimiq Watch did not answer means
+ * the total may be short (never silently zero), and any window reaching back
+ * before 2025 carries the app's own note that the public rewards data starts
+ * in January 2025.
+ */
+function rewardNotes(failedYears: number[], askedFromMs: number): string | undefined {
+  const notes: string[] = []
+  if (failedYears.length > 0) {
+    notes.push(`The staking rewards total may be short: Nimiq Watch did not answer for ${failedYears.join(', ')}.`)
+  }
+  if (askedFromMs < Date.parse('2025-01-01T00:00:00Z')) {
+    notes.push('Staking rewards before January 2025 may be missing: the public rewards data NimBooks reads starts then.')
+  }
+  return notes.length > 0 ? notes.join(' ') : undefined
+}
+
 type ToolResult = { content: { type: 'text'; text: string }[]; isError?: boolean }
 
 function ok(payload: unknown): ToolResult {
@@ -234,7 +270,10 @@ const BASE_INSTRUCTIONS =
   'requests. This server never signs and never sends: create_payment_request ' +
   'produces a shareable link and nothing more. It reads the public Nimiq ' +
   'chain and CoinGecko prices; it has no account, no keys and no server of ' +
-  'its own. Amounts are reported in both Luna (integer, exact) and NIM.'
+  'its own. Amounts are reported in both Luna (integer, exact) and NIM. It ' +
+  'also reads staking positions (get_staking), the validator pools ' +
+  '(list_validators), projects staking yield (project_yield) and sums ' +
+  'staking rewards (get_rewards); its yield figures are projections, never promises.'
 
 const server = new McpServer(
   { name: 'nimbooks-mcp', version: VERSION },
@@ -275,19 +314,33 @@ server.registerTool(
       const addr = addressArg(address)
       const from = parseWhen(since, 'since', false)
       const to = parseWhen(until, 'until', true)
-      const [balanceLuna, walk, staking] = await Promise.all([
-        getBalance(addr),
-        getTransactionHistory(addr, HISTORY_CAP, 200),
-        getStaking(addr),
-      ])
+      // A failed staker lookup is not the same as never staked (getStaking
+      // throws for that now), but the summary must still come back: it says
+      // so in a note and reports the staked figure as unknown, not 0.
+      let staking: StakingHolding | null = null
+      let stakingNote: string | undefined
+      const [balanceLuna, walk] = await Promise.all([getBalance(addr), getTransactionHistory(addr, HISTORY_CAP, 200)])
+      try {
+        staking = await getStaking(addr)
+      } catch (e) {
+        stakingNote =
+          `The staker lookup failed, so the staked amounts below are unknown, not zero: ` +
+          `${e instanceof ToolError ? e.message : String(e)}`
+      }
       // Restaking rewards never appear in the tx index — they are read from
       // the same v2 endpoint the app uses and folded in as rows, so a
       // staker's balance trajectory is not silently missing its income. The
       // window is the whole ask: `since`/`until` when given, every reward the
-      // public data has (back to January 2025) otherwise.
-      const rewardTxs = REWARDS_DISABLED
-        ? []
-        : await getRestakeRewardTxs(addr, from ?? Date.parse(REWARDS_FLOOR_DAY + 'T00:00:00Z'), to ?? Date.now())
+      // public data has (back to January 2025) otherwise. A reporting variant
+      // is used so a year the endpoint did not answer is named, not dropped:
+      // the app's rule is that the cards say the total may be short instead
+      // of staying silent.
+      const askedFrom = from ?? Date.parse(REWARDS_FLOOR_DAY + 'T00:00:00Z')
+      const rewardReport = REWARDS_DISABLED
+        ? { rows: [], failedYears: [] }
+        : await getRestakeRewardTxsReport(addr, askedFrom, to ?? Date.now())
+      const rewardTxs = rewardReport.rows
+      const rewardsNote = rewardNotes(rewardReport.failedYears, askedFrom)
       const txs = [...walk.txs, ...rewardTxs].sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
 
       let inLuna = 0n
@@ -357,6 +410,8 @@ server.registerTool(
         outCount,
         historyFetched: walk.txs.length,
         rewardsFetched: rewardTxs.length,
+        rewardsNote,
+        stakingNote,
         truncated:
           walk.txs.length >= HISTORY_CAP || walk.overrun
             ? walk.overrun
@@ -469,10 +524,12 @@ server.registerTool(
       const walk = await getTransactionHistory(addr, HISTORY_CAP, 200)
       // Restaking rewards are income too: the same v2 rows the app folds into
       // its statement, fetched for the statement period itself, so a staker's
-      // statement is not missing them (the tx index has none).
-      const rewardTxs = REWARDS_DISABLED
-        ? []
-        : await getRestakeRewardTxs(addr, bounds.from, Math.min(bounds.to, Date.now()))
+      // statement is not missing them (the tx index has none). A reporting
+      // variant, so a year the endpoint skipped is named in the answer.
+      const rewardReport = REWARDS_DISABLED
+        ? { rows: [], failedYears: [] }
+        : await getRestakeRewardTxsReport(addr, bounds.from, Math.min(bounds.to, Date.now()))
+      const rewardTxs = rewardReport.rows
       const txs = [...walk.txs, ...rewardTxs].sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
       const prices = await getDailyCloses(bounds.from, Math.min(bounds.to, Date.now()))
       const statement = computeStatement(txs, addr, bounds, prices)
@@ -492,6 +549,7 @@ server.registerTool(
           txCount: r.txCount,
         })),
         totals: statement.totals,
+        rewardsNote: rewardNotes(rewardReport.failedYears, bounds.from),
         priceNote:
           statement.pricesMissing > 0
             ? [
@@ -762,12 +820,561 @@ server.registerTool(
     })
 )
 
+// 7: get_staking
+
+function percentOf(v: number | null | undefined, dp = 2): number | null {
+  if (v === null || v === undefined || !Number.isFinite(v)) return null
+  return Number((v * 100).toFixed(dp))
+}
+
+function findValidatorByAddress(address: string, validators: ValidatorInfo[]): ValidatorInfo | null {
+  const flat = address.replace(/\s+/g, '').toUpperCase()
+  return validators.find((v) => v.address.replace(/\s+/g, '').toUpperCase() === flat) ?? null
+}
+
+/** Blocks at about 1 block/second, as the app words its unstake clocks. */
+function blocksWait(blocks: number): string {
+  if (blocks < 90) return `about ${blocks} minutes at about 1 block per second`
+  const h = blocks / 3600
+  if (h < 48) return `about ${Math.round(h)} hour(s) at about 1 block per second`
+  return `about ${Math.round(h / 24)} day(s) at about 1 block per second`
+}
+
+/** The calendar years a rewards window covers, clamped to the floor day and now. */
+function rewardYears(fromMs: number, toMs: number): number[] {
+  const from = Math.max(fromMs, Date.parse(REWARDS_FLOOR_DAY + 'T00:00:00Z'))
+  const to = Math.min(toMs, Date.now())
+  if (to < from) return []
+  const first = Number(new Date(from).toISOString().slice(0, 4))
+  const last = Number(new Date(to).toISOString().slice(0, 4))
+  const years: number[] = []
+  for (let y = first; y <= last; y++) years.push(y)
+  return years
+}
+
+server.registerTool(
+  'get_staking',
+  {
+    title: 'Staked position',
+    description:
+      'A Nimiq address\'s staking position: active staked, inactive (cooling down after an ' +
+      'unstake), retired (ready to withdraw) and total, plus the pool it is staked to with its ' +
+      'fee, net yield and payout type, an unstake clock (a retire only becomes valid one full ' +
+      'epoch after deactivation), and a first-year rewards estimate at the pool\'s current net ' +
+      'yield. Read-only: reads the public chain and the public validators list, never signs and ' +
+      'never sends. Never staked reads as staked: false, never as a failed lookup; a failed ' +
+      'lookup is an error that says so.',
+    inputSchema: {
+      address: z
+        .string()
+        .optional()
+        .describe(`Nimiq address (NQ form, spaced or flat, or 40 hex characters). ${DEFAULTS_TO_CONFIGURED}`),
+    },
+    annotations: READ_ONLY,
+  },
+  async ({ address }) =>
+    guard('get_staking', async () => {
+      const addr = addressArg(address)
+      const holding = await getStaking(addr)
+      const spaced = spacedAddress(addr)
+
+      if (!holding) {
+        // The RPC said "No staker with address", the real answer for an
+        // address that has never staked, and not the same thing as a failed
+        // lookup (which throws, above).
+        return ok({
+          address: spaced,
+          staked: false,
+          activeLuna: '0',
+          activeNim: '0',
+          inactiveLuna: '0',
+          inactiveNim: '0',
+          retiredLuna: '0',
+          retiredNim: '0',
+          stakedLuna: '0',
+          stakedNim: '0',
+          validator: null,
+          unstaking: null,
+          estimate: null,
+          note: `No staker record exists on chain for this address: it has never staked. ${MIN_STAKE_NOTE}`,
+        })
+      }
+
+      const activeLuna = BigInt(/^\d+$/.test(holding.active) ? holding.active : '0')
+      const inactiveLuna = BigInt(/^\d+$/.test(holding.inactive) ? holding.inactive : '0')
+      const retiredLuna = BigInt(/^\d+$/.test(holding.retired) ? holding.retired : '0')
+      const totalLuna = activeLuna + inactiveLuna + retiredLuna
+
+      // The pool's fee, yield and payout wording ride on the validators list;
+      // when that API is down, the balances are still exact, so they answer
+      // and the pool details come back empty with a note (name: null).
+      let validators: ValidatorInfo[] | null = null
+      let validatorsNote: string | undefined
+      try {
+        validators = (await getValidatorsSnapshot()).validators
+      } catch (e) {
+        validatorsNote = `${e instanceof ToolError ? e.message : String(e)} The balances below are exact from the chain.`
+      }
+      const v = validators && holding.delegation ? findValidatorByAddress(holding.delegation, validators) : null
+
+      // Unstaking: a deactivate moves NIM to the inactive bucket, and the
+      // retire transaction is only valid a full epoch later
+      // (inactiveFrom + 43,200 blocks, roughly 12 hours at 1 block/s).
+      let unstaking: Record<string, unknown> | null = null
+      if (inactiveLuna > 0n) {
+        const retireValidAt = holding.inactiveFrom > 0 ? holding.inactiveFrom + BLOCKS_PER_EPOCH : null
+        let currentBlock: number | null = null
+        try {
+          currentBlock = await getBlockHeight()
+        } catch {
+          currentBlock = null
+        }
+        const ready = currentBlock !== null && retireValidAt !== null && currentBlock >= retireValidAt
+        const blocksLeft =
+          currentBlock !== null && retireValidAt !== null ? Math.max(0, retireValidAt - currentBlock) : null
+        unstaking = {
+          inactiveFromBlock: holding.inactiveFrom || null,
+          retireValidAtBlock: retireValidAt,
+          currentBlockHeight: currentBlock,
+          readyToRetire: currentBlock === null ? null : ready,
+          ...(blocksLeft !== null && !ready ? { timeLeft: blocksWait(blocksLeft) } : {}),
+          note:
+            'Inactive (cooling down) NIM no longer earns. Withdrawing it takes two steps: the retire ' +
+            'transaction first becomes valid a full reporting epoch after the deactivation takes ' +
+            'effect, and the withdrawal itself follows after that.',
+        }
+      }
+
+      let estimate: Record<string, unknown> | null = null
+      if (v && v.annualReward !== null && v.annualReward > 0 && activeLuna > 0n) {
+        const proj = projectStake({
+          principalNim: Number(activeLuna) / 100000,
+          annualRateNow: v.annualReward,
+          months: 12,
+          compound: compoundsFor(v),
+        })
+        estimate = {
+          firstYearRewardsNim: Number(proj.firstYearNim.toFixed(5)),
+          firstYearRewardsLuna: String(Math.round(proj.firstYearNim * 100000)),
+          annualRatePercent: percentOf(v.annualReward),
+          compounds: compoundsFor(v),
+          estimateNote:
+            'An estimate: the pool\'s current net yield held over the first year, with emission ' +
+            'falling along the protocol curve. It assumes the network stays at today\'s total stake, ' +
+            'which nothing guarantees; it is not a promise.',
+        }
+      }
+
+      const notes: string[] = []
+      if (validatorsNote) notes.push(validatorsNote)
+      if (!v && !validatorsNote) {
+        notes.push(
+          holding.delegation
+            ? 'The pool this stake is with is not in the validators list right now; its name, fee and yield are unknown here.'
+            : 'The staker record does not name a pool (delegation is empty), so the pool details are unknown.'
+        )
+      }
+
+      return ok({
+        address: spaced,
+        staked: true,
+        activeLuna: activeLuna.toString(),
+        activeNim: formatLunaExact(activeLuna.toString()),
+        inactiveLuna: inactiveLuna.toString(),
+        inactiveNim: formatLunaExact(inactiveLuna.toString()),
+        inactiveLabel: 'cooling down (earning nothing)',
+        retiredLuna: retiredLuna.toString(),
+        retiredNim: formatLunaExact(retiredLuna.toString()),
+        retiredLabel: 'ready to withdraw',
+        stakedLuna: totalLuna.toString(),
+        stakedNim: formatLunaExact(totalLuna.toString()),
+        // The pool rides on the validators list; when that is unavailable (or
+        // the delegation is not in it), the object comes back with name: null
+        // and a note, while the balances above stay exact.
+        validator: holding.delegation
+          ? {
+              address: spacedAddress(holding.delegation),
+              name: v ? v.name : null,
+              feePercent: v ? percentOf(v.fee) : null,
+              netYieldPercent: v ? percentOf(v.annualReward) : null,
+              compounds: v ? compoundsFor(v) : null,
+              payout: v ? (compoundsFor(v) ? 'adds rewards to your stake' : 'pays rewards out') : null,
+              producing: v ? v.reliability !== null : null,
+              buildersPool: v ? isBuildersPool(v.address) : null,
+            }
+          : null,
+        unstaking,
+        estimate,
+        note: notes.length > 0 ? notes.join(' ') : undefined,
+      })
+    })
+)
+
+// 8: list_validators
+
+server.registerTool(
+  'list_validators',
+  {
+    title: 'Nimiq validator pools',
+    description:
+      'The Nimiq validator pools of the current epoch, ranked neutrally, exactly as the NimBooks ' +
+      'app ranks them: producing pools first (those with a reliability score this epoch), best ' +
+      'net annual yield first within them, pools that publish no yield last, then the ' +
+      'non-producing pools, and the name as the final stable tiebreak. Nothing is pinned first. ' +
+      'Read-only: one call to the public validators list, never signs and never sends. ' +
+      'netYieldPercent is the net annual yield on the network\'s total stake after the pool\'s ' +
+      'fee, the Nimiq wallet\'s convention; it moves as emission falls and as stake moves.',
+    inputSchema: {
+      limit: z.number().int().min(1).max(50).optional().describe('Pools to return, 1 to 50. Default 50.'),
+      includeNonProducing: z
+        .boolean()
+        .optional()
+        .describe('Include pools with no reliability score this epoch (they earn nothing right now). Default true.'),
+    },
+    annotations: READ_ONLY,
+  },
+  async ({ limit, includeNonProducing }) =>
+    guard('list_validators', async () => {
+      const { validators, networkStakeLuna } = await getValidatorsSnapshot()
+      const max = limit ?? 50
+      const producingOnly = includeNonProducing === false
+      const picked = (producingOnly ? validators.filter((v) => v.reliability !== null) : validators).slice(0, max)
+      const typical = typicalRate(validators)
+      return ok({
+        count: picked.length,
+        ordered: 'producing pools first by net yield, no-yield pools last, non-producing pools after, name as the stable tiebreak',
+        validators: picked.map((v, i) => ({
+          rank: i + 1,
+          name: v.name,
+          address: spacedAddress(v.address),
+          feePercent: percentOf(v.fee),
+          feeNote: v.fee === null ? 'does not publish a fee' : undefined,
+          netYieldPercent: percentOf(v.annualReward),
+          reliabilityPercent: percentOf(v.reliability),
+          producing: v.reliability !== null,
+          compounds: compoundsFor(v),
+          payout: compoundsFor(v) ? 'restakes' : 'direct',
+          stakedNim: Number((v.balance / 100000).toFixed(5)),
+          buildersPool: isBuildersPool(v.address),
+        })),
+        typicalYieldPercent: percentOf(typical),
+        typicalYieldNote:
+          'the median net annual yield across producing pools, the neutral "what staking pays" figure',
+        networkStakeNim: Number((networkStakeLuna / 100000).toFixed(5)),
+        networkStakeNote: 'the network\'s total active stake, backed out of the list the same way the app backs it out',
+        note:
+          'ImpactZero is run by the developer of NimBooks. It is ranked by the same rule as every ' +
+          'other pool and is not pinned. Net annual yield is the yield on the network\'s total stake ' +
+          'after the pool\'s fee, the Nimiq wallet\'s convention; it moves as emission falls and as ' +
+          'stake moves. Pools marked direct pay rewards out instead of restaking them.',
+      })
+    })
+)
+
+// 9: project_yield
+
+server.registerTool(
+  'project_yield',
+  {
+    title: 'Project staking yield',
+    description:
+      'Projects what staking an amount of NIM might earn, year by year. With an explicit rate it ' +
+      'is a pure offline calculation. Read-only, never signs and never sends. Rate resolution, in ' +
+      'order: an explicit annualRatePercent, then the named pool\'s current net yield, then the ' +
+      'median of the producing pools. Compounding follows the pool\'s payout type (direct pools ' +
+      'pay out, the rest restake) unless an explicit compound choice is given. Returns per-year ' +
+      'rewards, cumulative rewards and balance, plus its assumptions: emission falls along the ' +
+      'protocol supply curve, the network\'s total stake is held at today\'s level, and it is a ' +
+      'projection, not a promise.',
+    inputSchema: {
+      amountNim: z
+        .string()
+        .describe('Amount to stake, in NIM, as a decimal string, e.g. "1000". At most 5 decimals.'),
+      years: z.number().int().min(1).max(10).optional().describe('Horizon in years, 1 to 10. Default 1.'),
+      validator: z
+        .string()
+        .optional()
+        .describe('A pool: its NQ address, exact name, or a unique part of the name (list_validators has them).'),
+      annualRatePercent: z
+        .number()
+        .optional()
+        .describe(
+          'Explicit annual rate in percent, more than 0 and at most 100. Wins over any pool\'s or the typical rate, and makes the call work offline.'
+        ),
+      compound: z
+        .boolean()
+        .optional()
+        .describe('Restake rewards as they arrive (true) or pay them out (false). Default: the pool\'s payout type, else true.'),
+    },
+    annotations: READ_ONLY,
+  },
+  async ({ amountNim, years, validator, annualRatePercent, compound }) =>
+    guard('project_yield', async () => {
+      const luna = parseNimToLuna(String(amountNim))
+      if (!luna) {
+        throw new ToolError(
+          `"${amountNim}" is not an amount I can project. Give a positive NIM amount with at most ` +
+            `5 decimals, e.g. "1000".`
+        )
+      }
+      if (years !== undefined && !(Number.isInteger(years) && years >= 1 && years <= 10)) {
+        throw new ToolError(`years must be a whole number from 1 to 10, not ${String(years)}.`)
+      }
+      const horizon = years ?? 1
+      const principalNim = Number(luna) / 100000
+
+      // With an explicit rate this is a pure calculation: nothing is fetched,
+      // so it works with the validators API unreachable. Otherwise the named
+      // pool (for its net yield) or the list (for the typical median) is read.
+      let validators: ValidatorInfo[] | null = null
+      let named: ValidatorInfo | null = null
+      if (annualRatePercent === undefined) {
+        validators = (await getValidatorsSnapshot()).validators
+        named = validator ? matchValidator(validator, validators) : null
+      }
+      const choice = chooseRate({
+        annualRatePercent,
+        validatorQuery: validator,
+        named,
+        validators: validators ?? [],
+      })
+      // With an explicit rate the pool's payout type is never looked up (the
+      // call stays offline), so an unstated compound falls back to true.
+      const resolvedCompound = annualRatePercent === undefined ? chooseCompound(compound, named) : (compound ?? true)
+      const now = Date.now()
+      const proj = projectStake({
+        principalNim,
+        annualRateNow: choice.rate,
+        months: horizon * 12,
+        compound: resolvedCompound,
+        now,
+      })
+
+      const perYear: Array<Record<string, unknown>> = []
+      for (let y = 1; y <= horizon; y++) {
+        const end = proj.points[y * 12]
+        const start = proj.points[(y - 1) * 12]
+        perYear.push({
+          year: y,
+          rewardsThatYearNim: Number((end.rewardsNim - start.rewardsNim).toFixed(5)),
+          cumulativeRewardsNim: Number(end.rewardsNim.toFixed(5)),
+          balanceNim: Number(end.balanceNim.toFixed(5)),
+        })
+      }
+      const last = proj.points[proj.points.length - 1]
+
+      const notes: string[] = []
+      if (annualRatePercent !== undefined && validator && compound === undefined) {
+        notes.push(
+          `A rate was given explicitly, so the pool "${validator}" was not looked up and its payout ` +
+            `type is unknown here: compounding was left on. Pass compound: false if that pool pays out.`
+        )
+      }
+
+      return ok({
+        amountNim: formatLunaExact(luna),
+        amountLuna: luna,
+        years: horizon,
+        compound: resolvedCompound,
+        compoundsLabel: resolvedCompound ? 'rewards are restaked (compound)' : 'rewards are paid out (simple)',
+        ratePercent: Number((choice.rate * 100).toFixed(5)),
+        rateSource: choice.rateSource,
+        perYear,
+        totals: {
+          totalRewardsNim: Number(proj.rewardsNim.toFixed(5)),
+          balanceAtEndNim: Number(last.balanceNim.toFixed(5)),
+        },
+        assumptions: [
+          'Emission falls along the protocol supply curve: each month pays slightly less than the one before (modelled).',
+          'The network\'s total stake is held at today\'s level, which is not modelled: more stake lowers everyone\'s rate, less raises it.',
+          'This is a projection, not a promise.',
+        ],
+        note: notes.length > 0 ? notes.join(' ') : undefined,
+      })
+    })
+)
+
+// 10: get_rewards
+
+server.registerTool(
+  'get_rewards',
+  {
+    title: 'Staking rewards',
+    description:
+      'Staking rewards for an address over a window: the total (Luna and NIM), the reward days, ' +
+      'the first and last reward date, and the breakdown per paying pool, plus an actual yield ' +
+      'over the trailing 30 days measured against the current active stake and the current ' +
+      'validator\'s estimate for comparison. Read-only, never signs and never sends. Important: ' +
+      'only restaking (compounding) pools show up in this data; a direct-payout pool\'s rewards ' +
+      'arrive as ordinary incoming transactions and are found with list_transactions instead. The ' +
+      'public rewards data starts January 2025, so earlier asks come back empty, and it can lag ' +
+      'by a day. A year Nimiq Watch did not answer is named in the answer, never silently dropped.',
+    inputSchema: {
+      address: z
+        .string()
+        .optional()
+        .describe(`Nimiq address (NQ form, spaced or flat, or 40 hex characters). ${DEFAULTS_TO_CONFIGURED}`),
+      since: z
+        .string()
+        .optional()
+        .describe('Start of the window, YYYY-MM-DD or ISO 8601 (UTC). Default: the start of the public rewards data.'),
+      until: z.string().optional().describe('End of the window, YYYY-MM-DD or ISO 8601 (UTC). Default: now.'),
+      includeDays: z
+        .boolean()
+        .optional()
+        .describe('Include the per-day reward rows, newest first, at most 400. Default false.'),
+    },
+    annotations: READ_ONLY,
+  },
+  async ({ address, since, until, includeDays }) =>
+    guard('get_rewards', async () => {
+      const addr = addressArg(address)
+      const from = parseWhen(since, 'since', false) ?? Date.parse(REWARDS_FLOOR_DAY + 'T00:00:00Z')
+      const to = parseWhen(until, 'until', true) ?? Date.now()
+
+      // The rewards fetch is failure-tolerant per calendar year, and the
+      // reporting variant is what keeps that tolerance honest: a skipped
+      // year is named, never silently zero (the app's "may be short" rule).
+      const report = REWARDS_DISABLED
+        ? { rows: [], failedYears: rewardYears(from, to) }
+        : await getRestakeRewardTxsReport(addr, from, to)
+      const rows = report.rows
+
+      // The pool context rides on an optional best-effort read of the staker
+      // record and the validators list; neither may fail the whole answer,
+      // because the rewards asked for are the point.
+      let activeLuna = 0
+      let stakingFailed = false
+      const holding = await getStaking(addr).catch((e: unknown) => {
+        stakingFailed = true
+        log(`get_rewards: staker lookup failed: ${e instanceof Error ? e.message : String(e)}`)
+        return null
+      })
+      if (holding) activeLuna = Number(/^\d+$/.test(holding.active) ? holding.active : '0')
+      let validators: ValidatorInfo[] | null = null
+      try {
+        validators = (await getValidatorsSnapshot()).validators
+      } catch {
+        validators = null
+      }
+      const current =
+        validators && holding ? findValidatorByAddress(holding.delegation, validators) : null
+
+      const totalLuna = rows.reduce((acc, r) => acc + BigInt(/^\d+$/.test(r.value) ? r.value : '0'), 0n)
+      const earning = rewardsByValidator(rows)
+      const byValidator = earning.map((e) => {
+        const v = validators ? findValidatorByAddress(e.address, validators) : null
+        return {
+          address: spacedAddress(e.address),
+          name: v ? v.name : null,
+          nim: Number(e.nim.toFixed(5)),
+          days: e.days,
+          firstRewardDate: e.firstMs === Infinity ? null : new Date(e.firstMs).toISOString().slice(0, 10),
+          lastRewardDate: e.lastMs ? new Date(e.lastMs).toISOString().slice(0, 10) : null,
+        }
+      })
+
+      const day = (r: NimiqTx): string => new Date(r.timestamp ?? 0).toISOString().slice(0, 10)
+      const rewardDates = [...new Set(rows.map((r) => day(r)))].sort()
+
+      // Actual yield over the trailing 30 days against the current active
+      // stake (the app's Earn card figure), with the reason spelled out when
+      // it cannot say anything: few covered days, no stake, or a window that
+      // does not reach the last 30 days.
+      const windowEnd = Date.now()
+      let actualYield: Record<string, unknown>
+      if (stakingFailed) {
+        actualYield = { percent: null, windowDays: null, reason: 'the active stake could not be read' }
+      } else if (!holding) {
+        actualYield = { percent: null, windowDays: null, reason: 'no staker record on chain' }
+      } else if (activeLuna <= 0) {
+        actualYield = { percent: null, windowDays: null, reason: 'no active stake to measure against' }
+      } else if (windowEnd > to + 30 * 86_400_000) {
+        actualYield = { percent: null, windowDays: null, reason: 'the asked window does not overlap the last 30 days' }
+      } else {
+        const t = trailingYield(rows, activeLuna, windowEnd, 30)
+        actualYield = t
+          ? { percent: Number((t.rate * 100).toFixed(5)), windowDays: t.windowDays }
+          : { percent: null, windowDays: null, reason: 'under 7 days of rewards in the last 30' }
+      }
+
+      const notes: string[] = []
+      if (report.failedYears.length > 0 && rows.length === 0) {
+        notes.push(
+          `Nimiq Watch did not answer for ${report.failedYears.join(', ')}, so any rewards in this window are unknown, not zero.`
+        )
+      } else if (rows.length === 0) {
+        notes.push(
+          'No restaking rewards were recorded for this address in this window. That is a no-rewards answer, not a failure: only restaking (compounding) pools appear in this data at all.'
+        )
+      }
+      if (current && !compoundsFor(current)) {
+        notes.push(
+          `${current.name} pays rewards out directly, so those payouts do not appear here at all: they arrive as ordinary incoming transactions, which list_transactions reports.`
+        )
+      }
+
+      // Per-day rows (only when asked): per UTC day, the total across pools,
+      // newest first, at most 400, the app's one-row-per-day view.
+      const include = includeDays === true
+      const perDay = new Map<string, bigint>()
+      for (const r of rows) {
+        const d = day(r)
+        perDay.set(d, (perDay.get(d) ?? 0n) + BigInt(/^\d+$/.test(r.value) ? r.value : '0'))
+      }
+      const dayRows = include
+        ? [...perDay.entries()]
+            .sort((a, b) => (a[0] < b[0] ? 1 : -1))
+            .slice(0, 400)
+            .map(([d, luna]) => ({ day: d, rewardsLuna: luna.toString(), rewardsNim: formatLunaExact(luna.toString()) }))
+        : undefined
+
+      return ok({
+        address: spacedAddress(addr),
+        window: {
+          since: new Date(from).toISOString(),
+          until: new Date(Math.min(to, Date.now())).toISOString(),
+        },
+        totalRewardsLuna: totalLuna.toString(),
+        totalRewardsNim: formatLunaExact(totalLuna.toString()),
+        rewardDays: perDay.size,
+        firstRewardDate: rewardDates[0] ?? null,
+        lastRewardDate: rewardDates[rewardDates.length - 1] ?? null,
+        byValidator,
+        actualYield,
+        estimatedYieldPercent: current ? percentOf(current.annualReward) : null,
+        estimatedYieldNote: current
+          ? `${current.name}'s current net yield, for comparison with actualYield above`
+          : !holding && !stakingFailed
+            ? 'no current pool to compare against: this address has no staker record'
+            : 'no current pool to compare against (the staker record or the validators list was not readable)',
+        rewardsNote: rewardNotes(report.failedYears, from),
+        ...(stakingFailed
+          ? {
+              stakingNote:
+                'The staker record could not be read, so actualYield is missing the active stake it would divide by.',
+            }
+          : {}),
+        ...(include
+          ? {
+              days: dayRows,
+              truncated:
+                perDay.size > 400
+                  ? `Only the newest 400 reward days are listed; the window holds ${perDay.size}.`
+                  : undefined,
+            }
+          : {}),
+        note: notes.length > 0 ? notes.join(' ') : undefined,
+      })
+    })
+)
+
 // --- Boot ---
 
 async function main(): Promise<void> {
   const transport = new StdioServerTransport()
   await server.connect(transport)
-  log(`v${VERSION} ready — 6 tools, read-only.`)
+  log(`v${VERSION} ready: 10 tools, read-only.`)
   log(options.backupPath ? `backup: ${options.backupPath}` : 'no --backup given; list_invoices will explain how to make one')
   if (defaultAddressSpaced) log(`default address: ${defaultAddressSpaced} (named in the server instructions)`)
 }
