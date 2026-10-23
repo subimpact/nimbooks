@@ -195,6 +195,9 @@ const stamp = (d) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, '
 const wantStart = stamp(startLocal)
 const wantEnd = stamp(endLocal)
 
+const unfold = (s) => s.replace(/\r\n /g, '')
+check('reminder ics: every physical line is 75 octets or fewer', reminder.ics.split('\r\n').every((l) => Buffer.byteLength(l) <= 75))
+reminder.ics = unfold(reminder.ics)
 check('reminder ics: weekly rule', reminder.ics.includes('RRULE:FREQ=WEEKLY'))
 check('reminder ics: PRODID', reminder.ics.includes('PRODID:-//NimBooks//Restake reminder//EN'))
 check('reminder ics: UID', reminder.ics.includes(`UID:${nowMs}-restake@nimbooks.subimpact.net`))
@@ -216,12 +219,14 @@ const crlf = (reminder.ics.match(/\r\n/g) || []).length
 check('reminder ics: CRLF line endings throughout', lf === crlf && lf > 0 && !/\r(?!\n)/.test(reminder.ics), `${crlf}/${lf}`)
 
 const escaped = restakeReminder({ nowMs, appUrl: 'https://example.com/a,b;c' })
+escaped.ics = unfold(escaped.ics)
 check(
   'reminder ics: description escapes comma and semicolon',
   escaped.ics.includes('https://example.com/a\\,b\\;c'),
   escaped.ics.split('\r\n').find((l) => l.startsWith('DESCRIPTION:'))
 )
 const multi = restakeReminder({ nowMs, appUrl: 'https://example.com/a\nb' })
+multi.ics = unfold(multi.ics)
 check('reminder ics: description escapes newlines', multi.ics.includes('https://example.com/a\\nb'))
 
 const google = new URL(reminder.googleUrl)

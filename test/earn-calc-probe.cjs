@@ -162,12 +162,13 @@ const staker = (nim) => ({ result: { data: { address: ADDR, balance: nim * NIM, 
   {
     const { ctx, page, errors } = await openFixture(stakerOn(IZ, 7620.55), 500)
     const card = page.locator('.earn-card')
+    await card.locator('summary', { hasText: 'Staking terms' }).click()
     const labels = (await card.locator('.earn-terms dt').allInnerTexts()).map((s) => s.trim())
     check('direct: the four staking-term labels', TERM_LABELS.every((l) => labels.includes(l)), labels.join(' | '))
     const text = (await card.innerText()).replace(/\s+/g, ' ')
     check(
       'direct: restake line names the pool and the yearly gain',
-      /ImpactZero pays your rewards into your wallet instead of restaking them\. Restaking them adds about [\d,.]+ NIM a year\./.test(text),
+      /ImpactZero pays your rewards into your wallet instead of restaking them\. Restaking them adds about [\d,.]+ NIM a year at today's network stake\./.test(text),
       text.slice(0, 500)
     )
     check('direct: terms risk says it pays into the wallet every 12 hours', /pays rewards into your wallet every 12 hours/.test(text), text.slice(0, 600))
@@ -200,6 +201,7 @@ const staker = (nim) => ({ result: { data: { address: ADDR, balance: nim * NIM, 
   {
     const { ctx, page, errors } = await openFixture(stakerOn(RESTAKE_FLAT, 7620.55), 0)
     const card = page.locator('.earn-card')
+    await card.locator('summary', { hasText: 'Staking terms' }).click()
     const labels = (await card.locator('.earn-terms dt').allInnerTexts()).map((s) => s.trim())
     check('restake pool: the four staking-term labels', TERM_LABELS.every((l) => labels.includes(l)), labels.join(' | '))
     check('restake pool: no restake row', (await card.locator('[data-probe="earn-restake"]').count()) === 0)

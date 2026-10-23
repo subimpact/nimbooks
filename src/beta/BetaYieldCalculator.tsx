@@ -332,7 +332,11 @@ export default function BetaYieldCalculator({
       <p className="tw:m-0 tw:text-xs tw:leading-relaxed tw:text-muted-foreground">
         An estimate, not a promise. Rewards shrink a little every year because new NIM issuance falls by about 12% a
         year by design, and the estimate assumes the network's total stake stays as it is today: more NIM staked
-        network-wide lowers everyone's rate. A pool only pays while it produces blocks.
+        network-wide lowers everyone's rate. A pool only pays while it produces blocks. Compare with{' '}
+        <a href="https://www.nimiq.com/staking-calculator" target="_blank" rel="noopener noreferrer">
+          Nimiq's staking calculator
+        </a>
+        .
       </p>
     </div>
   )

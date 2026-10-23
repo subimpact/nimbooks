@@ -154,6 +154,32 @@ function escapeIcsText(text: string): string {
     .replace(/\r?\n/g, '\\n')
 }
 
+/**
+ * RFC 5545 line folding: content lines over 75 octets continue on the next
+ * line after CRLF + one space. Folds on UTF-8 byte length, never inside a
+ * multi-byte character.
+ */
+function foldIcsLine(line: string): string {
+  const enc = new TextEncoder()
+  if (enc.encode(line).length <= 75) return line
+  const out: string[] = []
+  let cur = ''
+  let curBytes = 0
+  for (const ch of line) {
+    const n = enc.encode(ch).length
+    const limit = out.length === 0 ? 75 : 74 // continuation lines start with a space
+    if (curBytes + n > limit) {
+      out.push(cur)
+      cur = ''
+      curBytes = 0
+    }
+    cur += ch
+    curBytes += n
+  }
+  out.push(cur)
+  return out.join('\r\n ')
+}
+
 /** UTC timestamp in the iCalendar basic format. */
 function icsStamp(ms: number): string {
   const d = new Date(ms)
@@ -208,7 +234,7 @@ export function restakeReminder({ nowMs, appUrl }: { nowMs: number; appUrl: stri
     'END:VEVENT',
     'END:VCALENDAR',
   ]
-  const ics = lines.join('\r\n') + '\r\n'
+  const ics = lines.map(foldIcsLine).join('\r\n') + '\r\n'
 
   const params = new URLSearchParams({
     action: 'TEMPLATE',
