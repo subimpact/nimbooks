@@ -7,7 +7,7 @@
 // Badge text. Spelled out rather than built from a version constant so the exact
 // label ships as one string in the bundle (JSX would emit "v" as a separate node).
 // package.json carries the machine-readable version.
-export const APP_VERSION_LABEL = 'v1.37.0'
+export const APP_VERSION_LABEL = 'v1.38.0'
 
 export interface ChangelogEntry {
   version: string
@@ -16,6 +16,15 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '1.38.0',
+    date: '2026-10-24',
+    items: [
+      'Every stake now shows its terms: how staking works with your pool, that the rate varies, what can go wrong and how long getting out takes. They sit under Staking terms on the Earn card and in full in the Stake panel before you stake',
+      'Pools that pay rewards into your wallet instead of restaking them get a restake loop on the Earn card: what restaking would add over a year, a one-tap Restake button, and a weekly reminder for Google Calendar or as a calendar file (inside Nimiq Pay, copy the reminder link)',
+      "The yield calculator links to Nimiq's own staking calculator so you can compare the estimate",
+    ],
+  },
   {
     version: '1.37.0',
     date: '2026-10-22',

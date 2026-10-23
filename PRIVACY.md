@@ -109,6 +109,7 @@ device calls it.
 | EVM public RPCs (Polygon, Base, Arbitrum, Optimism, Ethereum) | USDT and native balances | your EVM address |
 | Nimiq Hub (`hub.nimiq.com`) | browser sign-in and signing | what you sign there |
 | short.io | short links for receipts and payment requests you share | the shared link, including its contents |
+| Google Calendar (only if you tap the restake reminder link) | adds a weekly "Restake your NIM rewards" event | the event title and a link to NimBooks; no address or amount |
 
 NimBooks sets no cookies of its own.
 

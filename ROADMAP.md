@@ -5,9 +5,9 @@ your stake earns and why, every reward in your history, and statements, tax
 files and proofs when you need them. It works inside Nimiq Pay and with Nimiq
 Wallet in any browser.
 
-_Last updated 22 October 2026. Dates are targets._
+_Last updated 24 October 2026. Dates are targets._
 
-## Shipped since Cycle 2 (v1.14 → v1.37)
+## Shipped since Cycle 2 (v1.14 → v1.38)
 
 **Prices and currencies (v1.37)**
 - Total value never shows $0.00 when a price service is busy: the last known price stays on screen, dated ("as of HH:MM") when older than 30 minutes, or "Price unavailable" when none exists.
@@ -21,6 +21,8 @@ _Last updated 22 October 2026. Dates are targets._
 - **Partial unstakes** that would leave less than the protocol's 100 NIM minimum staked are explained before they're sent (v1.32).
 - **Reasons to come back:** the Earn card shows the rewards earned since your last visit, your actual yield over the last 30 days next to the pool's estimate, and what each validator has earned you all time (v1.33).
 - **"Stake it?" prompt** when a received payment leaves NIM idle (v1.33).
+- **Staking terms** on every position: how it works, that the rate varies, what can go wrong, and how long getting out takes (v1.38).
+- **Restake loop** for pools that pay rewards into your wallet: what restaking adds a year, a one-tap restake, and a weekly calendar reminder (v1.38).
 
 **Books and tax**
 - FIFO crypto tax with staking income, in your display currency, plus Koinly, CoinTracking and CryptoTaxCalculator CSVs (v1.21–1.22).
