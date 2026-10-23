@@ -221,6 +221,15 @@ export default function BetaEarnCard({
       )}
 
       {terms && (
+        <Collapsible className="tw:group/earn-terms tw:text-sm">
+          <CollapsibleTrigger
+            className="tw:flex tw:min-h-[44px] tw:w-full tw:items-center tw:justify-between tw:gap-2 tw:text-muted-foreground"
+            data-probe="earn-terms-toggle"
+          >
+            Staking terms
+            <ChevronDownIcon className="tw:size-4 tw:transition-transform tw:group-data-open/earn-terms:rotate-180" />
+          </CollapsibleTrigger>
+          <CollapsibleContent>
         <dl
           className="tw:m-0 tw:grid tw:gap-1.5 tw:text-xs tw:text-muted-foreground"
           data-probe="earn-terms"
@@ -243,13 +252,15 @@ export default function BetaEarnCard({
             <dd className="tw:m-0">{terms.exit}</dd>
           </div>
         </dl>
+          </CollapsibleContent>
+        </Collapsible>
       )}
 
       {showRestake && (
         <div className="tw:grid tw:gap-1" data-probe="earn-restake">
           <p className="tw:m-0 tw:text-sm">
             {`${validatorName ?? 'Your pool'} pays your rewards into your wallet instead of restaking them.`}
-            {gain !== null && gain >= 0.01 ? ` Restaking them adds about ${nimFmt(gain, lang)} NIM a year.` : ''}
+            {gain !== null && gain >= 0.01 ? ` Restaking them adds about ${nimFmt(gain, lang)} NIM a year at today's network stake.` : ''}
           </p>
           {reminderLink && (
             <p className="tw:m-0 tw:flex tw:flex-wrap tw:items-center tw:gap-2 tw:text-xs tw:text-muted-foreground">

@@ -210,6 +210,8 @@ export default function EarnCard({
       )}
 
       {terms && (
+        <details className="earn-validators earn-terms-wrap" data-probe="earn-terms-toggle">
+        <summary>Staking terms</summary>
         <dl className="earn-terms" data-probe="earn-terms" data-schedule={scheduleLabel ?? undefined}>
           <div>
             <dt>How it works</dt>
@@ -228,13 +230,14 @@ export default function EarnCard({
             <dd>{terms.exit}</dd>
           </div>
         </dl>
+        </details>
       )}
 
       {showRestake && (
         <div className="earn-restake" data-probe="earn-restake">
           <p className="earn-restake-line">
             {`${validatorName ?? 'Your pool'} pays your rewards into your wallet instead of restaking them.`}
-            {gain !== null && gain >= 0.01 ? ` Restaking them adds about ${nimFmt(gain, lang)} NIM a year.` : ''}
+            {gain !== null && gain >= 0.01 ? ` Restaking them adds about ${nimFmt(gain, lang)} NIM a year at today's network stake.` : ''}
           </p>
           {reminderLink && (
             <p className="earn-reminder">
