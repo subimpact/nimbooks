@@ -82,6 +82,8 @@ export const FEATURES: FeatureDef[] = [
       "Rewards arrive as daily totals, and today's appear tomorrow.",
       'Unstaking takes up to about a day. It takes longer if the validator is jailed, which means it is removed from the network for a time after misbehaving.',
       'To switch validator, unstake, wait out the cooldown, then stake again.',
+      'Every stake shows its terms: how it works, that the rate varies, what can go wrong and how long getting out takes.',
+      'Pools that pay rewards into your wallet get a one-tap restake and a weekly calendar reminder.',
     ],
     tryView: { view: 'dashboard', open: 'stake' },
   },

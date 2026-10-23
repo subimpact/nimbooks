@@ -161,6 +161,7 @@ import type { SampleEntry } from './lib/features'
 import { COUNT_NOTICE, consentFromLanding, getCountConsent, setCountConsent, type CountConsent } from './lib/connectCount'
 import { markBackedUp, markUnbackedChange, needsBackup } from './lib/backupNudge'
 import { typicalRate, compoundsFor, projectStake } from './lib/yieldCalc'
+import { payoutScheduleLabel, restakeGainNim, restakeReminder, stakeTerms } from './lib/earnTerms'
 import { rewardsByValidator, rewardsSince, stakeNudge as pickStakeNudge, trailingYield } from './lib/earnInsights'
 import { splitHtlcFlows } from './lib/htlcFlows'
 import EarnCard from './EarnCard'
@@ -2861,6 +2862,36 @@ export default function App() {
   const earnRate = (earning ? currentValidator?.annualReward : null) ?? typicalRate(validators)
   const earnCompound = earning && currentValidator ? compoundsFor(currentValidator) : true
 
+  // Staking terms (Council Cycle 3): the four things every Earn position says,
+  // for the pool this account is actually with. The same copy feeds the stake
+  // panel further down, for the pool that stake would go to.
+  const scheduleLabel = payoutScheduleLabel(currentValidator?.payoutSchedule)
+  const terms = stakeTerms({
+    validator: earning ? currentValidator : null,
+    hasStaker: earning,
+    scheduleLabel,
+  })
+  const restakeGain =
+    earning && currentValidator?.payoutType === 'direct'
+      ? restakeGainNim({ stakedNim: activeStakeNim, rate: earnRate ?? null })
+      : null
+  // Mini apps get no push notifications, so the reminder is a calendar event.
+  // Built once: the next day at 09:00 local time does not change per render.
+  const reminder = useMemo(
+    () => restakeReminder({ nowMs: Date.now(), appUrl: 'https://nimbooks.subimpact.net/' }),
+    []
+  )
+  const panelValidator = selectedValidator
+    ? (validators.find((v) => cleanAddr(v.address) === selectedValidator) ?? null)
+    : currentValidator
+  const panelTerms = stakeTerms({
+    validator: panelValidator,
+    // The panel describes a picked pool, whether or not this account already
+    // stakes: use its name in "how it works" as soon as one is known.
+    hasStaker: hasStaker || !!selectedValidator,
+    scheduleLabel: payoutScheduleLabel(panelValidator?.payoutSchedule),
+  })
+
   const openStake = () => {
     // A verification still in flight keeps its card — reopening mid-check
     // resumes the confirming step rather than resetting to a form. Anything
@@ -4615,6 +4646,12 @@ export default function App() {
     rewardsSinceVisit: rewardsSincePreviousVisit,
     trailing: actualYield,
     validatorEarnings: validatorEarnings,
+    terms: terms,
+    payoutType: earning ? currentValidator?.payoutType : undefined,
+    scheduleLabel: scheduleLabel,
+    restakeGainNim: restakeGain,
+    inNimiqPay: inNimiqPay,
+    reminder: reminder,
   }
   // In beta the earn card is rebuilt on the kit inside BetaOverview; the
   // classic card only ever renders in the classic look.
@@ -6801,6 +6838,31 @@ export default function App() {
                     </button>
                   </div>
                 )}
+
+                {/* The same four terms the Earn card shows, for the pool this
+                    stake would go to. Rendered in demo mode too: the panel is
+                    read-only there, not information-free. */}
+                <div className="stake-terms">
+                  <span className="label">Before you stake</span>
+                  <dl className="earn-terms">
+                    <div>
+                      <dt>How it works</dt>
+                      <dd>{panelTerms.howItWorks}</dd>
+                    </div>
+                    <div>
+                      <dt>Rate</dt>
+                      <dd>{panelTerms.rate}</dd>
+                    </div>
+                    <div>
+                      <dt>What can go wrong</dt>
+                      <dd>{panelTerms.risk}</dd>
+                    </div>
+                    <div>
+                      <dt>Getting out</dt>
+                      <dd>{panelTerms.exit}</dd>
+                    </div>
+                  </dl>
+                </div>
 
                 {/* A submitted stake is no longer reported here: it takes over
                     the panel with a confirming step and then a confirmed card,

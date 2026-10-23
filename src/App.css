@@ -4086,6 +4086,52 @@ a.btn-ghost.btn-link {
 .earn-validator-amount {
   color: var(--muted);
 }
+/* Staking terms: the four things every Earn position says (Council Cycle 3):
+   how it works, that the rate varies, what can go wrong, how long getting out
+   takes. Small type, bold labels, one row each. */
+.earn-terms {
+  margin: 10px 0 0;
+  display: grid;
+  gap: 5px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.earn-terms div {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: 8px;
+}
+.earn-terms dt {
+  font-weight: 700;
+  color: var(--text);
+}
+.earn-terms dd {
+  margin: 0;
+}
+/* The restake loop, for pools that pay rewards into the wallet. */
+.earn-restake {
+  margin: 10px 0 0;
+  display: grid;
+  gap: 4px;
+}
+.earn-restake-line {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text);
+}
+.earn-reminder {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.earn-reminder .btn-link-inline {
+  font-size: 12px;
+}
 /* "Stake it?" card, directly under the Earn card. */
 .stake-nudge {
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
