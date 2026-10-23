@@ -88,6 +88,128 @@ const staker = (nim) => ({ result: { data: { address: ADDR, balance: nim * NIM, 
     check(`${name}: no page errors`, errors.length === 0, errors.join(' | '))
     await ctx.close()
   }
+
+  // --- Staking terms + the restake loop (Council Cycle 3) ---
+  // Deterministic validator list: the staker's pool pays rewards into the
+  // wallet ('direct', with a free-text schedule), and a second pool restakes.
+  const RESTAKE = 'NQ62 68D7 RQHN MSTR 1Y0T SY1P HU89 5QJ5 YV05'
+  const RESTAKE_FLAT = RESTAKE.replace(/\s+/g, '')
+  const FIXTURE = [
+    {
+      id: 1,
+      name: 'ImpactZero',
+      address: IZ,
+      fee: 0.025,
+      balance: 45000000000000,
+      dominanceRatio: 0.05,
+      score: { reliability: 0.99 },
+      payoutType: 'direct',
+      payoutSchedule: 'Every 12 hours',
+      isListed: true,
+    },
+    {
+      id: 2,
+      name: 'Moon Pool',
+      address: RESTAKE_FLAT,
+      fee: 0.01,
+      balance: 36000000000000,
+      dominanceRatio: 0.04,
+      score: { reliability: 0.98 },
+      payoutType: 'restake',
+      payoutSchedule: '0 */6 * * *',
+      isListed: true,
+    },
+  ]
+  const stakerOn = (delegation, nim) => ({
+    result: {
+      data: { address: ADDR, balance: nim * NIM, delegation, inactiveBalance: 0, inactiveFrom: null, retiredBalance: 0 },
+    },
+  })
+
+  async function openFixture(stakerRes, basicNim) {
+    const ctx = await browser.newContext({ viewport: { width: 360, height: 780 }, userAgent: PAY_UA })
+    await ctx.addInitScript(([addr]) => {
+      localStorage.setItem('nimbooks:session', JSON.stringify({ provider: 'pay', nimiqAddress: addr, view: 'overview' }))
+      localStorage.setItem('nimbooks:countConsent', 'no')
+      window.nimiqPay = {}
+    }, [ADDR])
+    const page = await ctx.newPage()
+    const errors = []
+    page.on('pageerror', (e) => errors.push(String(e)))
+    await page.route('**/validators-api-main.je-cf9.workers.dev/**', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(FIXTURE) })
+    )
+    await page.route('**/rpc.nimiqwatch.com/**', async (route) => {
+      const body = route.request().postData() || ''
+      let req = {}
+      try { req = JSON.parse(body) } catch {}
+      const reply = (payload) => route.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify({ jsonrpc: '2.0', id: req.id, ...payload }) })
+      if (req.method === 'getStakerByAddress') return reply(stakerRes)
+      if (req.method === 'getAccountByAddress' && String(req.params?.[0]).replace(/\s+/g, '') === FLAT)
+        return reply({ result: { data: { address: FLAT, balance: basicNim * NIM, type: 'basic' } } })
+      if (req.method === 'getTransactionsByAddress') return reply({ result: { data: [] } })
+      return route.continue()
+    })
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' })
+    await page.waitForSelector('.earn-card', { timeout: 25000 })
+    await page.waitForTimeout(4000)
+    return { ctx, page, errors }
+  }
+
+  const TERM_LABELS = ['How it works', 'Rate', 'What can go wrong', 'Getting out']
+
+  // Direct pool: terms, the restake line, the relabelled button, the reminder.
+  {
+    const { ctx, page, errors } = await openFixture(stakerOn(IZ, 7620.55), 500)
+    const card = page.locator('.earn-card')
+    const labels = (await card.locator('.earn-terms dt').allInnerTexts()).map((s) => s.trim())
+    check('direct: the four staking-term labels', TERM_LABELS.every((l) => labels.includes(l)), labels.join(' | '))
+    const text = (await card.innerText()).replace(/\s+/g, ' ')
+    check(
+      'direct: restake line names the pool and the yearly gain',
+      /ImpactZero pays your rewards into your wallet instead of restaking them\. Restaking them adds about [\d,.]+ NIM a year\./.test(text),
+      text.slice(0, 500)
+    )
+    check('direct: terms risk says it pays into the wallet every 12 hours', /pays rewards into your wallet every 12 hours/.test(text), text.slice(0, 600))
+    const primary = card.locator('.btn-primary')
+    const primaryText = (await primary.count()) ? ((await primary.first().textContent()) || '').trim() : 'none'
+    check('direct: primary button relabelled Restake 500 NIM', (await primary.count()) === 1 && primaryText === 'Restake 500 NIM', primaryText)
+    const gcal = card.locator('a', { hasText: 'Google Calendar' })
+    const href = (await gcal.count()) ? await gcal.first().getAttribute('href') : ''
+    check('direct: Google Calendar link', href.startsWith('https://calendar.google.com/calendar/render?'), href)
+    check('direct: Pay WebView hides the .ics download', (await card.locator('button', { hasText: 'Download .ics' }).count()) === 0)
+    check('direct: Pay WebView offers Copy link', (await card.locator('button', { hasText: 'Copy link' }).count()) === 1)
+    check('direct: no em-dash', !text.includes('\u2014'))
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+    check('direct: no horizontal overflow @360', overflow <= 1, `overflow=${overflow}`)
+
+    // The stake panel carries the same four rows for the pool it would use.
+    await primary.first().click()
+    await page.waitForSelector('.modal[aria-label="Stake NIM"]', { timeout: 10000 })
+    await page.waitForTimeout(800)
+    const modal = (await page.locator('.modal').innerText()).replace(/\s+/g, ' ')
+    check('stake panel: Before you stake', /before you stake/i.test(modal), modal.slice(0, 300))
+    check('stake panel: Getting out', modal.includes('Getting out'), modal.slice(0, 300))
+    check('stake panel: How it works', modal.includes('How it works'), modal.slice(0, 300))
+    check('stake panel: describes the pool', /ImpactZero \(2\.5% fee\) produces blocks/.test(modal), modal.slice(0, 500))
+    check('direct: no page errors', errors.length === 0, errors.join(' | '))
+    await ctx.close()
+  }
+
+  // Restaking pool: terms show, but there is no restake row to add.
+  {
+    const { ctx, page, errors } = await openFixture(stakerOn(RESTAKE_FLAT, 7620.55), 0)
+    const card = page.locator('.earn-card')
+    const labels = (await card.locator('.earn-terms dt').allInnerTexts()).map((s) => s.trim())
+    check('restake pool: the four staking-term labels', TERM_LABELS.every((l) => labels.includes(l)), labels.join(' | '))
+    check('restake pool: no restake row', (await card.locator('[data-probe="earn-restake"]').count()) === 0)
+    const text = (await card.innerText()).replace(/\s+/g, ' ')
+    check('restake pool: risk says the pool restakes', /Moon Pool adds your rewards to your stake every 6 hours\./.test(text), text.slice(0, 600))
+    check('restake pool: no em-dash', !text.includes('\u2014'))
+    check('restake pool: no page errors', errors.length === 0, errors.join(' | '))
+    await ctx.close()
+  }
+
   await browser.close()
   console.log(`\n${pass} passed, ${fail} failed`)
   process.exit(fail ? 1 : 0)

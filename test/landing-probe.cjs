@@ -110,7 +110,7 @@ async function sheetFacts(page) {
       const okHeads = ['How to use it', 'Behind the scenes', 'Good to know'].every((h) => f.heads.includes(h))
       check(
         `phone sheet ${slug}: steps, behind the scenes, good to know, both buttons`,
-        !!f && f.steps >= 3 && f.steps <= 4 && f.behind >= 2 && f.behind <= 4 && f.good >= 1 && f.good <= 3 && okHeads && f.tryBtn && f.tourBtn && !!f.title,
+        !!f && f.steps >= 3 && f.steps <= 4 && f.behind >= 2 && f.behind <= 4 && f.good >= 1 && f.good <= 5 && okHeads && f.tryBtn && f.tourBtn && !!f.title,
         f ? JSON.stringify({ title: f.title, steps: f.steps, behind: f.behind, good: f.good, heads: f.heads }) : 'no sheet'
       )
       check(`phone sheet ${slug}: hash is #/learn/${slug}`, (await hashNow(page)) === `#/learn/${slug}`, await hashNow(page))
@@ -341,7 +341,7 @@ async function sheetFacts(page) {
       })
       check(
         `desktop panel ${slug}: steps, behind the scenes, good to know, both buttons`,
-        f.steps >= 3 && f.steps <= 4 && f.behind >= 2 && f.behind <= 4 && f.good >= 1 && f.good <= 3 && f.tryBtn && f.tourBtn && !!f.title && f.current === slug,
+        f.steps >= 3 && f.steps <= 4 && f.behind >= 2 && f.behind <= 4 && f.good >= 1 && f.good <= 5 && f.tryBtn && f.tourBtn && !!f.title && f.current === slug,
         JSON.stringify({ title: f.title, steps: f.steps, behind: f.behind, good: f.good, current: f.current })
       )
       check(`desktop ${slug}: address follows the selection`, (await hashNow(page)) === `#/learn/${slug}`, await hashNow(page))

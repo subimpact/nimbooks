@@ -248,6 +248,12 @@ async function readBetaBadge(page) {
   await page.locator('[data-probe="earn-toggle"]').click()
   await page.locator('[data-probe="earn-since"], [data-probe="earn-year"]').first().waitFor()
   check('(e) expands again', (await page.locator('[data-probe="earn-summary"]').count()) === 0)
+  const betaTerms = (await page.locator('[data-probe="earn-terms"] dt').allInnerTexts()).map((s) => s.trim())
+  check(
+    '(e) beta earn card shows the four staking-term labels',
+    ['How it works', 'Rate', 'What can go wrong', 'Getting out'].every((l) => betaTerms.includes(l)),
+    betaTerms.join(' | ')
+  )
 
   // (f) The calculator: a drawer inside .ui-beta, same numbers as classic.
   await page.locator('[data-probe="earn-maths"]').click()
