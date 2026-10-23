@@ -10,9 +10,11 @@
 // inside its own .ui-beta scope: it must import nothing beyond the shared libs
 // (lib/chain, lib/yieldCalc) and the beta kit.
 
+import { useEffect, useRef, useState } from 'react'
 import { ChevronDownIcon } from 'lucide-react'
 import { formatFiat, type CurrencyCode } from '../lib/chain'
 import { projectStake } from '../lib/yieldCalc'
+import type { StakeTerms } from '../lib/earnTerms'
 import { Button } from './components/ui/button'
 import { CardContent } from './components/ui/card'
 import {
@@ -41,6 +43,12 @@ export default function BetaEarnCard({
   rewardsSinceVisit = null,
   trailing = null,
   validatorEarnings = [],
+  terms = null,
+  payoutType,
+  scheduleLabel = null,
+  restakeGainNim = null,
+  inNimiqPay = false,
+  reminder = null,
 }: {
   /** Active stake, NIM. */
   stakedNim: number
@@ -66,6 +74,18 @@ export default function BetaEarnCard({
   trailing?: { rate: number; windowDays: number } | null
   /** All-time earnings per validator, largest first. */
   validatorEarnings?: readonly { address: string; name: string; nim: number; firstMs: number; lastMs: number }[]
+  /** The four staking-terms rows, or null while there is nothing to say. */
+  terms?: StakeTerms | null
+  /** How the pool pays rewards ('restake' | 'direct' | 'none' | undefined). */
+  payoutType?: string
+  /** Human label for the pool's payout schedule (lib/earnTerms). */
+  scheduleLabel?: string | null
+  /** What restaking rewards adds over a year, NIM. Only for a direct pool. */
+  restakeGainNim?: number | null
+  /** Inside Nimiq Pay's WebView: downloads do not work, clipboard does. */
+  inNimiqPay?: boolean
+  /** Weekly restake reminder (.ics and Google Calendar link). */
+  reminder?: { ics: string; googleUrl: string } | null
 }) {
   const yearOf = (nim: number) =>
     rate === null ? null : projectStake({ principalNim: nim, annualRateNow: rate, months: 12, compound }).firstYearNim
@@ -77,6 +97,48 @@ export default function BetaEarnCard({
   const canStakeIdle = hasStaker ? idleNim >= 1 : canStartStaking
   const showIdle = idleYear !== null && canStakeIdle
   const fiat = (nim: number) => (nimPrice > 0 ? ` ≈ ${formatFiat(nim * nimPrice, currency)}` : '')
+
+  // The restake loop (Council Cycle 3), identical conditions to the classic
+  // card: a direct pool pays rewards into the wallet, so offer the restake tap
+  // and say what compounding would add over a year.
+  const showRestake = hasStaker && payoutType === 'direct'
+  const gain = showRestake ? restakeGainNim : null
+  const restakeLabel = showRestake && idleNim >= 1 ? `Restake ${nimFmt(idleNim, lang)} NIM` : null
+  const reminderLink = showRestake ? reminder : null
+  const reminderLinkClass =
+    'tw:text-xs tw:font-semibold tw:text-accent-foreground tw:underline tw:underline-offset-2'
+
+  const [copyState, setCopyState] = useState<'idle' | 'ok' | 'fail'>('idle')
+  const copyTimer = useRef<number | null>(null)
+  useEffect(
+    () => () => {
+      if (copyTimer.current) window.clearTimeout(copyTimer.current)
+    },
+    []
+  )
+  const downloadReminder = () => {
+    if (!reminderLink) return
+    const blob = new Blob([reminderLink.ics], { type: 'text/calendar;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'nimbooks-restake-reminder.ics'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
+  const copyReminder = async () => {
+    if (!reminderLink) return
+    try {
+      await navigator.clipboard.writeText(reminderLink.googleUrl)
+      setCopyState('ok')
+    } catch {
+      setCopyState('fail')
+    }
+    if (copyTimer.current) window.clearTimeout(copyTimer.current)
+    copyTimer.current = window.setTimeout(() => setCopyState('idle'), 2000)
+  }
 
   return (
     <CardContent className="tw:flex tw:flex-col tw:gap-2">
@@ -158,11 +220,67 @@ export default function BetaEarnCard({
         </p>
       )}
 
+      {terms && (
+        <dl
+          className="tw:m-0 tw:grid tw:gap-1.5 tw:text-xs tw:text-muted-foreground"
+          data-probe="earn-terms"
+          data-schedule={scheduleLabel ?? undefined}
+        >
+          <div className="tw:grid tw:grid-cols-[96px_1fr] tw:gap-x-3">
+            <dt className="tw:font-semibold tw:text-foreground">How it works</dt>
+            <dd className="tw:m-0">{terms.howItWorks}</dd>
+          </div>
+          <div className="tw:grid tw:grid-cols-[96px_1fr] tw:gap-x-3">
+            <dt className="tw:font-semibold tw:text-foreground">Rate</dt>
+            <dd className="tw:m-0">{terms.rate}</dd>
+          </div>
+          <div className="tw:grid tw:grid-cols-[96px_1fr] tw:gap-x-3">
+            <dt className="tw:font-semibold tw:text-foreground">What can go wrong</dt>
+            <dd className="tw:m-0">{terms.risk}</dd>
+          </div>
+          <div className="tw:grid tw:grid-cols-[96px_1fr] tw:gap-x-3">
+            <dt className="tw:font-semibold tw:text-foreground">Getting out</dt>
+            <dd className="tw:m-0">{terms.exit}</dd>
+          </div>
+        </dl>
+      )}
+
+      {showRestake && (
+        <div className="tw:grid tw:gap-1" data-probe="earn-restake">
+          <p className="tw:m-0 tw:text-sm">
+            {`${validatorName ?? 'Your pool'} pays your rewards into your wallet instead of restaking them.`}
+            {gain !== null && gain >= 0.01 ? ` Restaking them adds about ${nimFmt(gain, lang)} NIM a year.` : ''}
+          </p>
+          {reminderLink && (
+            <p className="tw:m-0 tw:flex tw:flex-wrap tw:items-center tw:gap-2 tw:text-xs tw:text-muted-foreground">
+              Get a weekly reminder:{' '}
+              <a
+                className={reminderLinkClass}
+                href={reminderLink.googleUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Google Calendar
+              </a>
+              {inNimiqPay ? (
+                <button className={reminderLinkClass} onClick={copyReminder}>
+                  {copyState === 'ok' ? 'Copied' : copyState === 'fail' ? 'Copy failed' : 'Copy link'}
+                </button>
+              ) : (
+                <button className={reminderLinkClass} onClick={downloadReminder}>
+                  Download .ics
+                </button>
+              )}
+            </p>
+          )}
+        </div>
+      )}
+
       <div className="tw:flex tw:flex-wrap tw:items-center tw:gap-2">
         {canStakeIdle && (
           // The one gold action on this screen: staking.
           <Button className="tw:min-h-[44px] tw:flex-1" onClick={onStake} data-probe="earn-stake">
-            {hasStaker ? 'Stake idle NIM' : 'Start earning'}
+            {restakeLabel ?? (hasStaker ? 'Stake idle NIM' : 'Start earning')}
           </Button>
         )}
         <Button variant="outline" className="tw:min-h-[44px]" onClick={onCalculator} data-probe="earn-maths">

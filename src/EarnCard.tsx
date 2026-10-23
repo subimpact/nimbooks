@@ -7,8 +7,10 @@
 // they include this year's emission decline and, for restaking pools,
 // compounding: the same maths as the calculator behind "See the maths".
 
+import { useEffect, useRef, useState } from 'react'
 import { formatFiat, type CurrencyCode } from './lib/chain'
 import { projectStake } from './lib/yieldCalc'
+import type { StakeTerms } from './lib/earnTerms'
 
 const nimFmt = (n: number, lang: string, max = 2) => n.toLocaleString(lang, { maximumFractionDigits: max })
 const pct = (r: number, lang: string) => (r * 100).toLocaleString(lang, { maximumFractionDigits: 2 })
@@ -30,6 +32,12 @@ export default function EarnCard({
   rewardsSinceVisit = null,
   trailing = null,
   validatorEarnings = [],
+  terms = null,
+  payoutType,
+  scheduleLabel = null,
+  restakeGainNim = null,
+  inNimiqPay = false,
+  reminder = null,
 }: {
   /** Active stake, NIM. */
   stakedNim: number
@@ -55,6 +63,18 @@ export default function EarnCard({
   trailing?: { rate: number; windowDays: number } | null
   /** All-time earnings per validator, largest first. */
   validatorEarnings?: readonly { address: string; name: string; nim: number; firstMs: number; lastMs: number }[]
+  /** The four staking-terms rows, or null while there is nothing to say. */
+  terms?: StakeTerms | null
+  /** How the pool pays rewards ('restake' | 'direct' | 'none' | undefined). */
+  payoutType?: string
+  /** Human label for the pool's payout schedule (lib/earnTerms). */
+  scheduleLabel?: string | null
+  /** What restaking rewards adds over a year, NIM. Only for a direct pool. */
+  restakeGainNim?: number | null
+  /** Inside Nimiq Pay's WebView: downloads do not work, clipboard does. */
+  inNimiqPay?: boolean
+  /** Weekly restake reminder (.ics and Google Calendar link). */
+  reminder?: { ics: string; googleUrl: string } | null
 }) {
   const yearOf = (nim: number) =>
     rate === null ? null : projectStake({ principalNim: nim, annualRateNow: rate, months: 12, compound }).firstYearNim
@@ -65,6 +85,49 @@ export default function EarnCard({
   const canStartStaking = idleNim >= minStakeNim
   const showIdle = idleYear !== null && (hasStaker ? idleNim >= 1 : canStartStaking)
   const fiat = (nim: number) => (nimPrice > 0 ? ` ≈ ${formatFiat(nim * nimPrice, currency)}` : '')
+
+  // The restake loop (Council Cycle 3): a direct pool pays rewards into the
+  // wallet, so offer the same tap that a restaking pool does on its own, and
+  // say what compounding would add over a year.
+  const showRestake = hasStaker && payoutType === 'direct'
+  const gain = showRestake ? restakeGainNim : null
+  const restakeLabel =
+    showRestake && idleNim >= 1 ? `Restake ${nimFmt(idleNim, lang)} NIM` : null
+  const reminderLink = showRestake ? reminder : null
+
+  // Copy link is the only reminder path inside Pay (no file downloads); show
+  // its result briefly, the way the copy buttons elsewhere do.
+  const [copyState, setCopyState] = useState<'idle' | 'ok' | 'fail'>('idle')
+  const copyTimer = useRef<number | null>(null)
+  useEffect(
+    () => () => {
+      if (copyTimer.current) window.clearTimeout(copyTimer.current)
+    },
+    []
+  )
+  const downloadReminder = () => {
+    if (!reminderLink) return
+    const blob = new Blob([reminderLink.ics], { type: 'text/calendar;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'nimbooks-restake-reminder.ics'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
+  const copyReminder = async () => {
+    if (!reminderLink) return
+    try {
+      await navigator.clipboard.writeText(reminderLink.googleUrl)
+      setCopyState('ok')
+    } catch {
+      setCopyState('fail')
+    }
+    if (copyTimer.current) window.clearTimeout(copyTimer.current)
+    copyTimer.current = window.setTimeout(() => setCopyState('idle'), 2000)
+  }
 
   return (
     <div className="card earn-card" data-learn="earn" data-tour="earn">
@@ -146,10 +209,62 @@ export default function EarnCard({
         </p>
       )}
 
+      {terms && (
+        <dl className="earn-terms" data-probe="earn-terms" data-schedule={scheduleLabel ?? undefined}>
+          <div>
+            <dt>How it works</dt>
+            <dd>{terms.howItWorks}</dd>
+          </div>
+          <div>
+            <dt>Rate</dt>
+            <dd>{terms.rate}</dd>
+          </div>
+          <div>
+            <dt>What can go wrong</dt>
+            <dd>{terms.risk}</dd>
+          </div>
+          <div>
+            <dt>Getting out</dt>
+            <dd>{terms.exit}</dd>
+          </div>
+        </dl>
+      )}
+
+      {showRestake && (
+        <div className="earn-restake" data-probe="earn-restake">
+          <p className="earn-restake-line">
+            {`${validatorName ?? 'Your pool'} pays your rewards into your wallet instead of restaking them.`}
+            {gain !== null && gain >= 0.01 ? ` Restaking them adds about ${nimFmt(gain, lang)} NIM a year.` : ''}
+          </p>
+          {reminderLink && (
+            <p className="earn-reminder">
+              Get a weekly reminder:{' '}
+              <a
+                className="btn-link-inline"
+                href={reminderLink.googleUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Google Calendar
+              </a>
+              {inNimiqPay ? (
+                <button className="btn-link-inline" onClick={copyReminder}>
+                  {copyState === 'ok' ? 'Copied' : copyState === 'fail' ? 'Copy failed' : 'Copy link'}
+                </button>
+              ) : (
+                <button className="btn-link-inline" onClick={downloadReminder}>
+                  Download .ics
+                </button>
+              )}
+            </p>
+          )}
+        </div>
+      )}
+
       <div className="earn-actions">
         {(hasStaker ? idleNim >= 1 : canStartStaking) && (
           <button className="btn-primary" onClick={onStake}>
-            {hasStaker ? 'Stake idle NIM' : 'Start earning'}
+            {restakeLabel ?? (hasStaker ? 'Stake idle NIM' : 'Start earning')}
           </button>
         )}
         <button className="btn-link-inline" onClick={onCalculator}>

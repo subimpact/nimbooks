@@ -1150,6 +1150,9 @@ export interface ValidatorInfo {
   fee: number | null // 0.01 = 1%; null when the pool publishes no fee
   reliability: number | null // null = not producing (no score this epoch)
   payoutType?: string
+  // Free text from the API ('Every 12 hours', '0 */6 * * *', a sentence, '').
+  // Missing means an old cache from before this field existed: unknown.
+  payoutSchedule?: string
   isListed: boolean
   balance: number // Luna staked with this validator (for network total)
   annualReward: number | null // net annual yield after fee, as a fraction (0.0831 = 8.31% p.a.)
@@ -1388,6 +1391,7 @@ async function fetchValidatorsFresh(stale: ValidatorInfo[] | null): Promise<Vali
         fee,
         reliability: typeof v?.score?.reliability === 'number' ? v.score.reliability : null,
         payoutType: typeof v?.payoutType === 'string' ? v.payoutType : undefined,
+        payoutSchedule: typeof v?.payoutSchedule === 'string' ? v.payoutSchedule : undefined,
         isListed: v?.isListed !== false,
         balance,
         // Same convention as the Nimiq wallet's validator list: annual yield
