@@ -86,10 +86,12 @@ async function openCase(browser, hash, stakerRes, basicNim) {
   await sample.waitFor({ timeout: 20000 })
   await page.waitForSelector('.stake-link-waiting', { timeout: 5000 })
   const waiting = (await page.locator('.stake-link-waiting').innerText()).trim()
+  // Phone browser: Open in Nimiq Pay must carry the link through nimiqpay://
+  const payHref = await page.locator('a:has-text("Open in Nimiq Pay")').first().getAttribute('href').catch(() => null)
   await sample.click()
   await page.waitForSelector('.modal[aria-label="Stake NIM"]', { timeout: 30000 })
   await page.waitForTimeout(800)
-  return { ctx, page, errors, waiting }
+  return { ctx, page, errors, waiting, payHref }
 }
 
 ;(async () => {
@@ -97,7 +99,9 @@ async function openCase(browser, hash, stakerRes, basicNim) {
 
   // (a) Amount + validator link: panel opens, notice names both, hash gone.
   {
-    const { ctx, page, errors, waiting } = await openCase(browser, `#/stake?amount=5&validator=${encodeURIComponent(IZ)}`, stakerOnIz, 500)
+    const { ctx, page, errors, waiting, payHref } = await openCase(browser, `#/stake?amount=5&validator=${encodeURIComponent(IZ)}`, stakerOnIz, 500)
+    const handoff = payHref ? decodeURIComponent(payHref.replace('nimiqpay://miniapp?url=', '')) : ''
+    check('a: Open in Nimiq Pay carries the stake link', payHref?.startsWith('nimiqpay://miniapp?url=') && handoff === `https://nimbooks.subimpact.net/#/stake?amount=5&validator=${IZ_FLAT}`, payHref)
     const banner = (await page.locator('.stake-link-banner').innerText()).replace(/\s+/g, ' ')
     check('a: connect screen says a stake link is waiting', waiting === 'A stake link is waiting. Connect a wallet to open it.', waiting)
     check('a: stake panel opens from the link', await page.locator('.modal[aria-label="Stake NIM"]').count() === 1)

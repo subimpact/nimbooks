@@ -939,9 +939,11 @@ export async function getEvmBalances(address: string): Promise<EvmBalance[]> {
 // vetted list in currencyData.ts. The original 37 keep their exact label,
 // symbol and flag; every later row gets the uppercase code as its label, the
 // international symbol where it differs from the bare code ("AED " padding
-// where it does not, same pattern as the original AED entry), and no flag:
-// the picker and the chip render a neutral code badge for those instead of
-// an image that does not exist.
+// where it does not, same pattern as the original AED entry), and the flag of
+// the country its code starts with (ISO 4217 codes begin with the ISO 3166
+// country code), from the same Nimiq wallet flag set in public/flags/. The
+// shared currencies (XAF, XCD, XCG, XOF, XPF) and the three the set has no
+// flag for (GYD, SHP, SZL) keep the neutral code badge instead.
 export type CurrencyCode = string
 
 export interface CurrencyEntry {
@@ -1006,6 +1008,9 @@ export const WALLET_CURRENCIES: CurrencyCode[] = [...TAX_CURRENCIES, ...WALLET_E
 
 const ORIG_BY_CODE = new Map(ORIGINAL_CURRENCIES.map((c) => [c.code, c]))
 
+// No single-country flag exists for these (see the note above the type).
+const FLAGLESS_CODES = new Set(['gyd', 'shp', 'szl', 'xaf', 'xcd', 'xcg', 'xof', 'xpf'])
+
 export const CURRENCIES: CurrencyEntry[] = CURRENCY_DATA.map((meta) => {
   const orig = ORIG_BY_CODE.get(meta.code)
   if (orig) return { ...orig, name: meta.name }
@@ -1014,6 +1019,7 @@ export const CURRENCIES: CurrencyEntry[] = CURRENCY_DATA.map((meta) => {
     code: meta.code,
     label: up,
     symbol: meta.intlSymbol !== up ? meta.intlSymbol : `${up} `,
+    ...(FLAGLESS_CODES.has(meta.code) ? {} : { flag: up.slice(0, 2) }),
     name: meta.name,
   }
 })
