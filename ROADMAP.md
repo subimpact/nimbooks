@@ -23,6 +23,7 @@ _Last updated 24 October 2026. Dates are targets._
 - **"Stake it?" prompt** when a received payment leaves NIM idle (v1.33).
 - **Staking terms** on every position: how it works, that the rate varies, what can go wrong, and how long getting out takes (v1.38).
 - **Restake loop** for pools that pay rewards into your wallet: what restaking adds a year, a one-tap restake, and a weekly calendar reminder (v1.38).
+- **Stake links:** a link can open the stake panel with an amount and validator filled in. You still check and confirm it in your wallet. This is the app half of `draft_stake`; the MCP tool is still to come (v1.38).
 - **New look (beta) sidebar:** NIM price with its 24-hour or 7-day change, a ring of where your NIM is, and Stake idle NIM (v1.38).
 
 **Books and tax**
@@ -53,7 +54,7 @@ _Last updated 24 October 2026. Dates are targets._
 - **`nimbooks-mcp` 1.1:** read-only `get_staking`, `list_validators`, `project_yield` and `get_rewards` tools, sharing the app's yield maths through a parity test.
 
 ### Week 3 · 29 October – 4 November: earning beyond the basics
-- **`draft_stake` in the MCP server:** it returns a NimBooks link that opens the stake panel pre-filled. It never signs; you confirm in your own wallet.
+- **`draft_stake` in the MCP server (still to come):** it returns a NimBooks stake link, whose app half now ships. It never signs; you confirm in your own wallet.
 - **Wider MCP reach:** listings in public MCP directories, and earning prompts on the `/mcp` page.
 
 ### Week 4 · 5–11 November: polish and submit

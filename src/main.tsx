@@ -45,6 +45,10 @@ function Router() {
     return () => window.removeEventListener('hashchange', onHashChange)
   }, [])
 
+  // Stake links open the ordinary app, with the panel filled in by App.
+  if (hash === '#/stake' || hash.startsWith('#/stake?')) {
+    return <App />
+  }
   // Bare `#/verify` is the interactive verifier — paste a receipt link there.
   if (hash === '#/verify' || hash.startsWith('#/verify/')) {
     return <VerifyPage key={hash} />
