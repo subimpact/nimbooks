@@ -4826,6 +4826,31 @@ export default function App() {
   // landing and connect screens are always classic.
   const betaShellOn = uiBeta && !!account
 
+  // Sidebar "Where your NIM is": one row per EVM asset (the same symbol can
+  // sit on several chains), priced with the display-currency table. An
+  // unpriced asset stays NaN so the row can say "Price unavailable".
+  const evmFiatBySymbol: Record<string, number> = {
+    usdt: shown.usdt,
+    pol: shown.pol,
+    eth: shown.eth,
+  }
+  const evmSidebarRows: Array<{ symbol: string; amount: number; fiat: number }> = []
+  for (const balance of evmBalances) {
+    const amount = Number(balance.balance) / 10 ** balance.decimals
+    const fiatValue = evmFiatBySymbol[balance.symbol.toLowerCase()] ?? NaN
+    const existing = evmSidebarRows.find((row) => row.symbol === balance.symbol)
+    if (existing) {
+      existing.amount += Number.isFinite(amount) ? amount : 0
+      existing.fiat += fiatValue
+    } else {
+      evmSidebarRows.push({
+        symbol: balance.symbol,
+        amount: Number.isFinite(amount) ? amount : 0,
+        fiat: fiatValue,
+      })
+    }
+  }
+
   // The beta ("New look (beta)") wiring: one props object per beta screen,
   // sourced from the same closures the classic sections read, so the two
   // looks can never drift on inputs or actions.
@@ -4842,6 +4867,33 @@ export default function App() {
     onRefresh: () => refresh(account),
     refreshing: loading,
     countdown: !demoMode && !loading && account.nimiqAddress ? countdown : null,
+    price: {
+      nim: shown.nim,
+      currency,
+      // USD -> display currency for the history points: the NIM pair when
+      // both legs are known, else the stablecoin table (NaN when neither).
+      usdToCur:
+        hasRate(fiat.nim[currency]) && hasRate(fiat.nim.usd)
+          ? fiat.nim[currency] / fiat.nim.usd
+          : fiat.usdt[currency],
+      lang,
+    },
+    holdings: {
+      availableLuna: Number(nimBalance) || 0,
+      stakedLuna,
+      movingLuna: htlcLuna,
+      vestedLuna,
+      evm: evmSidebarRows,
+    },
+    stake: {
+      // A staker can add any amount above 1 NIM; a first stake must clear the
+      // protocol's 100 NIM minimum (same rule the Earn card uses).
+      show: earning ? stakeMaxNim >= 1 : stakeMaxNim >= MIN_STAKE_NIM,
+      onStake: () => {
+        openStake()
+        if (stakeMaxNim > 0) setStakeAmount(String(Math.floor(stakeMaxNim)))
+      },
+    },
     notices: (
       <>
         {error && (
