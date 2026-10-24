@@ -2915,6 +2915,26 @@ a.btn-ghost.btn-link {
   margin: 0 0 12px;
 }
 
+/* Link-opened stake panel: always says where the amount and validator came
+   from, so a crafted link cannot look like an ordinary stake. Same amber
+   placement as the demo banner, its own class and message. */
+.stake-link-banner {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 0 0 12px;
+}
+
+.stake-link-waiting {
+  font-weight: 600;
+  color: var(--accent);
+}
+
 /* Standalone amber note (e.g. the send sheet's "Checking the chain…"
    heading during a Pay outcome-unknown). Same tint the demo banner uses:
    amber, "wait and check", not the error red. */

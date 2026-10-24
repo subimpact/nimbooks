@@ -135,6 +135,7 @@ import {
   upsertInvoice,
   type StoredInvoice,
 } from './lib/invoice'
+import { parseStakeLink, type StakeLinkIntent } from './lib/stakeLink'
 import { seedDemoData } from './lib/demoData'
 import { getAllRestakeRewardTxs } from './lib/stakingEvents'
 import {
@@ -313,6 +314,58 @@ function mergeRates(base: FiatRates, cached?: Partial<FiatRates>): FiatRates {
 
 function cleanAddr(address: string): string {
   return address.replace(/\s+/g, '').toUpperCase()
+}
+
+const STAKE_INTENT_KEY = 'nimbooks:stakeIntent'
+const STAKE_LINK_MAX_LUNA = 21_000_000_000 * 100_000
+
+// The link intent is public data (amount + validator) kept for one tab while a
+// wallet is still connecting. It is cleared the moment the panel consumes it,
+// and on disconnect, so a reload or a later wallet never reopens it.
+function loadStoredStakeIntent(): StakeLinkIntent | null {
+  try {
+    const raw = sessionStorage.getItem(STAKE_INTENT_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<StakeLinkIntent>
+    const amountLuna =
+      typeof parsed.amountLuna === 'number' &&
+      Number.isSafeInteger(parsed.amountLuna) &&
+      parsed.amountLuna > 0 &&
+      parsed.amountLuna <= STAKE_LINK_MAX_LUNA
+        ? parsed.amountLuna
+        : null
+    const validator =
+      typeof parsed.validator === 'string' && isValidNimiqAddress(parsed.validator)
+        ? parsed.validator.replace(/\s+/g, '').toUpperCase()
+        : null
+    const warnings = Array.isArray(parsed.warnings)
+      ? parsed.warnings.filter((w): w is string => typeof w === 'string').slice(0, 6)
+      : []
+    return { amountLuna, validator, warnings }
+  } catch {
+    return null
+  }
+}
+
+function saveStoredStakeIntent(intent: StakeLinkIntent): void {
+  try {
+    sessionStorage.setItem(STAKE_INTENT_KEY, JSON.stringify(intent))
+  } catch {
+    /* storage full or blocked: the panel still opens in this page load */
+  }
+}
+
+function clearStoredStakeIntent(): void {
+  try {
+    sessionStorage.removeItem(STAKE_INTENT_KEY)
+  } catch {
+    /* nothing to clear */
+  }
+}
+
+function shortStakeAddress(address: string): string {
+  const clean = address.replace(/\s+/g, '').toUpperCase()
+  return `${clean.slice(0, 8)}...${clean.slice(-4)}`
 }
 
 // The storage a session preference lives in for the connected account: per tab
@@ -936,6 +989,27 @@ export default function App() {
   // exactly like the send sheet.
   const [stakeCelebrate, setStakeCelebrate] = useState<string | null>(null)
   const stakeCelebrateTimer = useRef<number | null>(null)
+  // A stake link's intent, kept until a wallet and the validator list are
+  // ready. The notice is the link-opened panel's phishing guard: it stays on
+  // screen for as long as that panel does, then clears with it.
+  const [stakeLinkIntent, setStakeLinkIntent] = useState<StakeLinkIntent | null>(null)
+  const [stakeLinkNotice, setStakeLinkNotice] = useState<string | null>(null)
+  const stakeLinkConsumedRef = useRef(false)
+
+  // Capture at boot: the hash is the link's payload. Save only the public
+  // intent, then take the route off the URL so a reload or Back does not
+  // trigger it again.
+  useEffect(() => {
+    const fromHash = parseStakeLink(window.location.hash)
+    if (fromHash) {
+      saveStoredStakeIntent(fromHash)
+      setStakeLinkIntent(fromHash)
+      window.history.replaceState(null, '', window.location.pathname + window.location.search)
+      return
+    }
+    const stored = loadStoredStakeIntent()
+    if (stored) setStakeLinkIntent(stored)
+  }, [])
 
   // Onboarding tour state machine (see lib/tour.ts). The App owns setView, so
   // TourHost asks it to navigate via onNavigate when a route step is entered.
@@ -2624,6 +2698,7 @@ export default function App() {
     if (unstakeSubmitted?.source === 'panel' && unstakeVerify !== 'checking') {
       resetUnstakeFlow()
     }
+    setStakeLinkNotice(null)
     setStakeOpen(false)
   }, [clearStakeCelebration, stakeVerify, unstakeSubmitted?.source, unstakeVerify, resetUnstakeFlow])
 
@@ -2916,6 +2991,113 @@ export default function App() {
     }
     setStakeOpen(true)
   }
+
+  // Open a waiting stake link once the wallet is connected, its balance is
+  // known and the validator list has answered. The link prefills only; it never
+  // submits, and it never invents a validator for a link that named none.
+  useEffect(() => {
+    const intent = stakeLinkIntent
+    if (!intent || !account?.nimiqAddress || stakeLinkConsumedRef.current) return
+    if (validators.length === 0 && !validatorsError) return
+    // A capped amount needs the real free balance, so wait for the connect
+    // refresh rather than treating the first 0 as the wallet's balance.
+    if (intent.amountLuna !== null && (nimBalance === null || loading)) return
+
+    stakeLinkConsumedRef.current = true
+    clearStoredStakeIntent()
+    setStakeLinkIntent(null)
+    openStake()
+
+    const warnings = [...intent.warnings]
+    // No link validator means no selection at all. A stale selection from an
+    // earlier panel in this session must not leak into the link.
+    if (!hasStaker) setSelectedValidator(null)
+
+    let appliedLuna = intent.amountLuna
+    if (appliedLuna !== null) {
+      const freeLuna = Math.max(0, Math.floor(stakeMaxLuna))
+      if (appliedLuna > freeLuna) {
+        appliedLuna = freeLuna
+        warnings.push(
+          `Only ${formatLuna(String(freeLuna), lang)} NIM is free to stake, so the amount was capped.`
+        )
+      }
+      if (!hasStaker && appliedLuna < MIN_STAKE_LUNA) {
+        if (freeLuna >= MIN_STAKE_LUNA) {
+          appliedLuna = MIN_STAKE_LUNA
+          warnings.push(
+            `A first stake starts at ${MIN_STAKE_NIM} NIM, so the amount was set to the minimum.`
+          )
+        } else {
+          warnings.push(
+            `A first stake needs at least ${MIN_STAKE_NIM} NIM, and only ${formatLuna(String(freeLuna), lang)} NIM is free to stake.`
+          )
+        }
+      }
+      if (appliedLuna > 0) setStakeAmount(formatLunaExact(String(appliedLuna)))
+    }
+
+    const linkedValidator = intent.validator
+      ? (validators.find((v) => cleanAddr(v.address) === intent.validator) ?? null)
+      : null
+    if (intent.validator) {
+      if (!linkedValidator) {
+        warnings.push('That validator is not in the live validator list, so it was not selected.')
+      } else if (stakingHolding) {
+        const current = lockedDelegation ? cleanAddr(lockedDelegation) : null
+        if (current === intent.validator) {
+          warnings.push(
+            `Your stake is already with ${linkedValidator.name}, so the link's validator matches it.`
+          )
+        } else {
+          warnings.push(
+            'Your stake is already delegated, so the link\'s validator was not selected. Adding stake stays with your current validator; switching needs an unstake first.'
+          )
+        }
+      } else if (linkedValidator.reliability === null && !isPinnedValidator(linkedValidator.address)) {
+        warnings.push(
+          `${linkedValidator.name} is not producing rewards right now, so it was not selected.`
+        )
+      } else {
+        setSelectedValidator(cleanAddr(linkedValidator.address))
+      }
+    }
+
+    const linkAmount =
+      intent.amountLuna !== null ? `${formatLuna(String(intent.amountLuna), lang)} NIM` : null
+    const linkValidator = intent.validator
+      ? linkedValidator
+        ? `${linkedValidator.name} (${shortStakeAddress(linkedValidator.address)})`
+        : shortStakeAddress(intent.validator)
+      : null
+    let notice: string
+    if (linkAmount && linkValidator) {
+      notice = `Opened from a link: ${linkAmount} with ${linkValidator}. Check both before you confirm.`
+    } else if (linkAmount) {
+      notice = `Opened from a link: ${linkAmount}. Check it before you confirm.`
+    } else if (linkValidator) {
+      notice = `Opened from a link: ${linkValidator}. Check it before you confirm.`
+    } else {
+      notice = 'Opened from a link. Check the amount and validator before you confirm.'
+    }
+    if (warnings.length > 0) notice += ' ' + warnings.join(' ')
+    setStakeLinkNotice(notice)
+    // openStake is stable for this one shot; reading it off the render keeps
+    // the effect from reopening when unrelated state changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    stakeLinkIntent,
+    account?.nimiqAddress,
+    validators,
+    validatorsError,
+    nimBalance,
+    loading,
+    stakeMaxLuna,
+    stakingHolding,
+    hasStaker,
+    lockedDelegation,
+    lang,
+  ])
 
   // --- Reasons to come back (lib/earnInsights): all local, nothing sent. ---
   // Actual yield over the trailing month, next to the estimate above: rewards
@@ -3958,6 +4140,10 @@ export default function App() {
     setMemoInput('')
     setShownQrId(null)
     setStakeOpen(false)
+    setStakeLinkNotice(null)
+    clearStoredStakeIntent()
+    setStakeLinkIntent(null)
+    stakeLinkConsumedRef.current = false
     setCurrencyOpen(false)
     setSelectedValidator(null)
     setStakeAmount('')
@@ -4453,6 +4639,9 @@ export default function App() {
             )}
           </header>
           <main className="connect-panel">
+            {stakeLinkIntent && (
+              <p className="stake-link-waiting">A stake link is waiting. Connect a wallet to open it.</p>
+            )}
             {inNimiqPay ? (
               <>
                 <button className="btn-primary" onClick={connect} disabled={connecting || hubConnecting}>
@@ -6582,6 +6771,12 @@ export default function App() {
                 ✕
               </button>
             </div>
+
+            {stakeLinkNotice && (
+              <p className="stake-link-banner" role="status">
+                {stakeLinkNotice}
+              </p>
+            )}
 
             <div className="stake-status">
               <span className="label">Your stake</span>

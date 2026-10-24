@@ -57,7 +57,8 @@ runs the whole UI on a real public address, with no signing.
 
 ```
 src/
-├── App.tsx              Main app: Overview, History, Receipts, Request, Export
+├── App.tsx              Main app: Overview, History, Receipts, Request, Export;
+│                        #/stake opens the stake panel from a share link
 ├── EarnCard.tsx         Top of Overview: what the stake earns, or could
 ├── YieldCalculator.tsx  "See the maths": projection, chart, year table
 ├── Analytics.tsx        Daily net flow and balance trajectory (pure SVG)
@@ -79,6 +80,7 @@ src/
     ├── tax.ts, taxCsv.ts FIFO gains, staking income, Koinly/CoinTracking/CTC CSVs
     ├── receipt.ts       Receipt encode, Ed25519 verify, signer binding, chain check
     ├── invoice.ts       Payment requests: exact Luna maths, link encoding
+    ├── stakeLink.ts     Stake links: parse/build #/stake?amount=…&validator=…
     ├── cashlink.ts      Cashlink format, byte-for-byte with the Hub
     ├── backup.ts        Export/restore of everything on the device
     ├── connectCount.ts  Consent for the public wallet count

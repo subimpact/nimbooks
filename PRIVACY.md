@@ -1,6 +1,6 @@
 # NimBooks privacy
 
-_Last updated 22 October 2026 (v1.37.0)._
+_Last updated 24 October 2026 (v1.38.0)._
 
 The short version:
 - **No account and no keys.** Your wallet signs everything; NimBooks never sees a private key.
@@ -43,6 +43,12 @@ list are preferences, so a backup carries them; in demo mode the sample wallet
 keeps both per tab (sessionStorage) and never writes them to localStorage.
 Neither key is anything but a timestamp or list of transaction hashes, and
 neither ever leaves your device.
+
+A stake link that opens the panel keeps its public values for the tab only:
+
+| What | Key |
+|---|---|
+| Stake link amount and validator, cleared once the panel opens or you disconnect | `nimbooks:stakeIntent` (sessionStorage) |
 
 None of this is sent anywhere. It also means **clearing site data, or signing
 out of Nimiq Pay, deletes it.** Export → Backup & restore gives you a copy to
