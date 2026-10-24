@@ -42,11 +42,20 @@ const stakerOnIz = {
   },
 }
 
-async function openCase(browser, hash, stakerRes, basicNim) {
-  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } })
-  await ctx.addInitScript(() => {
-    localStorage.setItem('nimbooks:countConsent', 'no')
+async function openCase(browser, hash, stakerRes, basicNim, opts = {}) {
+  const paySession = opts.paySession === true
+  const validatorDelayMs = Number(opts.validatorDelayMs) || 0
+  const ctx = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    ...(paySession ? { userAgent: 'Mozilla/5.0 (Linux; Android 16) NimiqPay/1.0 Mobile' } : {}),
   })
+  await ctx.addInitScript(({ paySession, addr }) => {
+    localStorage.setItem('nimbooks:countConsent', 'no')
+    if (paySession) {
+      localStorage.setItem('nimbooks:session', JSON.stringify({ provider: 'pay', nimiqAddress: addr, view: 'dashboard' }))
+      window.nimiqPay = {}
+    }
+  }, { paySession, addr: ADDR })
   const page = await ctx.newPage()
   const errors = []
   page.on('pageerror', (e) => errors.push(String(e)))
@@ -58,9 +67,10 @@ async function openCase(browser, hash, stakerRes, basicNim) {
     if (/Failed to load resource|net::ERR|status of 4\d\d|status of 5\d\d|XML Parsing Error/i.test(text)) return
     errors.push('console: ' + text)
   })
-  await page.route('**/validators-api-main.je-cf9.workers.dev/**', (route) =>
-    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(VALIDATORS) })
-  )
+  await page.route('**/validators-api-main.je-cf9.workers.dev/**', async (route) => {
+    if (validatorDelayMs > 0) await new Promise((r) => setTimeout(r, validatorDelayMs))
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(VALIDATORS) })
+  })
   await page.route('**/v2.nimiqwatch.com/**', (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify({ groups: [] }) })
   )
@@ -82,6 +92,14 @@ async function openCase(browser, hash, stakerRes, basicNim) {
     return reply({ result: { data: null } })
   })
   await page.goto(`${BASE}/${hash}`, { waitUntil: 'domcontentloaded' })
+  if (paySession) {
+    // A restored Pay session goes straight to the dashboard, then the link
+    // opens its own panel without the connect screen in the way.
+    await page.waitForSelector('.topbar', { timeout: 30000 })
+    await page.waitForSelector('.modal[aria-label="Stake NIM"]', { timeout: 30000 })
+    await page.waitForTimeout(800)
+    return { ctx, page, errors, waiting: null, payHref: null }
+  }
   const sample = page.locator('.connect-panel button', { hasText: 'Try with a sample wallet' })
   await sample.waitFor({ timeout: 20000 })
   await page.waitForSelector('.stake-link-waiting', { timeout: 5000 })
@@ -136,6 +154,42 @@ async function openCase(browser, hash, stakerRes, basicNim) {
     check('c: bad validator selects nothing', await page.locator('.option-row[aria-checked="true"]').count() === 0)
     check('c: valid amount still prefilled', (await page.locator('#stakeAmount').inputValue()) === '150', await page.locator('#stakeAmount').inputValue())
     check('c: no console errors', errors.length === 0, errors.join(' | '))
+    await ctx.close()
+  }
+
+  // (d) Pay-session link: the panel opens before the delayed validator list,
+  // then the named validator is applied when the list lands.
+  {
+    const { ctx, page, errors } = await openCase(
+      browser,
+      `#/stake?amount=10&validator=${encodeURIComponent(IZ)}`,
+      noStaker,
+      1000,
+      { paySession: true, validatorDelayMs: 5000 }
+    )
+    const early = (await page.locator('.stake-link-banner').innerText()).replace(/\s+/g, ' ')
+    check('d: Pay-session panel opens before the validator list', await page.locator('.modal[aria-label="Stake NIM"]').count() === 1)
+    check('d: pending notice shows the short validator address', /Opened from a link: 10 NIM with NQ08 ACT8 \.\.\. NVXY\./.test(early) && !/ImpactZero/.test(early), early)
+    check('d: no validator is selected while the list is pending', await page.locator('.option-row[aria-checked="true"]').count() === 0)
+    await page.locator('.stake-link-banner', { hasText: 'ImpactZero' }).waitFor({ timeout: 20000 })
+    const late = (await page.locator('.stake-link-banner').innerText()).replace(/\s+/g, ' ')
+    check('d: notice names the validator once the list lands', /Opened from a link: 10 NIM with ImpactZero \(NQ08 ACT8 \.\.\. NVXY\)\./.test(late), late)
+    check('d: validator is selected once the list lands', await page.locator('.option-row[aria-checked="true"]').count() === 1)
+    check('d: no console errors', errors.length === 0, errors.join(' | '))
+    await ctx.close()
+  }
+
+  // (e) The link's own staker lookup fails: the panel still opens with the
+  // amount, selects nothing, and says why.
+  {
+    const stakerError = { error: { code: -32603, message: 'RPC unavailable' } }
+    const { ctx, page, errors } = await openCase(browser, `#/stake?amount=10&validator=${encodeURIComponent(IZ)}`, stakerError, 1000)
+    const banner = (await page.locator('.stake-link-banner').innerText()).replace(/\s+/g, ' ')
+    check('e: panel opens when the staker lookup fails', await page.locator('.modal[aria-label="Stake NIM"]').count() === 1)
+    check('e: no validator is selected when the staker lookup fails', await page.locator('.option-row[aria-checked="true"]').count() === 0)
+    check('e: could-not-check note is shown', /Your stake could not be checked right now, so no validator was selected\./.test(banner), banner)
+    check('e: amount is still prefilled', (await page.locator('#stakeAmount').inputValue()) === '10', await page.locator('#stakeAmount').inputValue())
+    check('e: no console errors', errors.length === 0, errors.join(' | '))
     await ctx.close()
   }
 
