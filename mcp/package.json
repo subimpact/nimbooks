@@ -1,6 +1,6 @@
 {
   "name": "nimbooks-mcp",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "mcpName": "io.github.subimpact/nimbooks-mcp",
   "description": "Read-only MCP server for your Nimiq books: balances, history, statements, draft payment requests and stake links. Never signs.",
   "license": "MIT",
@@ -42,7 +42,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "zod": "^4.6.4"
   },
   "devDependencies": {
