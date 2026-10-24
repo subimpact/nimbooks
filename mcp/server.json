@@ -1,0 +1,31 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.subimpact/nimbooks-mcp",
+  "title": "NimBooks",
+  "description": "Read-only Nimiq books: balances, history, statements, staking, payment and stake links. Never signs.",
+  "repository": {
+    "url": "https://github.com/subimpact/nimbooks-mcp",
+    "source": "github"
+  },
+  "websiteUrl": "https://nimbooks.subimpact.net/mcp/",
+  "version": "1.2.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "nimbooks-mcp",
+      "version": "1.2.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "named",
+          "name": "--address",
+          "description": "Your Nimiq address (NQ...). Used when a question does not name one.",
+          "isRequired": false,
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}
