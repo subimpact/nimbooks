@@ -111,6 +111,86 @@ async function mockValidators(page) {
   )
 }
 
+// Deterministic market for the sidebar widgets: the NIM price (tier 1 of the
+// price chain, prices.nim.sh) and DefiLlama's chart endpoint behind the price
+// card's history. The two ranges get different, deliberately signed series so
+// a range switch must both change the change line and redraw the sparkline.
+const NIM_USD = 0.00039354
+const HISTORY_CHANGE = { 24: 1.0231, 28: 0.959 } // +2.31% / -4.10%
+
+function historyBody(span) {
+  const last = Math.floor(Date.now() / 1000)
+  const step = span === 24 ? 3600 : 6 * 3600
+  const count = span === 24 ? 24 : 28
+  const firstPrice = span === 24 ? 0.0004 : 0.00041
+  const lastPrice = firstPrice * HISTORY_CHANGE[span]
+  const prices = []
+  for (let i = 0; i < count; i++) {
+    const f = i / (count - 1)
+    const price = i === count - 1 ? lastPrice : firstPrice + (lastPrice - firstPrice) * f
+    prices.push({ timestamp: last - (count - 1 - i) * step, price: Number(price.toFixed(8)) })
+  }
+  return JSON.stringify({
+    coins: { 'coingecko:nimiq-2': { symbol: 'NIM', confidence: 0.99, prices } },
+  })
+}
+
+async function mockMarket(page) {
+  const json = (body) => ({
+    status: 200,
+    contentType: 'application/json',
+    headers: { 'access-control-allow-origin': '*' },
+    body,
+  })
+  await page.route('**/prices.nim.sh/**', (route) => {
+    const ticker = decodeURIComponent(new URL(route.request().url()).pathname)
+      .split('/')
+      .filter(Boolean)[1]
+    const prices = { NIM: NIM_USD, ETH: 2500, MATIC: 0.0957 }
+    return route.fulfill(
+      json(
+        JSON.stringify({
+          currency: ticker,
+          time: Math.floor(Date.now() / 1000),
+          price: prices[ticker] ?? 1,
+        })
+      )
+    )
+  })
+  // Chart history, by span: 24h asks for span=24, 7d for span=28.
+  await page.route('**/coins.llama.fi/chart/**', (route) => {
+    const span = Number(new URL(route.request().url()).searchParams.get('span'))
+    return route.fulfill(json(historyBody(span === 28 ? 28 : 24)))
+  })
+  // The other two price tiers, in case tier 1 is skipped: same price.
+  await page.route('**/coins.llama.fi/prices/**', (route) =>
+    route.fulfill(
+      json(
+        JSON.stringify({
+          coins: {
+            'coingecko:nimiq-2': { price: NIM_USD, symbol: 'NIM', timestamp: Math.floor(Date.now() / 1000) },
+            'coingecko:tether': { price: 1, symbol: 'USDT', timestamp: Math.floor(Date.now() / 1000) },
+            'coingecko:ethereum': { price: 2500, symbol: 'ETH', timestamp: Math.floor(Date.now() / 1000) },
+            'coingecko:polygon-ecosystem-token': { price: 0.0957, symbol: 'POL', timestamp: Math.floor(Date.now() / 1000) },
+          },
+        })
+      )
+    )
+  )
+  await page.route('**/api.coingecko.com/**', (route) =>
+    route.fulfill(
+      json(
+        JSON.stringify({
+          'nimiq-2': { usd: NIM_USD },
+          tether: { usd: 1 },
+          ethereum: { usd: 2500 },
+          'matic-network': { usd: 0.0957 },
+        })
+      )
+    )
+  )
+}
+
 async function dismissTour(page) {
   // The sample wallet offers the tour whenever it is fully loaded and idle,
   // including in the middle of a run, so dismiss on every call.
@@ -183,6 +263,7 @@ async function readBetaBadge(page) {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, userAgent: PAY_UA })
   const page = await ctx.newPage()
   await mockValidators(page)
+  await mockMarket(page)
   const errors = []
   page.on('pageerror', (e) => errors.push('390: ' + String(e)))
   await page.goto(BASE, { waitUntil: 'domcontentloaded' })
@@ -373,6 +454,7 @@ async function readBetaBadge(page) {
   const ctxD = await browser.newContext({ viewport: { width: 1440, height: 900 }, userAgent: PAY_UA })
   const pd = await ctxD.newPage()
   await mockValidators(pd)
+  await mockMarket(pd)
   await ctxD.addInitScript(() => {
     localStorage.setItem('nimbooks:ui', 'beta')
   })
@@ -393,6 +475,79 @@ async function readBetaBadge(page) {
   check('(d) no bottom tab bar at 1440', bottomHidden)
   const badgeD = (await pd.locator('[data-probe="beta-version-badge"]').innerText()).trim()
   check(`(d) desktop badge is ${BETA_BADGE}`, badgeD === BETA_BADGE, JSON.stringify(badgeD))
+
+  // (l) The sidebar widgets: NIM price card, "Where your NIM is" ring and the
+  // one action, "Stake idle NIM". Prices come from the stubbed market above.
+  const priceCard = pd.locator('[data-probe="beta-price-card"]')
+  check('(l) the sidebar shows the NIM price card', (await priceCard.count()) === 1)
+  const card24 = (await priceCard.innerText()).replace(/\s+/g, ' ').trim()
+  check('(l) the card shows the stubbed NIM price', /\$0\.00039\d+/.test(card24), card24)
+  check('(l) the 24h change is signed, arrow and sign', /\+2\.31% in 24 hours/.test(card24), card24)
+  const spark24 = await pd.locator('[data-probe="beta-price-spark"] path').getAttribute('d')
+  check('(l) the sparkline draws the 24h series', !!spark24 && spark24.startsWith('M '), String(spark24))
+
+  const chip = pd.locator('[data-probe="beta-price-range"]')
+  check('(l) the range chip starts at 24h', (await chip.innerText()).trim() === '24h')
+  await chip.click()
+  await pd.waitForFunction(
+    (prev) => {
+      const path = document.querySelector('[data-probe="beta-price-spark"] path')
+      return !!path && path.getAttribute('d') !== prev
+    },
+    spark24,
+    { timeout: 15000 }
+  )
+  check('(l) the range chip toggles to 7d', (await chip.innerText()).trim() === '7d')
+  const card7 = (await priceCard.innerText()).replace(/\s+/g, ' ').trim()
+  check('(l) the 7d change is signed, -4.10% in 7 days', /-4\.10% in 7 days/.test(card7), card7)
+  const spark7 = await pd.locator('[data-probe="beta-price-spark"] path').getAttribute('d')
+  check('(l) switching the range redraws the sparkline', !!spark7 && spark7 !== spark24)
+
+  // Balances arrive from the chain after the shell paints: wait for the ring
+  // to have its rows (and so for the stake rule to have settled) before
+  // reading them.
+  const ringRows = pd.locator('[data-probe="beta-ring-row"]')
+  await ringRows.first().waitFor({ timeout: 30000 })
+  const ringCount = await ringRows.count()
+  const ringText = (await ringRows.allInnerTexts()).map((t) => t.replace(/\s+/g, ' ').trim())
+  check('(l) the ring lists Available and Staked', ringCount >= 2 && ringText.some((t) => t.startsWith('Available')) && ringText.some((t) => t.startsWith('Staked')), ringText.join(' | '))
+  check('(l) every ring row carries a 2 decimal NIM amount', ringText.every((t) => /\d+\.\d{2} NIM/.test(t)), ringText.join(' | '))
+  const ringPct = ringText.reduce((sum, t) => {
+    const m = /([\d.]+)%$/.exec(t)
+    return sum + (m ? Number(m[1]) : 0)
+  }, 0)
+  check('(l) the ring percentages sum to 100.0', Math.abs(ringPct - 100) <= 0.05, ringPct.toFixed(2))
+  const arcs = await pd.locator('[data-probe="beta-nim-ring"] svg circle[stroke-dasharray]').count()
+  check('(l) one donut arc per legend row', arcs === ringCount, `${arcs}/${ringCount}`)
+  const widgetText = await pd.locator('[data-probe="beta-sidebar-widgets"]').innerText()
+  check('(l) widget copy has no em or en dash', !/[\u2013\u2014]/.test(widgetText), JSON.stringify(widgetText))
+
+  // Icon-collapsed desktop sidebar: the widgets are hidden, and come back.
+  const trigger = pd.locator('[data-slot="sidebar-trigger"]').first()
+  await trigger.click()
+  await pd.waitForTimeout(600)
+  check('(l) collapsing the sidebar to icons hides the widgets', !(await pd.locator('[data-probe="beta-sidebar-widgets"]').first().isVisible()))
+  await trigger.click()
+  await pd.waitForTimeout(600)
+  check('(l) expanding it brings the widgets back', await pd.locator('[data-probe="beta-sidebar-widgets"]').first().isVisible())
+
+  await pd.locator('[data-probe="beta-stake-idle"]').click()
+  await pd.waitForSelector('.modal[aria-label="Stake NIM"]', { timeout: 15000 })
+  check('(l) Stake idle NIM opens the stake panel', (await pd.locator('.modal[aria-label="Stake NIM"]').count()) === 1)
+  await pd.locator('.modal[aria-label="Stake NIM"] .modal-head [aria-label="Close"]').click()
+  await pd.waitForSelector('.modal[aria-label="Stake NIM"]', { state: 'detached', timeout: 10000 })
+
+  // Under 520px of viewport height the price card hides (the Nimiq Wallet rule).
+  await pd.setViewportSize({ width: 1440, height: 500 })
+  await pd.waitForTimeout(600)
+  check('(l) under 520px tall the price card is hidden', (await priceCard.count()) === 0)
+  check('(l) the ring stays at 500px tall', (await pd.locator('[data-probe="beta-nim-ring"]').count()) === 1)
+  const over1440 = await pd.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
+  check('(l) no horizontal overflow at 1440', over1440)
+  await pd.setViewportSize({ width: 1440, height: 900 })
+  await pd.waitForTimeout(600)
+  check('(l) the price card comes back at 900px tall', (await priceCard.count()) === 1)
+
   check('(d) no page errors at 1440', desktopErrors.length === 0, JSON.stringify(desktopErrors.slice(0, 3)))
   await ctxD.close()
 
@@ -419,6 +574,57 @@ async function readBetaBadge(page) {
   await pc.waitForTimeout(1200)
   check(`(i) ?ui=classic beats a stored beta (badge ${VERSION})`, ((await pc.locator('.version-badge').first().innerText()).trim()) === VERSION)
   await ctxClassic.close()
+
+  // --- Stage 5: the sidebar widgets on a phone (390x844) and at 360. ---
+  const ctxW = await browser.newContext({ viewport: { width: 390, height: 844 }, userAgent: PAY_UA })
+  const pw = await ctxW.newPage()
+  await mockValidators(pw)
+  await mockMarket(pw)
+  const widgetErrors = []
+  pw.on('pageerror', (e) => widgetErrors.push(String(e)))
+  await pw.goto(BASE + '/?ui=beta', { waitUntil: 'domcontentloaded' })
+  await pw.click('button:has-text("Try with a sample wallet")')
+  await pw.waitForSelector('[data-probe="beta-shell"]', { timeout: 30000 })
+  await pw.waitForTimeout(1500)
+  await dismissTour(pw)
+  check('(m) the widgets mount only with the phone Sheet', (await pw.locator('[data-probe="beta-sidebar-widgets"]').count()) === 0)
+  await pw.locator('[data-slot="sidebar-trigger"]').first().click()
+  await pw.waitForSelector('[data-probe="beta-sidebar-widgets"]', { timeout: 15000 })
+  // Same chain-read wait as on desktop.
+  await pw.locator('[data-probe="beta-ring-row"]').first().waitFor({ timeout: 30000 })
+  await pw.locator('[data-probe="beta-stake-idle"]').waitFor({ timeout: 30000 })
+  await pw.waitForTimeout(1200)
+  const inSheet = await pw.evaluate(() => {
+    const widgets = document.querySelector('[data-probe="beta-sidebar-widgets"]')
+    return Boolean(widgets && widgets.closest('[data-slot="sidebar"][data-mobile="true"]'))
+  })
+  check('(m) the widgets render inside the phone Sheet', inSheet)
+  check('(m) the price card and the ring are in the Sheet', (await pw.locator('[data-probe="beta-price-card"]').count()) === 1 && (await pw.locator('[data-probe="beta-nim-ring"]').count()) === 1)
+  check('(m) the Sheet shows the price and the stake action', /\$0\.00039\d+/.test(await pw.locator('[data-probe="beta-price-card"]').innerText()) && (await pw.locator('[data-probe="beta-stake-idle"]').count()) === 1)
+  const sheetOverflow390 = await pw.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
+  check('(m) no horizontal overflow at 390 with the Sheet open', sheetOverflow390)
+
+  // The stake action closes the Sheet, then opens the classic stake panel.
+  await pw.locator('[data-probe="beta-stake-idle"]').click()
+  await pw.waitForSelector('.modal[aria-label="Stake NIM"]', { timeout: 15000 })
+  const sheetGone = pw.locator('[data-slot="sidebar"][data-mobile="true"]')
+  await sheetGone.waitFor({ state: 'detached', timeout: 10000 })
+  check('(m) Stake idle NIM closes the Sheet', (await sheetGone.count()) === 0)
+  check('(m) and opens the stake panel', await pw.locator('.modal[aria-label="Stake NIM"]').isVisible())
+  await pw.locator('.modal[aria-label="Stake NIM"] .modal-head [aria-label="Close"]').click()
+  await pw.waitForSelector('.modal[aria-label="Stake NIM"]', { state: 'detached', timeout: 10000 })
+
+  await pw.setViewportSize({ width: 360, height: 780 })
+  await pw.waitForTimeout(500)
+  await pw.locator('[data-slot="sidebar-trigger"]').first().click()
+  await pw.waitForSelector('[data-probe="beta-sidebar-widgets"]', { timeout: 15000 })
+  await pw.waitForTimeout(600)
+  const over360 = await pw.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
+  check('(m) no horizontal overflow at 360', over360)
+  const phoneText = await pw.locator('[data-probe="beta-sidebar-widgets"]').innerText()
+  check('(m) phone widget copy has no em or en dash', !/[\u2013\u2014]/.test(phoneText), JSON.stringify(phoneText))
+  check('(m) no page errors on the widget run', widgetErrors.length === 0, JSON.stringify(widgetErrors.slice(0, 3)))
+  await ctxW.close()
 
   await browser.close()
   console.log(`\n${pass} passed, ${fail} failed`)
