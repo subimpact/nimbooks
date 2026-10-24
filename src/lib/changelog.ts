@@ -25,6 +25,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "The yield calculator links to Nimiq's own staking calculator so you can compare the estimate",
       'New look (beta): the sidebar now carries the NIM price in your currency with its 24-hour or 7-day change and a small chart (tap 24h to switch), a ring showing where your NIM is (available, staked, moving in Nimiq Pay), and a Stake idle NIM button. There are no buy, sell or swap buttons: NimBooks does not trade',
       'Stake links: a link can open the stake panel with an amount and validator filled in. You still check and confirm it in your wallet',
+      'nimbooks-mcp 1.2.0 adds draft_stake: ask your AI assistant for a stake link and it hands back one that opens the stake panel filled in. Like the other tools, it never signs',
     ],
   },
   {
