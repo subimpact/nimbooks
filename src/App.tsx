@@ -382,6 +382,59 @@ function shortStakeAddress(address: string): string {
   return `${clean.slice(0, 4)} ${clean.slice(4, 8)} ... ${clean.slice(-4)}`
 }
 
+function stakeLinkNoticeText(
+  amountLabel: string | null,
+  validatorLabel: string | null,
+  warnings: string[]
+): string {
+  let notice: string
+  if (amountLabel && validatorLabel) {
+    notice = `Opened from a link: ${amountLabel} with ${validatorLabel}. Check both before you confirm.`
+  } else if (amountLabel) {
+    notice = `Opened from a link: ${amountLabel}. Check it before you confirm.`
+  } else if (validatorLabel) {
+    notice = `Opened from a link: ${validatorLabel}. Check it before you confirm.`
+  } else {
+    notice = 'Opened from a link. Check the amount and validator before you confirm.'
+  }
+  if (warnings.length > 0) notice += ' ' + warnings.join(' ')
+  return notice
+}
+
+// A link validator's outcome against the live list, shared by the first open
+// and the pending list arrival. The holding is the link's own staker lookup,
+// not the connect refresh's record that lands after the history walk.
+function linkValidatorOutcome(
+  validator: string,
+  holding: StakingHolding | null,
+  list: ValidatorInfo[],
+  warnings: string[]
+): { label: string; selected: string | null; warnings: string[] } {
+  const next = [...warnings]
+  const linked = list.find((v) => cleanAddr(v.address) === validator) ?? null
+  if (!linked) {
+    next.push('That validator is not in the live validator list, so it was not selected.')
+    return { label: shortStakeAddress(validator), selected: null, warnings: next }
+  }
+  const label = `${linked.name} (${shortStakeAddress(linked.address)})`
+  if (holding) {
+    const current = holding.delegation ? cleanAddr(holding.delegation) : null
+    if (current === validator) {
+      next.push(`Your stake is already with ${linked.name}, so the link's validator matches it.`)
+    } else {
+      next.push(
+        'Your stake is already delegated, so the link\'s validator was not selected. Adding stake stays with your current validator; switching needs an unstake first.'
+      )
+    }
+    return { label, selected: null, warnings: next }
+  }
+  if (linked.reliability === null && !isPinnedValidator(linked.address)) {
+    next.push(`${linked.name} is not producing rewards right now, so it was not selected.`)
+    return { label, selected: null, warnings: next }
+  }
+  return { label, selected: cleanAddr(linked.address), warnings: next }
+}
+
 // The storage a session preference lives in for the connected account: per tab
 // in demo mode (the sample address must never reach localStorage), on-device
 // otherwise.
@@ -1003,12 +1056,35 @@ export default function App() {
   // exactly like the send sheet.
   const [stakeCelebrate, setStakeCelebrate] = useState<string | null>(null)
   const stakeCelebrateTimer = useRef<number | null>(null)
-  // A stake link's intent, kept until a wallet and the validator list are
+  // A stake link's intent, kept until a wallet and its own staker record are
   // ready. The notice is the link-opened panel's phishing guard: it stays on
   // screen for as long as that panel does, then clears with it.
   const [stakeLinkIntent, setStakeLinkIntent] = useState<StakeLinkIntent | null>(null)
   const [stakeLinkNotice, setStakeLinkNotice] = useState<string | null>(null)
   const stakeLinkConsumedRef = useRef(false)
+  // The link's own staker lookup starts as soon as an account is connected:
+  // the connect refresh reads the same record, but only after the whole history
+  // walk, which is seconds on a busy wallet. `pending` guards the one start.
+  const stakeLinkLookupRef = useRef<string | null>(null)
+  const [stakeLinkLookup, setStakeLinkLookup] = useState<{
+    address: string
+    status: 'pending' | 'ok' | 'failed'
+    holding: StakingHolding | null
+  } | null>(null)
+  // A named validator is applied once the list arrives, without holding the
+  // panel back for the ~1.4 MB download. Closing the panel cancels it.
+  const [stakeLinkPendingValidator, setStakeLinkPendingValidator] = useState<string | null>(null)
+  // A failed link lookup leaves the panel unable to tell a first stake from an
+  // added one. The link amount must still show, so the slider does not clamp
+  // it to the first-stake minimum until the record is actually known.
+  const [stakeLinkStakerUnknown, setStakeLinkStakerUnknown] = useState(false)
+  const stakeLinkNoticeBaseRef = useRef<{ amountLabel: string | null; warnings: string[] } | null>(
+    null
+  )
+  const stakeLinkHoldingRef = useRef<StakingHolding | null>(null)
+  // One-shot override for openStake so a link can use its own staker lookup
+  // without changing the click handler's signature.
+  const stakeLinkOpenHasStakerRef = useRef<boolean | null>(null)
 
   // Capture at boot: the hash is the link's payload. Save only the public
   // intent, then take the route off the URL so a reload or Back does not
@@ -2715,6 +2791,10 @@ export default function App() {
       resetUnstakeFlow()
     }
     setStakeLinkNotice(null)
+    // Closing before the validator list lands cancels the pending selection.
+    setStakeLinkPendingValidator(null)
+    setStakeLinkStakerUnknown(false)
+    stakeLinkNoticeBaseRef.current = null
     setStakeOpen(false)
   }, [clearStakeCelebration, stakeVerify, unstakeSubmitted?.source, unstakeVerify, resetUnstakeFlow])
 
@@ -3002,32 +3082,69 @@ export default function App() {
     // A first stake can't be smaller than the minimum, and the slider floor is
     // set there — so open on that value rather than on a 0 the panel would
     // only reject (and which would leave a tap on the floor doing nothing).
-    if (!stakingHolding && stakeMaxNim >= MIN_STAKE_NIM && !(stakeAmountNim >= MIN_STAKE_NIM)) {
+    // A link passes its own staker lookup here: the connect refresh's record
+    // may still be behind the history walk.
+    const staker = stakeLinkOpenHasStakerRef.current ?? !!stakingHolding
+    stakeLinkOpenHasStakerRef.current = null
+    if (!staker && stakeMaxNim >= MIN_STAKE_NIM && !(stakeAmountNim >= MIN_STAKE_NIM)) {
       setStakeAmount(String(MIN_STAKE_NIM))
     }
     setStakeOpen(true)
   }
 
-  // Open a waiting stake link once the wallet is connected, its balance is
-  // known and the validator list has answered. The link prefills only; it never
-  // submits, and it never invents a validator for a link that named none.
+  // Open a waiting stake link as soon as the wallet is connected, its balance
+  // is known and the link's own staker record has answered. The connect refresh
+  // also reads that record, but only after the whole history walk; this lookup
+  // is one RPC and lands in ~300 ms. The validator list is deliberately not
+  // awaited: a cold list is a ~1.4 MB download, so the panel opens first and a
+  // named validator is applied when the list arrives (see the next effect).
   useEffect(() => {
     const intent = stakeLinkIntent
     if (!intent || !account?.nimiqAddress || stakeLinkConsumedRef.current) return
-    if (validators.length === 0 && !validatorsError) return
-    // A capped amount needs the real free balance, so wait for the connect
-    // refresh rather than treating the first 0 as the wallet's balance.
-    if (intent.amountLuna !== null && (nimBalance === null || loading)) return
+    const addr = account.nimiqAddress
+
+    // One lookup per intent/account. A changed account starts a new one; the
+    // address check inside both callbacks ignores an answer for the old one.
+    if (stakeLinkLookupRef.current !== addr) {
+      stakeLinkLookupRef.current = addr
+      setStakeLinkLookup({ address: addr, status: 'pending', holding: null })
+      void fetchStakingHolding(addr).then(
+        (holding) =>
+          setStakeLinkLookup((prev) =>
+            prev && prev.address === addr ? { address: addr, status: 'ok', holding } : prev
+          ),
+        (e) => {
+          console.warn('Stake link staker lookup failed:', e)
+          setStakeLinkLookup((prev) =>
+            prev && prev.address === addr
+              ? { address: addr, status: 'failed', holding: null }
+              : prev
+          )
+        }
+      )
+      return
+    }
+
+    const lookup = stakeLinkLookup
+    if (!lookup || lookup.address !== addr || lookup.status === 'pending') return
+    // A capped amount needs the real free balance, so wait for the balance
+    // read rather than treating the first 0 as the wallet's balance.
+    if (nimBalance === null) return
 
     stakeLinkConsumedRef.current = true
     clearStoredStakeIntent()
     setStakeLinkIntent(null)
+    setStakeLinkPendingValidator(null)
+    const linkHolding = lookup.status === 'ok' ? lookup.holding : null
+    stakeLinkHoldingRef.current = linkHolding
+    stakeLinkOpenHasStakerRef.current = lookup.status === 'failed' || !!linkHolding
+    setStakeLinkStakerUnknown(lookup.status === 'failed')
     openStake()
 
     const warnings = [...intent.warnings]
     // No link validator means no selection at all. A stale selection from an
     // earlier panel in this session must not leak into the link.
-    if (!hasStaker) setSelectedValidator(null)
+    if (!linkHolding) setSelectedValidator(null)
 
     let appliedLuna = intent.amountLuna
     if (appliedLuna !== null) {
@@ -3038,7 +3155,9 @@ export default function App() {
           `Only ${formatLuna(String(freeLuna), lang)} NIM is free to stake, so the amount was capped.`
         )
       }
-      if (!hasStaker && appliedLuna < MIN_STAKE_LUNA) {
+      // Only a lookup that answered can say this is a first stake. A failed
+      // lookup keeps the link's amount instead of guessing the minimum.
+      if (lookup.status === 'ok' && !linkHolding && appliedLuna < MIN_STAKE_LUNA) {
         if (freeLuna >= MIN_STAKE_LUNA) {
           appliedLuna = MIN_STAKE_LUNA
           warnings.push(
@@ -3053,67 +3172,98 @@ export default function App() {
       if (appliedLuna > 0) setStakeAmount(formatLunaExact(String(appliedLuna)))
     }
 
+    const amountLabel =
+      intent.amountLuna !== null ? `${formatLuna(String(intent.amountLuna), lang)} NIM` : null
+    stakeLinkNoticeBaseRef.current = { amountLabel, warnings: [...warnings] }
+
     const linkedValidator = intent.validator
       ? (validators.find((v) => cleanAddr(v.address) === intent.validator) ?? null)
       : null
-    if (intent.validator) {
-      if (!linkedValidator) {
-        warnings.push('That validator is not in the live validator list, so it was not selected.')
-      } else if (stakingHolding) {
-        const current = lockedDelegation ? cleanAddr(lockedDelegation) : null
-        if (current === intent.validator) {
-          warnings.push(
-            `Your stake is already with ${linkedValidator.name}, so the link's validator matches it.`
-          )
-        } else {
-          warnings.push(
-            'Your stake is already delegated, so the link\'s validator was not selected. Adding stake stays with your current validator; switching needs an unstake first.'
-          )
-        }
-      } else if (linkedValidator.reliability === null && !isPinnedValidator(linkedValidator.address)) {
-        warnings.push(
-          `${linkedValidator.name} is not producing rewards right now, so it was not selected.`
-        )
-      } else {
-        setSelectedValidator(cleanAddr(linkedValidator.address))
-      }
+
+    if (!intent.validator) {
+      setStakeLinkNotice(stakeLinkNoticeText(amountLabel, null, warnings))
+      return
     }
 
-    const linkAmount =
-      intent.amountLuna !== null ? `${formatLuna(String(intent.amountLuna), lang)} NIM` : null
-    const linkValidator = intent.validator
-      ? linkedValidator
-        ? `${linkedValidator.name} (${shortStakeAddress(linkedValidator.address)})`
-        : shortStakeAddress(intent.validator)
-      : null
-    let notice: string
-    if (linkAmount && linkValidator) {
-      notice = `Opened from a link: ${linkAmount} with ${linkValidator}. Check both before you confirm.`
-    } else if (linkAmount) {
-      notice = `Opened from a link: ${linkAmount}. Check it before you confirm.`
-    } else if (linkValidator) {
-      notice = `Opened from a link: ${linkValidator}. Check it before you confirm.`
-    } else {
-      notice = 'Opened from a link. Check the amount and validator before you confirm.'
+    if (lookup.status === 'failed') {
+      warnings.push('Your stake could not be checked right now, so no validator was selected.')
+      setStakeLinkNotice(
+        stakeLinkNoticeText(amountLabel, shortStakeAddress(intent.validator), warnings)
+      )
+      return
     }
-    if (warnings.length > 0) notice += ' ' + warnings.join(' ')
-    setStakeLinkNotice(notice)
+
+    if (!linkedValidator && validators.length === 0 && !validatorsError) {
+      // The list is still on its way. The short address keeps the notice
+      // honest now; the pending effect rewrites it with the name when the list
+      // lands (or explains that it did not).
+      setStakeLinkPendingValidator(intent.validator)
+      setStakeLinkNotice(
+        stakeLinkNoticeText(amountLabel, shortStakeAddress(intent.validator), warnings)
+      )
+      return
+    }
+
+    if (!linkedValidator && validatorsError && validators.length === 0) {
+      warnings.push('The validator list did not load, so the validator was not selected.')
+      setStakeLinkNotice(
+        stakeLinkNoticeText(amountLabel, shortStakeAddress(intent.validator), warnings)
+      )
+      return
+    }
+
+    const outcome = linkValidatorOutcome(intent.validator, linkHolding, validators, warnings)
+    if (outcome.selected) setSelectedValidator(outcome.selected)
+    setStakeLinkNotice(stakeLinkNoticeText(amountLabel, outcome.label, outcome.warnings))
     // openStake is stable for this one shot; reading it off the render keeps
     // the effect from reopening when unrelated state changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     stakeLinkIntent,
     account?.nimiqAddress,
+    stakeLinkLookup,
+    nimBalance,
     validators,
     validatorsError,
-    nimBalance,
-    loading,
     stakeMaxLuna,
-    stakingHolding,
-    hasStaker,
-    lockedDelegation,
     lang,
   ])
+
+  // A link panel that opened before the validator list. The panel and its
+  // notice are already up; this applies the same selection rules once the list
+  // lands, and rewrites the notice to name the validator. A failure keeps the
+  // short address and says why nothing was selected. closeStake clears the
+  // pending address, so a late list cannot move a selection behind a closed
+  // panel.
+  useEffect(() => {
+    const pending = stakeLinkPendingValidator
+    if (!pending || !stakeOpen) return
+    if (validators.length === 0 && !validatorsError) return
+    setStakeLinkPendingValidator(null)
+    const base = stakeLinkNoticeBaseRef.current
+    if (!base) return
+
+    if (validatorsError && validators.length === 0) {
+      const warnings = [
+        ...base.warnings,
+        'The validator list did not load, so the validator was not selected.',
+      ]
+      setStakeLinkNotice(
+        stakeLinkNoticeText(base.amountLabel, shortStakeAddress(pending), warnings)
+      )
+      return
+    }
+
+    const outcome = linkValidatorOutcome(
+      pending,
+      stakeLinkHoldingRef.current,
+      validators,
+      base.warnings
+    )
+    if (outcome.selected) setSelectedValidator(outcome.selected)
+    setStakeLinkNotice(stakeLinkNoticeText(base.amountLabel, outcome.label, outcome.warnings))
+  }, [stakeLinkPendingValidator, stakeOpen, validators, validatorsError])
+
 
   // --- Reasons to come back (lib/earnInsights): all local, nothing sent. ---
   // Actual yield over the trailing month, next to the estimate above: rewards
@@ -4160,6 +4310,13 @@ export default function App() {
     clearStoredStakeIntent()
     setStakeLinkIntent(null)
     stakeLinkConsumedRef.current = false
+    stakeLinkLookupRef.current = null
+    setStakeLinkLookup(null)
+    setStakeLinkPendingValidator(null)
+    setStakeLinkStakerUnknown(false)
+    stakeLinkNoticeBaseRef.current = null
+    stakeLinkHoldingRef.current = null
+    stakeLinkOpenHasStakerRef.current = null
     setCurrencyOpen(false)
     setSelectedValidator(null)
     setStakeAmount('')
@@ -7032,7 +7189,7 @@ export default function App() {
                         // minimum, so the slider doesn't offer it — unless the
                         // wallet can't reach it, where the floor would lock
                         // the slider to a value it can't fund.
-                        min={!hasStaker && stakeMaxNim >= MIN_STAKE_NIM ? MIN_STAKE_NIM : 0}
+                        min={!hasStaker && !stakeLinkStakerUnknown && stakeMaxNim >= MIN_STAKE_NIM ? MIN_STAKE_NIM : 0}
                         max={stakeMaxNim}
                         step={0.1}
                         value={Math.min(stakeAmountNim, stakeMaxNim)}
