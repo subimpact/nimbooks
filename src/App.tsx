@@ -4836,18 +4836,17 @@ export default function App() {
   }
   const evmSidebarRows: Array<{ symbol: string; amount: number; fiat: number }> = []
   for (const balance of evmBalances) {
-    const amount = Number(balance.balance) / 10 ** balance.decimals
-    const fiatValue = evmFiatBySymbol[balance.symbol.toLowerCase()] ?? NaN
+    const raw = Number(balance.balance) / 10 ** balance.decimals
+    const amount = Number.isFinite(raw) ? raw : 0
+    // `fiat` is the row's VALUE (amount x unit price), not the unit price.
+    const unitPrice = evmFiatBySymbol[balance.symbol.toLowerCase()] ?? NaN
+    const value = amount > 0 ? (hasRate(unitPrice) ? amount * unitPrice : NaN) : 0
     const existing = evmSidebarRows.find((row) => row.symbol === balance.symbol)
     if (existing) {
-      existing.amount += Number.isFinite(amount) ? amount : 0
-      existing.fiat += fiatValue
+      existing.amount += amount
+      existing.fiat += value
     } else {
-      evmSidebarRows.push({
-        symbol: balance.symbol,
-        amount: Number.isFinite(amount) ? amount : 0,
-        fiat: fiatValue,
-      })
+      evmSidebarRows.push({ symbol: balance.symbol, amount, fiat: value })
     }
   }
 

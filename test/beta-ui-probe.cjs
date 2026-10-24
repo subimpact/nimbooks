@@ -116,7 +116,9 @@ async function mockValidators(page) {
 // card's history. The two ranges get different, deliberately signed series so
 // a range switch must both change the change line and redraw the sparkline.
 const NIM_USD = 0.00039354
-const HISTORY_CHANGE = { 24: 1.0231, 28: 0.959 } // +2.31% / -4.10%
+// Series ends: +2.31% / -4.10%. The card ends the line at the live price
+// (NIM_USD), so its change reads first point -> live: -1.62% / -4.01%.
+const HISTORY_CHANGE = { 24: 1.0231, 28: 0.959 }
 
 function historyBody(span) {
   const last = Math.floor(Date.now() / 1000)
@@ -482,7 +484,7 @@ async function readBetaBadge(page) {
   check('(l) the sidebar shows the NIM price card', (await priceCard.count()) === 1)
   const card24 = (await priceCard.innerText()).replace(/\s+/g, ' ').trim()
   check('(l) the card shows the stubbed NIM price', /\$0\.00039\d+/.test(card24), card24)
-  check('(l) the 24h change is signed, arrow and sign', /\+2\.31% in 24 hours/.test(card24), card24)
+  check('(l) the 24h change runs to the live price, signed: -1.62% in 24 hours', /-1\.62% in 24 hours/.test(card24), card24)
   const spark24 = await pd.locator('[data-probe="beta-price-spark"] path').getAttribute('d')
   check('(l) the sparkline draws the 24h series', !!spark24 && spark24.startsWith('M '), String(spark24))
 
@@ -499,7 +501,7 @@ async function readBetaBadge(page) {
   )
   check('(l) the range chip toggles to 7d', (await chip.innerText()).trim() === '7d')
   const card7 = (await priceCard.innerText()).replace(/\s+/g, ' ').trim()
-  check('(l) the 7d change is signed, -4.10% in 7 days', /-4\.10% in 7 days/.test(card7), card7)
+  check('(l) the 7d change runs to the live price, signed: -4.01% in 7 days', /-4\.01% in 7 days/.test(card7), card7)
   const spark7 = await pd.locator('[data-probe="beta-price-spark"] path').getAttribute('d')
   check('(l) switching the range redraws the sparkline', !!spark7 && spark7 !== spark24)
 
