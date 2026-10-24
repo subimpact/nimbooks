@@ -107,6 +107,8 @@ async function openCase(browser, hash, stakerRes, basicNim) {
     check('a: stored intent is cleared once consumed', (await page.evaluate(() => sessionStorage.getItem('nimbooks:stakeIntent'))) === null)
     check('a: amount is prefilled', (await page.locator('#stakeAmount').inputValue()) === '5', await page.locator('#stakeAmount').inputValue())
     check('a: no em-dash or en-dash in the notice', !/[\u2013\u2014]/.test(banner), banner)
+    await page.waitForTimeout(2500)
+    check('a: tour offer does not cover the link-opened panel', (await page.locator('button:has-text("Let\'s go")').count()) === 0)
     check('a: no console errors', errors.length === 0, errors.join(' | '))
     await ctx.close()
   }

@@ -365,7 +365,7 @@ function clearStoredStakeIntent(): void {
 
 function shortStakeAddress(address: string): string {
   const clean = address.replace(/\s+/g, '').toUpperCase()
-  return `${clean.slice(0, 8)}...${clean.slice(-4)}`
+  return `${clean.slice(0, 4)} ${clean.slice(4, 8)} ... ${clean.slice(-4)}`
 }
 
 // The storage a session preference lives in for the connected account: per tab
@@ -1533,7 +1533,9 @@ export default function App() {
   const connectDemo = async (entry?: SampleEntry) => {
     setConnecting(true)
     setError(null)
-    skipTourOfferRef.current = !!entry && !entry.tour
+    // A waiting stake link opens the stake panel on entry; the tour offer
+    // would land on top of it and hide the link notice, so skip it once.
+    skipTourOfferRef.current = (!!entry && !entry.tour) || !!stakeLinkIntent
     try {
       // Public mainnet address with real human activity — read-only demo mode.
       // (NQ43 Y1RH P1K7 JH78 LRTS 95RY GAUU UBDK FFGX: seeded story wallet —
