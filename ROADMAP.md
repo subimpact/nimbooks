@@ -23,6 +23,7 @@ _Last updated 24 October 2026. Dates are targets._
 - **"Stake it?" prompt** when a received payment leaves NIM idle (v1.33).
 - **Staking terms** on every position: how it works, that the rate varies, what can go wrong, and how long getting out takes (v1.38).
 - **Restake loop** for pools that pay rewards into your wallet: what restaking adds a year, a one-tap restake, and a weekly calendar reminder (v1.38).
+- **New look (beta) sidebar:** NIM price with its 24-hour or 7-day change, a ring of where your NIM is, and Stake idle NIM (v1.38).
 
 **Books and tax**
 - FIFO crypto tax with staking income, in your display currency, plus Koinly, CoinTracking and CryptoTaxCalculator CSVs (v1.21–1.22).
