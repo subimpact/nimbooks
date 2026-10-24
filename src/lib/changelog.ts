@@ -23,6 +23,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       'Every stake now shows its terms: how staking works with your pool, that the rate varies, what can go wrong and how long getting out takes. They sit under Staking terms on the Earn card and in full in the Stake panel before you stake',
       'Pools that pay rewards into your wallet instead of restaking them get a restake loop on the Earn card: what restaking would add over a year, a one-tap Restake button, and a weekly reminder for Google Calendar or as a calendar file (inside Nimiq Pay, copy the reminder link)',
       "The yield calculator links to Nimiq's own staking calculator so you can compare the estimate",
+      'New look (beta): the sidebar now carries the NIM price in your currency with its 24-hour or 7-day change and a small chart (tap 24h to switch), a ring showing where your NIM is (available, staked, moving in Nimiq Pay), and a Stake idle NIM button. There are no buy, sell or swap buttons: NimBooks does not trade',
     ],
   },
   {
