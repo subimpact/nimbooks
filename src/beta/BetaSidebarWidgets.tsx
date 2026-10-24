@@ -149,7 +149,7 @@ function PriceCard({ price }: { price: BetaPriceProps }) {
   // Memory only: no new storage key, a fresh session starts at 24h.
   const [range, setRange] = useState<PriceRange>('24h')
   // null = the range was fetched and had nothing usable (unavailable line).
-  const [history, setHistory] = useState<{ range: PriceRange; points: PricePoint[] } | null>(null)
+  const [history, setHistory] = useState<{ range: PriceRange; points: PricePoint[]; fetchedAt: number } | null>(null)
   // null until the first answer: loadedRange !== range is the skeleton state.
   const [loadedRange, setLoadedRange] = useState<PriceRange | null>(null)
 
@@ -161,7 +161,7 @@ function PriceCard({ price }: { price: BetaPriceProps }) {
       if (document.visibilityState === 'hidden') return
       const result = await getNimPriceHistory(range)
       if (!alive) return
-      setHistory(result ? { range, points: result.points } : null)
+      setHistory(result ? { range, points: result.points, fetchedAt: result.fetchedAt } : null)
       setLoadedRange(range)
     }
     void load()
@@ -184,8 +184,15 @@ function PriceCard({ price }: { price: BetaPriceProps }) {
   // previous series must not be drawn under the new label.
   const display = useMemo(() => {
     if (!history || history.range !== range) return null
-    return history.points.map((point) => ({ t: point.t, usd: point.usd * factor }))
-  }, [history, range, factor])
+    const pts = history.points.map((point) => ({ t: point.t, usd: point.usd * factor }))
+    // The chart series trails the live price by an hour or two; end the line
+    // (and the change) at the price shown above it, when both are in the
+    // same currency.
+    if (known && !usdOnly && pts.length > 0 && pts[pts.length - 1].t < history.fetchedAt) {
+      pts.push({ t: history.fetchedAt, usd: price.nim })
+    }
+    return pts
+  }, [history, range, factor, known, usdOnly, price.nim])
   const change = useMemo(() => (display ? changePct(display) : null), [display])
   const loading = loadedRange !== range
   const rangeText = RANGE_LABEL[range] + (usdOnly ? ' (USD)' : '')
