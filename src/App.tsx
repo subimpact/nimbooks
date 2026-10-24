@@ -135,7 +135,7 @@ import {
   upsertInvoice,
   type StoredInvoice,
 } from './lib/invoice'
-import { parseStakeLink, type StakeLinkIntent } from './lib/stakeLink'
+import { buildStakeLink, parseStakeLink, type StakeLinkIntent } from './lib/stakeLink'
 import { seedDemoData } from './lib/demoData'
 import { getAllRestakeRewardTxs } from './lib/stakingEvents'
 import {
@@ -144,6 +144,7 @@ import {
   isNimiqPayUserAgent,
   isPhoneOrTablet,
   NIMIQ_PAY_APP_URL,
+  payDeepLink,
   siteLink,
 } from './lib/device'
 import { dialogFocus } from './lib/dialogFocus'
@@ -361,6 +362,19 @@ function clearStoredStakeIntent(): void {
   } catch {
     /* nothing to clear */
   }
+}
+
+// The "Open in Nimiq Pay" hand-off for a phone browser holding a stake link:
+// the plain miniapp URL loses the route (nimpay.app drops the fragment), so a
+// waiting link goes through the nimiqpay:// scheme, which carries the whole
+// site URL, exactly as the invoice page hands off a payment request.
+function payHandoffHref(intent: StakeLinkIntent | null): string {
+  if (!intent) return NIMIQ_PAY_APP_URL
+  const link = buildStakeLink({
+    amountNim: intent.amountLuna !== null ? formatLunaExact(String(intent.amountLuna)) : null,
+    validator: intent.validator,
+  })
+  return payDeepLink(link.slice(link.indexOf('#')))
 }
 
 function shortStakeAddress(address: string): string {
@@ -4657,7 +4671,7 @@ export default function App() {
               <>
                 <a
                   className="btn-primary btn-link"
-                  href={NIMIQ_PAY_APP_URL}
+                  href={payHandoffHref(stakeLinkIntent)}
                   target="_blank"
                   rel="noopener noreferrer"
                 >
