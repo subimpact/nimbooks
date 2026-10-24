@@ -65,6 +65,18 @@ function checksumOk(flat: string): boolean {
   return remainder === 1
 }
 
+/**
+ * The app's `isValidNimiqAddress` (src/lib/portfolio.ts): an NQ address of the
+ * right shape whose MOD-97 checksum closes. No exception, no normalisation
+ * beyond cleaning, which is what the stake-link port needs to match byte for
+ * byte.
+ */
+export function isValidNimiqAddress(address: string): boolean {
+  const flat = cleanAddress(address).toUpperCase()
+  if (!/^NQ[0-9A-Z]{34}$/.test(flat)) return false
+  return checksumOk(flat)
+}
+
 /** 20 address bytes → user-friendly NQ address (app's `deriveNimiqAddress` tail). */
 function bytesToNimiqAddress(hex: string): string {
   let num = BigInt('0x' + hex)
@@ -137,6 +149,12 @@ export class ToolError extends Error {}
 // --- RPC ---
 
 async function rpcCall(method: string, params: unknown[]): Promise<any> {
+  // Offline test gate, the chain-read sibling of the validators gate: makes
+  // every RPC call fail the way an unreachable endpoint does, so tools whose
+  // chain reads are optional can still be driven with no network.
+  if (process.env.NIMBOOKS_MCP_NO_CHAIN === '1') {
+    throw new ToolError('The chain read offline gate NIMBOOKS_MCP_NO_CHAIN=1 is set, so the Nimiq RPC was not called.')
+  }
   let lastErr: unknown
   for (let attempt = 0; attempt <= RETRIES; attempt++) {
     if (attempt > 0) await new Promise((r) => setTimeout(r, 600))

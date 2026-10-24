@@ -42,6 +42,7 @@ import {
   txLabel,
   getRestakeRewardTxsReport,
   getValidatorsSnapshot,
+  isValidNimiqAddress,
   REWARDS_FLOOR_DAY,
   type NimiqTx,
   type StakingHolding,
@@ -58,9 +59,16 @@ import {
   type InvoicePayload,
 } from './invoice.ts'
 import { listBackupInvoices, readBackupFile, type BackupFile } from './backup.ts'
+import {
+  buildStakeLink,
+  parseStakeLink,
+  STAKE_AMOUNT_WARNING,
+  STAKE_VALIDATOR_WARNING,
+} from './stakeLink.ts'
 import { computeStatement, getDailyCloses, periodBounds, priceCoverageNote } from './statement.ts'
 import {
   BLOCKS_PER_EPOCH,
+  MIN_STAKE_NIM,
   MIN_STAKE_NOTE,
   chooseCompound,
   chooseRate,
@@ -74,7 +82,7 @@ import {
   type ValidatorInfo,
 } from './staking.ts'
 
-const VERSION = '1.1.0'
+const VERSION = '1.2.0'
 
 // How far back a tool will walk the transaction index. The RPC pages 50 at a
 // time and is rate-limited, so these are budgets, not guesses — every tool
@@ -267,13 +275,15 @@ const READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: 
 
 const BASE_INSTRUCTIONS =
   'Read-only access to a Nimiq address\'s books, plus drafting of payment ' +
-  'requests. This server never signs and never sends: create_payment_request ' +
-  'produces a shareable link and nothing more. It reads the public Nimiq ' +
-  'chain and CoinGecko prices; it has no account, no keys and no server of ' +
-  'its own. Amounts are reported in both Luna (integer, exact) and NIM. It ' +
-  'also reads staking positions (get_staking), the validator pools ' +
-  '(list_validators), projects staking yield (project_yield) and sums ' +
-  'staking rewards (get_rewards); its yield figures are projections, never promises.'
+  'requests and stake links. This server never signs and never sends: ' +
+  'create_payment_request and draft_stake produce shareable links and nothing ' +
+  'more. It reads the public Nimiq chain and CoinGecko prices; it has no ' +
+  'account, no keys and no server of its own. Amounts are reported in both ' +
+  'Luna (integer, exact) and NIM. It also reads staking positions ' +
+  '(get_staking), the validator pools (list_validators), projects staking ' +
+  'yield (project_yield), sums staking rewards (get_rewards) and drafts stake ' +
+  'links (draft_stake) that open the app\'s stake panel pre-filled; its yield ' +
+  'figures are projections, never promises.'
 
 const server = new McpServer(
   { name: 'nimbooks-mcp', version: VERSION },
@@ -832,6 +842,30 @@ function findValidatorByAddress(address: string, validators: ValidatorInfo[]): V
   return validators.find((v) => v.address.replace(/\s+/g, '').toUpperCase() === flat) ?? null
 }
 
+/** Flat, uppercase form used for comparisons and links. */
+function flatAddress(address: string): string {
+  return address.replace(/\s+/g, '').toUpperCase()
+}
+
+/** Whether a validator argument is meant as an address rather than a name. */
+function looksLikeAddressQuery(query: string): boolean {
+  const flat = query.replace(/\s+/g, '')
+  return /^NQ/i.test(flat) || /^(0x)?[0-9a-f]{40}$/i.test(flat)
+}
+
+/** A validator address, or null when the input is not one (invalid is dropped, not thrown). */
+function validatorAddressFrom(input: string): string | null {
+  const flat = flatAddress(input)
+  if (/^(0X)?[0-9A-F]{40}$/.test(flat)) {
+    try {
+      return normalizeAddress(flat)
+    } catch {
+      return null
+    }
+  }
+  return isValidNimiqAddress(flat) ? flat : null
+}
+
 /** Blocks at about 1 block/second, as the app words its unstake clocks. */
 function blocksWait(blocks: number): string {
   if (blocks < 90) return `about ${blocks} minutes at about 1 block per second`
@@ -1369,12 +1403,159 @@ server.registerTool(
     })
 )
 
+// 11: draft_stake
+
+server.registerTool(
+  'draft_stake',
+  {
+    title: 'Draft a stake link',
+    description:
+      'DRAFTS a stake and returns a link only. This never signs anything and never sends ' +
+      'anything: the link opens the NimBooks app with the stake panel pre-filled, and you ' +
+      'check the amount and validator there and confirm in your own wallet. No validator is ' +
+      'recommended, ranked or chosen for you, and there is no default validator. The link ' +
+      'is the deliverable, exactly like create_payment_request: nothing is built, broadcast ' +
+      'or queued here, and nothing is marked as staked. Notes explain what the app will do ' +
+      'with the values, including a cap to the free balance and the 100 NIM first-stake ' +
+      'minimum.',
+    inputSchema: {
+      amountNim: z
+        .union([z.string(), z.number()])
+        .optional()
+        .describe('Amount in NIM, decimal, at most 5 decimals. An omitted or invalid amount is left out of the link with a note.'),
+      validator: z
+        .string()
+        .optional()
+        .describe('A validator NQ address, or a validator name (exact, or a unique part of the name). There is no default validator.'),
+      address: z
+        .string()
+        .optional()
+        .describe(`The staker account, used only to read the current delegation and liquid balance for notes. ${DEFAULTS_TO_CONFIGURED}`),
+    },
+    annotations: READ_ONLY,
+  },
+  async ({ amountNim, validator, address }) =>
+    guard('draft_stake', async () => {
+      const validatorInput = validator?.trim() ?? ''
+      let validatorAddress: string | null = null
+      let validatorInfo: ValidatorInfo | null = null
+      let validators: ValidatorInfo[] | null = null
+
+      if (validatorInput) {
+        if (looksLikeAddressQuery(validatorInput)) {
+          validatorAddress = validatorAddressFrom(validatorInput)
+          // An address does not need the list. When it is readable, the list
+          // supplies the pool's name and whether it is producing this epoch;
+          // when it is not, the address alone still goes into the link.
+          if (validatorAddress) {
+            try {
+              validators = (await getValidatorsSnapshot()).validators
+              validatorInfo = findValidatorByAddress(validatorAddress, validators)
+            } catch {
+              /* the link works with the address alone */
+            }
+          }
+        } else {
+          // A name has to be resolved against the live list; a failed fetch is
+          // a tool error that says so, never a quietly different link.
+          validators = (await getValidatorsSnapshot()).validators
+          validatorInfo = matchValidator(validatorInput, validators)
+          validatorAddress = validatorInfo ? flatAddress(validatorInfo.address) : null
+        }
+      }
+
+      const link = buildStakeLink({ amountNim, validator: validatorAddress })
+      const intent = parseStakeLink(link.slice(link.indexOf('#')))
+      if (!intent) {
+        throw new ToolError('The stake link could not be read back. This is a bug in the server; nothing was signed or sent.')
+      }
+      const amountLuna = intent.amountLuna
+      const amountNimOut = amountLuna !== null ? formatLunaExact(String(amountLuna)) : null
+
+      const notes: string[] = [
+        'Nothing was signed or sent. The link opens the stake panel in NimBooks; you check the amount and validator and confirm in your own wallet.',
+      ]
+      // A value that was dropped from the link is named, not silently omitted.
+      // The builder leaves invalid values out before they ever become params,
+      // so the link itself cannot carry the warning back; it comes from the
+      // input side.
+      if (amountNim !== undefined && amountNim !== null && amountLuna === null)
+        notes.push(STAKE_AMOUNT_WARNING)
+      if (validatorInput && !intent.validator) notes.push(STAKE_VALIDATOR_WARNING)
+      if (!intent.validator) notes.push('No validator was chosen. The app does not pick one for you.')
+
+      if (validatorInfo) {
+        if (validatorInfo.reliability === null) {
+          notes.push(
+            `${validatorInfo.name} has no reliability score this epoch, so it is not producing rewards and the app will not select it.`
+          )
+        } else if (!validatorInfo.isListed) {
+          notes.push(`${validatorInfo.name} is not listed as active this epoch, so the app will not select it.`)
+        }
+      }
+
+      // The account is read only for context notes. No address, or a failed
+      // read, never blocks the link.
+      let account: string | null = null
+      try {
+        account = addressArg(address)
+      } catch (e) {
+        if (address) {
+          notes.push(
+            `The account checks were skipped: ${e instanceof Error ? e.message : String(e)} The link is still valid.`
+          )
+        }
+      }
+
+      if (account) {
+        try {
+          const [balanceLuna, holding] = await Promise.all([getBalance(account), getStaking(account)])
+          if (holding && holding.delegation) {
+            const delegation = flatAddress(holding.delegation)
+            if (validatorAddress && delegation !== validatorAddress) {
+              const current = validators ? findValidatorByAddress(delegation, validators) : null
+              const who = current ? current.name : spacedAddress(delegation)
+              notes.push(
+                `This account already stakes with ${who}. The app adds new stake to that validator; switching needs an unstake first.`
+              )
+            }
+          }
+          if (amountLuna !== null) {
+            const liquid = /^\d+$/.test(balanceLuna) ? BigInt(balanceLuna) : 0n
+            if (BigInt(amountLuna) > liquid) {
+              notes.push(
+                `The amount is above the account's liquid balance (${formatLunaExact(liquid.toString())} NIM free), so the app will cap it to what is free.`
+              )
+            }
+            if (!holding && BigInt(amountLuna) < BigInt(MIN_STAKE_NIM) * 100000n) {
+              notes.push(`This account has no stake yet, and the app needs at least ${MIN_STAKE_NIM} NIM for a first stake.`)
+            }
+          }
+        } catch (e) {
+          notes.push(
+            `The account checks were skipped: ${e instanceof Error ? e.message : String(e)} The link is still valid.`
+          )
+        }
+      }
+
+      return ok({
+        link,
+        amountNim: amountNimOut,
+        validator: intent.validator
+          ? { address: spacedAddress(intent.validator), name: validatorInfo?.name ?? null }
+          : null,
+        notes,
+        signed: false,
+      })
+    })
+)
+
 // --- Boot ---
 
 async function main(): Promise<void> {
   const transport = new StdioServerTransport()
   await server.connect(transport)
-  log(`v${VERSION} ready: 10 tools, read-only.`)
+  log(`v${VERSION} ready: 11 tools, read-only.`)
   log(options.backupPath ? `backup: ${options.backupPath}` : 'no --backup given; list_invoices will explain how to make one')
   if (defaultAddressSpaced) log(`default address: ${defaultAddressSpaced} (named in the server instructions)`)
 }
