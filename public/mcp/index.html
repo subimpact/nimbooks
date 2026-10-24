@@ -246,13 +246,13 @@
 
   <h2>What it is</h2>
   <div class="card">
-    <p><code>nimbooks-mcp</code> is a small Model Context Protocol server that runs on your own machine. Point an AI assistant at it and your Nimiq books become answerable in ordinary sentences: balances, classified history, day-by-day statements priced at each day's close. It can also draft a payment request and hand you back the link, and it answers the staking questions too: the position, the pools, a yield projection, the rewards earned. Ten tools, no account to create.</p>
+    <p><code>nimbooks-mcp</code> is a small Model Context Protocol server that runs on your own machine. Point an AI assistant at it and your Nimiq books become answerable in ordinary sentences: balances, classified history, day-by-day statements priced at each day's close. It can also draft a payment request and hand you back the link, and it answers the staking questions too: the position, the pools, a yield projection, the rewards earned. Eleven tools, no account to create.</p>
     <ul class="prompts">
       <li>"How much came in last month, and who from?"</li>
       <li>"Draft a request for 25 NIM for the September retainer."</li>
       <li>"Has anyone paid request a1b2c3d4e5 yet?"</li>
     </ul>
-    <p class="note">New in 1.1: four staking tools that share the app's own maths.</p>
+    <p class="note">New in 1.2: draft_stake hands you a link that opens the stake panel pre-filled. It never signs.</p>
     <ul class="prompts">
       <li>"What is my stake earning?"</li>
       <li>"Which pools pay the most right now?"</li>
@@ -274,12 +274,13 @@
 
   <h2>The tools</h2>
   <div class="card">
-    <p>Ten tools, every one of them a read or a pure function:</p>
+    <p>Eleven tools, every one of them a read or a pure function:</p>
     <ul class="tool-list">
       <li><code>get_summary</code> <span>balance and money in, out and over a window</span></li>
       <li><code>list_transactions</code> <span>classified rows, newest first</span></li>
       <li><code>get_statement</code> <span>day-by-day, priced at each day's close</span></li>
       <li><code>create_payment_request</code> <span>drafts a shareable link, signs nothing</span></li>
+      <li><code>draft_stake</code> <span>hands you a link that opens the stake panel pre-filled, signs nothing</span></li>
       <li><code>check_request_paid</code> <span>whether a request has been paid</span></li>
       <li><code>list_invoices</code> <span>the requests saved in a backup file</span></li>
       <li><code>get_staking</code> <span>the staked position, the pool with its fee and net yield, the unstake clock</span></li>
@@ -322,7 +323,7 @@ npm run build</pre>
 
   <p class="note">Built from source instead? Swap <code>npx -y nimbooks-mcp</code> for <code>node /absolute/path/to/nimbooks/mcp/dist/index.js</code> in either config.</p>
 
-  <p class="note">Restart the client and the ten tools appear. <code>--address</code> is the account used when a question does not name one; every tool also takes an address of its own. Add <code>--backup /path/to/nimbooks-backup.json</code> if you want it to see the payment requests your app keeps on the device: that file holds cashlink keys, so keep it as carefully as a wallet. The server discards that part of it at the door.</p>
+  <p class="note">Restart the client and the eleven tools appear. <code>--address</code> is the account used when a question does not name one; every tool also takes an address of its own. Add <code>--backup /path/to/nimbooks-backup.json</code> if you want it to see the payment requests your app keeps on the device: that file holds cashlink keys, so keep it as carefully as a wallet. The server discards that part of it at the door.</p>
 
   <footer>
     <ul>

@@ -1,7 +1,8 @@
 # nimbooks-mcp
 
 An MCP server that gives an AI assistant read access to your Nimiq books — balances,
-classified history, tax-basis statements — and lets it **draft** payment requests.
+classified history, tax-basis statements — and lets it **draft** payment requests and
+stake links.
 
 It runs on your machine, reads the public chain, and cannot spend a single Luna.
 
@@ -19,8 +20,9 @@ This is the part to read first.
 
 - **It never signs anything.** There is no key handling in this package at all — nothing
   generates, stores, reads, derives or asks for a private key, a seed phrase or a
-  passphrase. `create_payment_request` returns a *link*. A link is a request. Only the
-  payer's wallet can move money, and only when its owner approves the payment there.
+  passphrase. `create_payment_request` and `draft_stake` return *links*. A link is a
+  request or a pre-filled draft, never a signature. Only the payer's wallet can move
+  money, and only when its owner approves the payment there.
 - **It never sends anything.** No transaction is built, broadcast or queued. Nothing is
   marked paid — not on chain, and not in your app's own books.
 - **It has no server.** The only hosts this process contacts are `rpc.nimiqwatch.com`
@@ -36,7 +38,7 @@ This is the part to read first.
 - **It is not a wallet, and not a replacement for one.** It reads what the chain already
   says in public about an address you name.
 
-Not sure? The whole server is six files under `src/`, about 2,300 lines. `src/index.ts`
+Not sure? The whole server is seven files under `src/`, about 3,400 lines. `src/index.ts`
 is the tool surface; there is nothing else to audit.
 
 ---
@@ -76,7 +78,7 @@ npm run build     # → dist/index.js
 }
 ```
 
-Restart Claude Desktop. The ten tools appear under the tools icon.
+Restart Claude Desktop. The eleven tools appear under the tools icon.
 
 ### Claude Code
 
@@ -116,6 +118,7 @@ chain instead.
 | `list_transactions` | Classified rows — kind, direction, counterparty, memo, hash. |
 | `get_statement` | Day-by-day in/out for a year or month, priced at each day's CoinGecko UTC close. |
 | `create_payment_request` | **Drafts** a request and returns a shareable link. Signs nothing. |
+| `draft_stake` | **Drafts** a stake link that opens the app's stake panel pre-filled. Signs nothing. |
 | `check_request_paid` | Whether a payment tagged with a request's reference has landed. |
 | `list_invoices` | Requests stored in your backup file. |
 | `get_staking` | The staked position: active, cooling down, retired, the pool, fee, net yield, an unstake clock, and a first-year estimate. |
@@ -197,7 +200,8 @@ npm run smoke  # opt-in: drives the built server against a live demo wallet over
 ```
 
 `npm run typecheck` covers `src/`. The cross-checks against the app's own modules
-(invoice byte-parity, classification fixtures, statement aggregation, stdio round trip)
+(invoice and stake-link byte-parity, classification fixtures, statement aggregation,
+stdio round trip)
 run in the app repository on every release.
 
 ---

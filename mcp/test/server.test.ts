@@ -3,7 +3,7 @@
 // Drives the real built server over real stdio, through the MCP SDK's own
 // client. Three things this proves that a unit test cannot:
 //
-//   1. The tool surface is exactly the ten tools, with the limits stated in
+//   1. The tool surface is exactly the eleven tools, with the limits stated in
 //      their descriptions — that surface is the promise made to the assistant.
 //   2. stdout carries nothing but the protocol. Any stray `console.log` in the
 //      server would corrupt the JSON-RPC framing and every call below would
@@ -28,10 +28,12 @@ import { projectStake as appProjectStake } from '../../src/lib/yieldCalc.ts'
 const SERVER = resolve('dist/index.js')
 const BACKUP = resolve('test/fixtures/backup.json')
 const OWN = 'NQ43 Y1RH P1K7 JH78 LRTS 95RY GAUU UBDK FFGX'
+const VALIDATOR = 'NQ08 ACT8 T0FE PTG8 P5RL H2S3 QGXH V15R NVXY'
 
 const EXPECTED_TOOLS = [
   'check_request_paid',
   'create_payment_request',
+  'draft_stake',
   'get_rewards',
   'get_staking',
   'get_statement',
@@ -58,7 +60,7 @@ function text(result: any): string {
   return (result.content ?? []).map((c: any) => c.text ?? '').join('\n')
 }
 
-test('tools/list returns exactly the ten tools', async () => {
+test('tools/list returns exactly the eleven tools', async () => {
   const client = await connect(['--backup', BACKUP, '--address', OWN])
   try {
     const { tools } = await client.listTools()
@@ -337,6 +339,96 @@ test('the server instructions mention the staking surface', async () => {
     assert.match(instructions, /list_validators/)
     assert.match(instructions, /project_yield/)
     assert.match(instructions, /get_rewards/)
+  } finally {
+    await client.close()
+  }
+})
+
+// --- The 1.2 stake-link tool (offline paths only) ---
+
+test('draft_stake with only an address returns a bare link and says the checks were skipped', async () => {
+  const client = await connectWithEnv(
+    { NIMBOOKS_MCP_NO_CHAIN: '1', NIMBOOKS_MCP_NO_VALIDATORS: '1' },
+    ['--address', OWN]
+  )
+  try {
+    const res = await client.callTool({ name: 'draft_stake', arguments: { address: OWN } })
+    assert.notEqual(res.isError, true, text(res))
+    const payload = JSON.parse(text(res))
+    assert.equal(payload.link, 'https://nimbooks.subimpact.net/#/stake')
+    assert.equal(payload.amountNim, null)
+    assert.equal(payload.validator, null)
+    assert.equal(payload.signed, false)
+    assert.ok(payload.notes.some((n: string) => /Nothing was signed or sent/.test(n)))
+    assert.ok(payload.notes.some((n: string) => /No validator was chosen/.test(n)))
+    assert.ok(payload.notes.some((n: string) => /account checks were skipped/.test(n)))
+  } finally {
+    await client.close()
+  }
+})
+
+test('draft_stake with only an amount fills the amount and leaves the validator empty', async () => {
+  const client = await connectWithEnv({ NIMBOOKS_MCP_NO_CHAIN: '1' })
+  try {
+    const res = await client.callTool({ name: 'draft_stake', arguments: { amountNim: '12.5' } })
+    assert.notEqual(res.isError, true, text(res))
+    const payload = JSON.parse(text(res))
+    assert.equal(payload.link, 'https://nimbooks.subimpact.net/#/stake?amount=12.5')
+    assert.equal(payload.amountNim, '12.5')
+    assert.equal(payload.validator, null)
+    assert.equal(payload.signed, false)
+    assert.ok(payload.notes.some((n: string) => /Nothing was signed or sent/.test(n)))
+    assert.ok(payload.notes.some((n: string) => /No validator was chosen/.test(n)))
+  } finally {
+    await client.close()
+  }
+})
+
+test('draft_stake with an amount and a validator address builds both into the link', async () => {
+  const client = await connectWithEnv({ NIMBOOKS_MCP_NO_CHAIN: '1', NIMBOOKS_MCP_NO_VALIDATORS: '1' })
+  try {
+    const res = await client.callTool({
+      name: 'draft_stake',
+      arguments: { amountNim: 250, validator: VALIDATOR },
+    })
+    assert.notEqual(res.isError, true, text(res))
+    const payload = JSON.parse(text(res))
+    assert.match(payload.link, /^https:\/\/nimbooks\.subimpact\.net\/#\/stake\?/)
+    assert.match(payload.link, /amount=250/)
+    assert.match(payload.link, /validator=NQ08ACT8T0FEPTG8P5RLH2S3QGXHV15RNVXY/)
+    assert.equal(payload.amountNim, '250')
+    assert.deepEqual(payload.validator, { address: VALIDATOR, name: null })
+    assert.equal(payload.signed, false)
+    assert.ok(payload.notes.some((n: string) => /Nothing was signed or sent/.test(n)))
+  } finally {
+    await client.close()
+  }
+})
+
+test('draft_stake drops a bad amount from the link and says why', async () => {
+  const client = await connectWithEnv({ NIMBOOKS_MCP_NO_CHAIN: '1' })
+  try {
+    const res = await client.callTool({ name: 'draft_stake', arguments: { amountNim: '0.000001' } })
+    assert.notEqual(res.isError, true, text(res))
+    const payload = JSON.parse(text(res))
+    assert.equal(payload.link, 'https://nimbooks.subimpact.net/#/stake')
+    assert.equal(payload.amountNim, null)
+    assert.equal(payload.signed, false)
+    assert.ok(payload.notes.some((n: string) => /not a valid NIM amount/.test(n)))
+  } finally {
+    await client.close()
+  }
+})
+
+test('draft_stake name lookup with the validators gate on says the list is unavailable', async () => {
+  const client = await connectWithEnv({ NIMBOOKS_MCP_NO_VALIDATORS: '1' })
+  try {
+    const res = await client.callTool({ name: 'draft_stake', arguments: { validator: 'Nimiq Surf' } })
+    assert.equal(res.isError, true, 'a name cannot resolve without the list')
+    const msg = text(res)
+    assert.match(msg, /validators list/)
+    assert.match(msg, /unavailable/)
+    assert.match(msg, /offline gate|NO_VALIDATORS/)
   } finally {
     await client.close()
   }
