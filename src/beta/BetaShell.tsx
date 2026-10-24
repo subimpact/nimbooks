@@ -49,6 +49,11 @@ import { Badge } from '@beta/components/ui/badge'
 import { Button } from '@beta/components/ui/button'
 import { TooltipProvider } from '@beta/components/ui/tooltip'
 import { BetaPortalContext } from '@beta/lib/portal'
+import BetaSidebarWidgets, {
+  type BetaHoldingsProps,
+  type BetaPriceProps,
+  type BetaStakeProps,
+} from '@beta/BetaSidebarWidgets'
 
 export type BetaView = 'dashboard' | 'history' | 'receipts' | 'request' | 'export'
 
@@ -73,6 +78,9 @@ export default function BetaShell({
   onRefresh,
   refreshing,
   countdown,
+  price,
+  holdings,
+  stake,
   notices,
   children,
 }: {
@@ -92,6 +100,12 @@ export default function BetaShell({
   refreshing: boolean
   /** Seconds to the next automatic refresh; hidden in demo mode. */
   countdown: number | null
+  /** NIM price + display currency for the sidebar price card (beta only). */
+  price?: BetaPriceProps
+  /** Where the NIM is, for the sidebar ring (beta only). */
+  holdings?: BetaHoldingsProps
+  /** The sidebar action that stakes idle NIM (beta only). */
+  stake?: BetaStakeProps
   /** The classic error and toast banners, shown between the top bar and content. */
   notices?: ReactNode
   /** The five sections, rendered into the content column. */
@@ -116,6 +130,9 @@ export default function BetaShell({
               versionLabel={versionLabel}
               onVersion={onVersion}
               onDisconnect={onDisconnect}
+              price={price}
+              holdings={holdings}
+              stake={stake}
             />
             <SidebarInset className="tw:min-w-0">
               <BetaTopBar
@@ -150,6 +167,9 @@ function BetaSidebar({
   versionLabel,
   onVersion,
   onDisconnect,
+  price,
+  holdings,
+  stake,
 }: {
   view: BetaView
   onNavigate: (view: BetaView) => void
@@ -157,6 +177,9 @@ function BetaSidebar({
   versionLabel: string
   onVersion: () => void
   onDisconnect: () => void
+  price?: BetaPriceProps
+  holdings?: BetaHoldingsProps
+  stake?: BetaStakeProps
 }) {
   // On a phone the sidebar is a modal Sheet: Radix makes everything outside it
   // inert while it is open, so every action closes it first. The changelog is
@@ -209,6 +232,13 @@ function BetaSidebar({
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+        {/* The sidebar widgets (NIM price, NIM ring, stake) sit under the
+            section list and disappear with the icon-collapsed sidebar. */}
+        <BetaSidebarWidgets
+          price={price}
+          holdings={holdings}
+          stake={stake && { show: stake.show, onStake: closeThen(stake.onStake) }}
+        />
       </SidebarContent>
       <SidebarFooter className="tw:gap-2">
         {address && (
