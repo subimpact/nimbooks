@@ -18,7 +18,7 @@ export interface ChangelogEntry {
 export const CHANGELOG: ChangelogEntry[] = [
   {
     version: '1.39.0',
-    date: '2026-10-25',
+    date: '2026-10-26',
     items: [
       'History has filters: Received, Sent, Rewards, Staking, Nimiq Pay transfers and Cashlinks, each with a count and a total. Rewards are grouped by month, so a year of daily rewards reads as twelve lines you can open',
       "History can hide Nimiq Pay's internal transfers, with the same switch as Analytics, so totals count only money that really came in or went out",

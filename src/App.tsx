@@ -2223,7 +2223,19 @@ export default function App() {
   useEffect(() => {
     setHistoryFilter('all')
     setVisibleTxCount(INITIAL_VISIBLE_TX)
+    setRewardMonthToggles({})
   }, [account?.nimiqAddress])
+  // Analytics lives on Overview and writes the shared key from its own state,
+  // so a switch flipped there must be picked up when History opens: re-read
+  // the stored preference on every entry to the History tab.
+  useEffect(() => {
+    if (view !== 'history') return
+    try {
+      setHideInternalHistory(localStorage.getItem('nimbooks:analytics:filterHtlc') === 'true')
+    } catch {
+      /* storage unavailable: keep the in-memory choice */
+    }
+  }, [view])
   // One stored preference for both screens: Analytics reads this key on mount,
   // so writing it on every change keeps the two Hide internal switches in step.
   useEffect(() => {
