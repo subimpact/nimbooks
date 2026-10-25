@@ -132,7 +132,7 @@ export const FEATURES: FeatureDef[] = [
     steps: [
       {
         title: 'Open History',
-        body: 'Your transactions run newest first, read from the chain.',
+        body: 'Your transactions run newest first, read from the chain. The chips at the top filter them to Received, Sent, Rewards, Staking, Nimiq Pay transfers or Cashlinks, each with a count and a total. Hide internal leaves out Nimiq Pay\'s own round trips, the same switch as Analytics.',
       },
       {
         title: 'Read the labels',
@@ -144,7 +144,7 @@ export const FEATURES: FeatureDef[] = [
       },
       {
         title: 'Load more',
-        body: 'History shows a page at a time. Load more reveals the rest.',
+        body: 'History shows a page at a time, and Load more reveals the rest. Rewards are grouped by month, so a year of daily rewards reads as twelve lines you can open.',
       },
     ],
     behindTheScenes: [

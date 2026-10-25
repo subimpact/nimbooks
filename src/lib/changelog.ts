@@ -7,7 +7,7 @@
 // Badge text. Spelled out rather than built from a version constant so the exact
 // label ships as one string in the bundle (JSX would emit "v" as a separate node).
 // package.json carries the machine-readable version.
-export const APP_VERSION_LABEL = 'v1.38.0'
+export const APP_VERSION_LABEL = 'v1.39.0'
 
 export interface ChangelogEntry {
   version: string
@@ -16,6 +16,15 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '1.39.0',
+    date: '2026-10-25',
+    items: [
+      'History has filters: Received, Sent, Rewards, Staking, Nimiq Pay transfers and Cashlinks, each with a count and a total. Rewards are grouped by month, so a year of daily rewards reads as twelve lines you can open',
+      "History can hide Nimiq Pay's internal transfers, with the same switch as Analytics, so totals count only money that really came in or went out",
+      'A stake link now opens the stake panel in about a second instead of waiting for your whole history to load',
+    ],
+  },
   {
     version: '1.38.0',
     date: '2026-10-24',

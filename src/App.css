@@ -1746,6 +1746,94 @@ a:focus-visible {
   padding: 24px 0;
 }
 
+/* History filters: one scrollable row of chips, no wrap on phones. The chips
+   reuse Analytics' .period look so the two screens read as one app. */
+.history-filters {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 4px;
+  overflow-x: auto;
+  padding: 3px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  scrollbar-width: none;
+}
+.history-filters::-webkit-scrollbar {
+  display: none;
+}
+.history-filters .period {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+/* The summary, the scope note and the hidden-internal line sit tight under the
+   chips instead of taking a full .hint gap each. */
+.history-summary,
+.history-scope,
+.history-hidden {
+  margin-top: 6px;
+}
+.history-scope {
+  opacity: 0.8;
+}
+.history-internal-toggle {
+  align-self: flex-start;
+  margin-top: 8px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--card);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.history-internal-toggle.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-gold);
+}
+/* A reward month: a header row that opens to the same daily rows as the flat
+   list, nested slightly under the header. */
+.reward-month {
+  margin-bottom: 8px;
+}
+.reward-month-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.reward-month-name {
+  font-size: 14px;
+  font-weight: 700;
+}
+.reward-month-meta {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.reward-month-chevron {
+  display: inline-block;
+  color: var(--muted);
+  font-size: 12px;
+  transition: transform 0.15s ease;
+}
+.reward-month-chevron.open {
+  transform: rotate(180deg);
+}
+.reward-month .tx {
+  margin-top: 8px;
+}
+
 /* Receipts */
 .receipt {
   background: var(--card);

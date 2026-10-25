@@ -166,6 +166,17 @@ import { typicalRate, compoundsFor, projectStake } from './lib/yieldCalc'
 import { payoutScheduleLabel, restakeGainNim, restakeReminder, stakeTerms } from './lib/earnTerms'
 import { rewardsByValidator, rewardsSince, stakeNudge as pickStakeNudge, trailingYield } from './lib/earnInsights'
 import { splitHtlcFlows } from './lib/htlcFlows'
+import {
+  HISTORY_FILTERS,
+  filterHistory,
+  groupRewardsByMonth,
+  hasInternalTransfers,
+  historyCounts,
+  historyDirection,
+  historySummary,
+  type HistoryCtx,
+  type HistoryFilter,
+} from './lib/historyFilter'
 import EarnCard from './EarnCard'
 import YieldCalculator from './YieldCalculator'
 import { setUiMode, useUiMode } from './lib/uiMode'
@@ -494,6 +505,38 @@ const TX_VERIFY_INTERVAL_MS = 10_000
 // Confetti.tsx) plus a beat, after which the burst unmounts itself and leaves
 // the success screen clean. It does not close anything.
 const CONFETTI_MS = 2_600
+
+// One page of History. Kept beside the filter state so "reset on filter
+// change" and the initial render cannot drift apart.
+const INITIAL_VISIBLE_TX = 50
+
+// History's chips, in order, and the copy each empty filter shows. The labels
+// are the short chip names; the summary line below the chips carries the units.
+const HISTORY_FILTER_LABEL: Record<HistoryFilter, string> = {
+  all: 'All',
+  received: 'Received',
+  sent: 'Sent',
+  rewards: 'Rewards',
+  staking: 'Staking',
+  pay: 'Pay transfers',
+  cashlinks: 'Cashlinks',
+}
+
+const HISTORY_EMPTY: Record<HistoryFilter, string> = {
+  all: 'No transactions in the history loaded on this device.',
+  received: 'No received payments in the history loaded on this device.',
+  sent: 'No sent payments in the history loaded on this device.',
+  rewards: 'No rewards in the history loaded on this device.',
+  staking: 'No staking transactions in the history loaded on this device.',
+  pay: 'No Nimiq Pay transfers in the history loaded on this device.',
+  cashlinks: 'No cashlinks in the history loaded on this device.',
+}
+
+// "1 transaction" / "2 transactions", so a one-day rewards month does not read
+// "1 days".
+function countLabel(n: number, one: string, many = `${one}s`): string {
+  return `${n} ${n === 1 ? one : many}`
+}
 
 // Nimiq PoS: one epoch is 43,200 blocks at ~1 block/second (~12h). A retire is
 // only valid a full reporting epoch after the deactivation took effect, which
@@ -872,7 +915,24 @@ export default function App() {
   const [theme, setTheme] = useState<Theme>(getInitialTheme)
   const [showReceiptHelp, setShowReceiptHelp] = useState(false)
   const [showTypeHelp, setShowTypeHelp] = useState(false)
-  const [visibleTxCount, setVisibleTxCount] = useState(50)
+  const [visibleTxCount, setVisibleTxCount] = useState(INITIAL_VISIBLE_TX)
+  // History's filter is a view preference, not a stored one: it lasts while the
+  // tab is mounted and resets to All when the connected account changes (see
+  // the effect below), so a new wallet never opens on the old one's filter.
+  const [historyFilter, setHistoryFilter] = useState<HistoryFilter>('all')
+  // Months are collapsed by default; this only records the months the user
+  // explicitly opened or closed, so the newest stays expanded until they say
+  // otherwise. Keyed by 'YYYY-MM'.
+  const [rewardMonthToggles, setRewardMonthToggles] = useState<Record<string, boolean>>({})
+  // The same stored preference as Analytics' Hide internal switch, so the two
+  // screens always agree. Read the way Analytics reads it ('true' = hide).
+  const [hideInternalHistory, setHideInternalHistory] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('nimbooks:analytics:filterHtlc') === 'true'
+    } catch {
+      return false
+    }
+  })
   const [statementYear, setStatementYear] = useState<string>('all')
   const [statement, setStatement] = useState<Statement | null>(null)
   const [statementLoading, setStatementLoading] = useState(false)
@@ -2114,6 +2174,77 @@ export default function App() {
       return !!sp && sp.realIn > 0
     })
   }, [allTxs, account?.nimiqAddress, account?.remoteAddress, analyticsHeldContracts, contractTxsForAnalytics])
+
+  // History's filters read the same netting Analytics does, with exactly the
+  // inputs Analytics passes (see the `Analytics` element below): the basic list
+  // for the tx rows, the held contracts and the contract-side rows that decide
+  // how much of a Pay round trip was really the user's money. Computed once
+  // here so the chip counts, the list and the totals share one map.
+  const historyFlows = useMemo(() => {
+    const own = account?.nimiqAddress
+    if (!own) return new Map()
+    return splitHtlcFlows(nimTxs, own, {
+      heldContracts: analyticsHeldContracts,
+      contractTxs: contractTxsForAnalytics,
+    })
+  }, [nimTxs, account?.nimiqAddress, analyticsHeldContracts, contractTxsForAnalytics])
+  const historyCtx = useMemo<HistoryCtx>(
+    () => ({
+      own: account?.nimiqAddress ?? '',
+      remote: account?.remoteAddress ?? null,
+      flows: historyFlows,
+      hideInternal: hideInternalHistory,
+    }),
+    [account?.nimiqAddress, account?.remoteAddress, historyFlows, hideInternalHistory]
+  )
+  const historyCountsByFilter = useMemo(
+    () => historyCounts(historyTxs, historyCtx),
+    [historyTxs, historyCtx]
+  )
+  const historyFiltered = useMemo(
+    () => filterHistory(historyTxs, historyFilter, historyCtx),
+    [historyTxs, historyFilter, historyCtx]
+  )
+  // Over ALL filtered rows, never the visible page: Load more must not move
+  // the summary figure.
+  const historyFilterSummary = useMemo(
+    () => historySummary(historyTxs, historyFilter, historyCtx),
+    [historyTxs, historyFilter, historyCtx]
+  )
+  const historyHasInternal = useMemo(
+    () => hasInternalTransfers(historyTxs, historyCtx),
+    [historyTxs, historyCtx]
+  )
+  const rewardMonths = useMemo(
+    () => (historyFilter === 'rewards' ? groupRewardsByMonth(historyFiltered) : []),
+    [historyFilter, historyFiltered]
+  )
+  // A new wallet never inherits the previous one's filter or page depth.
+  useEffect(() => {
+    setHistoryFilter('all')
+    setVisibleTxCount(INITIAL_VISIBLE_TX)
+  }, [account?.nimiqAddress])
+  // One stored preference for both screens: Analytics reads this key on mount,
+  // so writing it on every change keeps the two Hide internal switches in step.
+  useEffect(() => {
+    try {
+      localStorage.setItem('nimbooks:analytics:filterHtlc', String(hideInternalHistory))
+    } catch {
+      /* storage unavailable: the choice lasts for this session */
+    }
+  }, [hideInternalHistory])
+  const pickHistoryFilter = (filter: HistoryFilter) => {
+    if (filter === historyFilter) return
+    setHistoryFilter(filter)
+    setVisibleTxCount(INITIAL_VISIBLE_TX)
+  }
+  const toggleRewardMonth = (key: string, openByDefault: boolean) => {
+    setRewardMonthToggles((prev) => ({
+      ...prev,
+      [key]: !(prev[key] ?? openByDefault),
+    }))
+  }
+
   // Delegated NIM, including the buckets on their way back out: inactive is
   // cooling down and retired is withdrawable, but both are still the user's.
   const stakedLuna =
@@ -5212,6 +5343,132 @@ export default function App() {
     }
   }
 
+  // One row renderer for both History layouts: the flat list and a reward
+  // month's expanded rows must be the same row, so it is written once here.
+  // Content is unchanged from when this JSX lived inside the list.
+  const renderHistoryTxRow = (tx: NimiqTx) => {
+    // Direction comes from the filter module, so the arrow and the chip that
+    // lists the row can never disagree (a remote row sent from the relay is
+    // outgoing, everything else that is not from the basic address is in).
+    const isOut = historyDirection(tx, historyCtx) === 'out'
+    const label = txLabel(tx, account.nimiqAddress ?? '')
+    const memo = decodeMemo(tx.data)
+    const cashlinkTag = isCashlinkMemo(memo)
+    const demo = isDemoMode()
+    // Two kinds of synthesized row, and they differ in exactly one
+    // way that matters here: a staking action is a real transaction
+    // the index just doesn't list, so its hash opens in the explorer;
+    // a reward rollup has no hash at all.
+    const stakingAction = tx.synthetic
+      ? STAKING_ACTION_LABEL[tx.synthetic as StakingActionKind]
+      : undefined
+    const isReward = !!tx.synthetic && !stakingAction
+    // Reward rows are a daily rollup of restaking events, so the
+    // payer's name takes the place of the missing hash link.
+    const validator = isReward
+      ? (validators.find((v) => cleanAddr(v.address) === cleanAddr(tx.sender))?.name ??
+        `${tx.sender.slice(0, 14)}…`)
+      : null
+    // Recorded at submit; the verification poll flips it. Until then
+    // the row must not claim more than "handed to the network".
+    const stakingUnconfirmed =
+      !!stakingAction && stakingLog.some((a) => a.hash === tx.hash && !a.confirmed)
+    const counterparty = isOut ? tx.recipient : tx.sender
+    return (
+      <div key={tx.hash} className="tx tx-with-iqon">
+        <Iqon address={counterparty} size={28} className="tx-iqon" />
+        <div className="tx-body">
+          <div className="tx-main">
+            <span className={isOut ? 'out' : 'in'}>
+              {stakingAction ? `▼ ${stakingAction}` : isOut ? '▼ sent' : '▲ received'}
+              {stakingAction ? (
+                <span className={`tx-kind ${tx.synthetic}`}> · {tx.synthetic}</span>
+              ) : (
+                isLabelledTxKind(label) && (
+                  <span className={`tx-kind ${label}`}> · {label}</span>
+                )
+              )}
+            </span>
+            <span className="tx-amount">{formatLuna(tx.value, lang)} NIM</span>
+          </div>
+          <div className="tx-sub">
+            {tx.timestamp
+              ? new Date(timestampToMs(tx.timestamp)).toLocaleString(lang)
+              : '…'} ·{' '}
+            {isReward ? (
+              <span className="tx-synthetic">{validator} · restaked, daily total</span>
+            ) : (
+              <a
+                className="tx-hash-link"
+                href={explorerTxUrl(tx.hash)}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {tx.hash.slice(0, 10)}…
+              </a>
+            )}
+            {stakingAction && (
+              <span className="tx-synthetic">
+                {' '}
+                · staking{stakingUnconfirmed ? ', confirming…' : ''}
+              </span>
+            )}
+            {tx.executionResult === false && <span className="tx-failed"> · failed</span>}
+          </div>
+          {/* A staking transaction's data field is a signalling
+              payload, not a note anyone wrote: rendering that hex blob
+              as "memo:" is noise on screen and in the export. The
+              cashlink funding and claiming tags are the same kind of
+              furniture, so the row names the thing instead. */}
+          {cashlinkTag ? (
+            <div className="tx-memo">Cashlink</div>
+          ) : (
+            memo &&
+            label !== 'stake' &&
+            label !== 'unstake' && (
+              <div className="tx-memo">
+                memo:{' '}
+                {(() => {
+                  // The on-chain memo is the invoice reference
+                  // (nimbooks:invoice:<id>); the human description
+                  // travels in the share link. When this tx settled a
+                  // request we know locally, show the friendly name.
+                  const invId = parseInvoiceMemo(memo)
+                  const inv = invId ? invoices.find((i) => i.id === invId) : undefined
+                  return inv?.memo ? `${inv.memo} (${memo})` : memo
+                })()}
+              </div>
+            )
+          )}
+          {/* A deposit into the staking contract (toType 3) is not a
+              receipt candidate either — see lib/chain: the wallet
+              can't prove a payment it didn't make to a counterparty,
+              so the signature would verify and prove nothing. */}
+          {!tx.synthetic && !tx.remote && tx.toType !== 3 && (
+            <button
+              className="btn-small"
+              onClick={() => makeReceipt(tx)}
+              disabled={
+                demo ||
+                receipts.some((r) => r.txHash === tx.hash) ||
+                signingHash === tx.hash
+              }
+              title={demo ? 'Demo mode is read-only. Connect your wallet to sign receipts.' : undefined}
+            >
+              {signingHash === tx.hash
+                ? 'Signing…'
+                : receipts.some((r) => r.txHash === tx.hash)
+                  ? '✓ Signed'
+                  : demo
+                    ? 'Sign receipt (demo)'
+                    : 'Sign receipt'}
+            </button>
+          )}
+        </div>
+      </div>
+    )
+  }
+
   // The beta ("New look (beta)") wiring: one props object per beta screen,
   // sourced from the same closures the classic sections read, so the two
   // looks can never drift on inputs or actions.
@@ -5712,6 +5969,61 @@ export default function App() {
                 </button>
               </div>
             </div>
+            {/* Single-select filter chips. Counts cover the whole loaded
+                history; a filter with nothing in it is not offered (All always
+                is, so there is always a way back). */}
+            <div className="history-filters" role="group" aria-label="Filter transactions">
+              {HISTORY_FILTERS.map((filter) => {
+                const count = historyCountsByFilter[filter]
+                if (filter !== 'all' && count === 0) return null
+                return (
+                  <button
+                    key={filter}
+                    type="button"
+                    className={historyFilter === filter ? 'period active' : 'period'}
+                    aria-pressed={historyFilter === filter}
+                    onClick={() => pickHistoryFilter(filter)}
+                  >
+                    {HISTORY_FILTER_LABEL[filter]} {count}
+                  </button>
+                )
+              })}
+            </div>
+            {/* Over ALL filtered rows, never the visible page: Load more must
+                not move the figure. */}
+            <p className="hint small history-summary">
+              {historyFilter === 'received'
+                ? `${countLabel(historyFilterSummary.count, 'payment')} · ${formatLuna(historyFilterSummary.totalLuna, lang)} NIM received`
+                : historyFilter === 'sent'
+                  ? `${countLabel(historyFilterSummary.count, 'payment')} · ${formatLuna(historyFilterSummary.totalLuna, lang)} NIM sent`
+                  : historyFilter === 'rewards'
+                    ? `${countLabel(historyFilterSummary.days, 'day')} of rewards · ${formatLuna(historyFilterSummary.totalLuna, lang)} NIM`
+                    : countLabel(historyFilterSummary.count, 'transaction')}
+            </p>
+            <p className="hint small history-scope">In the history loaded on this device.</p>
+            {historyFilterSummary.hiddenLuna !== '0' && (
+              <p className="hint small history-hidden">
+                Nimiq Pay internal transfers hidden:{' '}
+                {formatLuna(historyFilterSummary.hiddenLuna, lang)} NIM
+              </p>
+            )}
+            {historyHasInternal &&
+              (historyFilter === 'all' ||
+                historyFilter === 'received' ||
+                historyFilter === 'sent') && (
+                <button
+                  type="button"
+                  className={
+                    hideInternalHistory
+                      ? 'history-internal-toggle active'
+                      : 'history-internal-toggle'
+                  }
+                  aria-pressed={hideInternalHistory}
+                  onClick={() => setHideInternalHistory((v) => !v)}
+                >
+                  Hide Nimiq Pay internal transfers
+                </button>
+              )}
             {showTypeHelp && (
               <div className="card help-card">
                 <p>
@@ -5758,7 +6070,8 @@ export default function App() {
                 has a tx hash and a submit time to show. Cooling/ready are
                 states, not transactions, and the staker-record note below
                 already reports them. */}
-            {unstakeActivity?.kind === 'pending' && (
+            {unstakeActivity?.kind === 'pending' &&
+              (historyFilter === 'all' || historyFilter === 'staking') && (
               <div className="tx pending-tx">
                 <div className="tx-main">
                   <span className="out">
@@ -5792,142 +6105,47 @@ export default function App() {
               </p>
             )}
             {loading && historyTxs.length === 0 && <p className="empty">Loading transactions…</p>}
-            {!loading && historyTxs.length === 0 && (
-              <p className="empty">No transactions found for this address.</p>
+            {!loading && historyFiltered.length === 0 && (
+              <p className="empty">{HISTORY_EMPTY[historyFilter]}</p>
             )}
-            {historyTxs.slice(0, visibleTxCount).map((tx) => {
-              const ownClean = account.nimiqAddress?.replace(/\s+/g, '').toUpperCase()
-              const senderClean = tx.sender.replace(/\s+/g, '').toUpperCase()
-              // Outgoing if it left either of the wallet's addresses — the
-              // basic account *or* the remote HTLC relay (remote rows carry
-              // `remote: true` and their sender is the relay address).
-              const isOut =
-                senderClean === ownClean ||
-                (tx.remote &&
-                  senderClean === account.remoteAddress?.replace(/\s+/g, '').toUpperCase())
-              const label = txLabel(tx, account.nimiqAddress ?? '')
-              const memo = decodeMemo(tx.data)
-              const cashlinkTag = isCashlinkMemo(memo)
-              const demo = isDemoMode()
-              // Two kinds of synthesized row, and they differ in exactly one
-              // way that matters here: a staking action is a real transaction
-              // the index just doesn't list, so its hash opens in the explorer;
-              // a reward rollup has no hash at all.
-              const stakingAction = tx.synthetic
-                ? STAKING_ACTION_LABEL[tx.synthetic as StakingActionKind]
-                : undefined
-              const isReward = !!tx.synthetic && !stakingAction
-              // Reward rows are a daily rollup of restaking events, so the
-              // payer's name takes the place of the missing hash link.
-              const validator = isReward
-                ? (validators.find((v) => cleanAddr(v.address) === cleanAddr(tx.sender))?.name ??
-                  `${tx.sender.slice(0, 14)}…`)
-                : null
-              // Recorded at submit; the verification poll flips it. Until then
-              // the row must not claim more than "handed to the network".
-              const stakingUnconfirmed =
-                !!stakingAction && stakingLog.some((a) => a.hash === tx.hash && !a.confirmed)
-              const counterparty = isOut ? tx.recipient : tx.sender
-              return (
-                <div key={tx.hash} className="tx tx-with-iqon">
-                  <Iqon address={counterparty} size={28} className="tx-iqon" />
-                  <div className="tx-body">
-                    <div className="tx-main">
-                      <span className={isOut ? 'out' : 'in'}>
-                        {stakingAction ? `▼ ${stakingAction}` : isOut ? '▼ sent' : '▲ received'}
-                        {stakingAction ? (
-                          <span className={`tx-kind ${tx.synthetic}`}> · {tx.synthetic}</span>
-                        ) : (
-                          isLabelledTxKind(label) && (
-                            <span className={`tx-kind ${label}`}> · {label}</span>
-                          )
-                        )}
-                      </span>
-                      <span className="tx-amount">{formatLuna(tx.value, lang)} NIM</span>
-                    </div>
-                    <div className="tx-sub">
-                      {tx.timestamp
-                        ? new Date(timestampToMs(tx.timestamp)).toLocaleString(lang)
-                        : '…'} ·{' '}
-                      {isReward ? (
-                        <span className="tx-synthetic">{validator} · restaked, daily total</span>
-                      ) : (
-                        <a
-                          className="tx-hash-link"
-                          href={explorerTxUrl(tx.hash)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
-                          {tx.hash.slice(0, 10)}…
-                        </a>
-                      )}
-                      {stakingAction && (
-                        <span className="tx-synthetic">
-                          {' '}
-                          · staking{stakingUnconfirmed ? ', confirming…' : ''}
-                        </span>
-                      )}
-                      {tx.executionResult === false && <span className="tx-failed"> · failed</span>}
-                    </div>
-                    {/* A staking transaction's data field is a signalling
-                        payload, not a note anyone wrote: rendering that hex blob
-                        as "memo:" is noise on screen and in the export. The
-                        cashlink funding and claiming tags are the same kind of
-                        furniture, so the row names the thing instead. */}
-                    {cashlinkTag ? (
-                      <div className="tx-memo">Cashlink</div>
-                    ) : (
-                      memo &&
-                      label !== 'stake' &&
-                      label !== 'unstake' && (
-                        <div className="tx-memo">
-                          memo:{' '}
-                          {(() => {
-                            // The on-chain memo is the invoice reference
-                            // (nimbooks:invoice:<id>); the human description
-                            // travels in the share link. When this tx settled a
-                            // request we know locally, show the friendly name.
-                            const invId = parseInvoiceMemo(memo)
-                            const inv = invId ? invoices.find((i) => i.id === invId) : undefined
-                            return inv?.memo ? `${inv.memo} (${memo})` : memo
-                          })()}
-                        </div>
-                      )
-                    )}
-                    {/* A deposit into the staking contract (toType 3) is not a
-                        receipt candidate either — see lib/chain: the wallet
-                        can't prove a payment it didn't make to a counterparty,
-                        so the signature would verify and prove nothing. */}
-                    {!tx.synthetic && !tx.remote && tx.toType !== 3 && (
+            {/* Rewards read as one row per calendar month, newest first. The
+                newest month is open until the user says otherwise; every month
+                expands to the same daily rows the flat list renders. */}
+            {historyFilter === 'rewards'
+              ? rewardMonths.map((m, i) => {
+                  const expanded = rewardMonthToggles[m.key] ?? i === 0
+                  return (
+                    <div key={m.key} className="reward-month">
                       <button
-                        className="btn-small"
-                        onClick={() => makeReceipt(tx)}
-                        disabled={
-                          demo ||
-                          receipts.some((r) => r.txHash === tx.hash) ||
-                          signingHash === tx.hash
-                        }
-                        title={demo ? 'Demo mode is read-only. Connect your wallet to sign receipts.' : undefined}
+                        type="button"
+                        className="reward-month-head"
+                        aria-expanded={expanded}
+                        onClick={() => toggleRewardMonth(m.key, i === 0)}
                       >
-                        {signingHash === tx.hash
-                          ? 'Signing…'
-                          : receipts.some((r) => r.txHash === tx.hash)
-                            ? '✓ Signed'
-                            : demo
-                              ? 'Sign receipt (demo)'
-                              : 'Sign receipt'}
+                        <span className="reward-month-name">{m.label}</span>
+                        <span className="reward-month-meta">
+                          {countLabel(m.days, 'day')} · {formatLuna(m.totalLuna, lang)} NIM
+                        </span>
+                        <span
+                          className={
+                            expanded ? 'reward-month-chevron open' : 'reward-month-chevron'
+                          }
+                          aria-hidden="true"
+                        >
+                          ▾
+                        </span>
                       </button>
-                    )}
-                  </div>
-                </div>
-              )
-            })}
-            {historyTxs.length > visibleTxCount && (
+                      {expanded && m.rows.map((tx) => renderHistoryTxRow(tx))}
+                    </div>
+                  )
+                })
+              : historyFiltered.slice(0, visibleTxCount).map((tx) => renderHistoryTxRow(tx))}
+            {historyFilter !== 'rewards' && historyFiltered.length > visibleTxCount && (
               <button
                 className="btn-ghost-lg"
                 onClick={() => setVisibleTxCount((c) => c + 100)}
               >
-                Load more ({historyTxs.length - visibleTxCount} remaining)
+                Load more ({historyFiltered.length - visibleTxCount} remaining)
               </button>
             )}
           </section>

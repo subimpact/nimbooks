@@ -5,9 +5,9 @@ your stake earns and why, every reward in your history, and statements, tax
 files and proofs when you need them. It works inside Nimiq Pay and with Nimiq
 Wallet in any browser.
 
-_Last updated 24 October 2026. Dates are targets._
+_Last updated 25 October 2026. Dates are targets._
 
-## Shipped since Cycle 2 (v1.14 → v1.38)
+## Shipped since Cycle 2 (v1.14 → v1.39)
 
 **Prices and currencies (v1.37)**
 - Total value never shows $0.00 when a price service is busy: the last known price stays on screen, dated ("as of HH:MM") when older than 30 minutes, or "Price unavailable" when none exists.
@@ -23,7 +23,8 @@ _Last updated 24 October 2026. Dates are targets._
 - **"Stake it?" prompt** when a received payment leaves NIM idle (v1.33).
 - **Staking terms** on every position: how it works, that the rate varies, what can go wrong, and how long getting out takes (v1.38).
 - **Restake loop** for pools that pay rewards into your wallet: what restaking adds a year, a one-tap restake, and a weekly calendar reminder (v1.38).
-- **Stake links:** a link can open the stake panel with an amount and validator filled in. You still check and confirm it in your wallet. This is the app half of `draft_stake`; the MCP tool is still to come (v1.38).
+- **Stake links:** a link can open the stake panel with an amount and validator filled in. You still check and confirm it in your wallet (v1.38).
+- **`draft_stake` in `nimbooks-mcp` 1.2.0** (2026-10-24): ask your AI assistant for a stake link and it hands back one that opens the stake panel filled in. Like the other tools, it never signs.
 - **New look (beta) sidebar:** NIM price with its 24-hour or 7-day change, a ring of where your NIM is, and Stake idle NIM (v1.38).
 
 **Books and tax**
@@ -34,6 +35,7 @@ _Last updated 24 October 2026. Dates are targets._
 - Analytics that tell Nimiq Pay's internal HTLC transfers apart from real payments (v1.23–1.25).
 - Every Nimiq Pay payment contract in History, not just the current one, and stakes made from Nimiq Pay counted as staking rather than money sent (v1.29).
 - Full-year staking rewards: statements, tax and History count every reward back to January 2025, fetched in calendar chunks with closed periods cached (v1.30).
+- **History filters:** Received, Sent, Rewards, Staking, Nimiq Pay transfers and Cashlinks, each with a count and a total. Rewards are grouped by month, and the same Hide internal switch as Analytics counts only money that really moved (v1.39).
 
 **Payments**
 - Cashlinks: NIM inside a claimable link, compatible with the Nimiq Hub (v1.14–1.15).
@@ -54,7 +56,6 @@ _Last updated 24 October 2026. Dates are targets._
 - **`nimbooks-mcp` 1.1:** read-only `get_staking`, `list_validators`, `project_yield` and `get_rewards` tools, sharing the app's yield maths through a parity test.
 
 ### Week 3 · 29 October – 4 November: earning beyond the basics
-- **`draft_stake` in the MCP server (still to come):** it returns a NimBooks stake link, whose app half now ships. It never signs; you confirm in your own wallet.
 - **Wider MCP reach:** listings in public MCP directories, and earning prompts on the `/mcp` page.
 
 ### Week 4 · 5–11 November: polish and submit
