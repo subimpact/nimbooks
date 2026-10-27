@@ -16,6 +16,7 @@ import type { SignedReceipt } from './receipt'
 import { canonicalPayload } from './receipt'
 import { broadcastRawTransaction, getNimiqBlockNumber } from './chain'
 import { isInNimiqPay, isMobileDevice, isNimiqPayUserAgent } from './device'
+import { DEMO_WALLET_ADDRESS } from './demoData'
 
 export interface WalletAccount {
   nimiqAddress?: string
@@ -299,9 +300,9 @@ export async function restoreWalletSession(): Promise<WalletAccount | null> {
 
   if (saved.provider === 'demo') {
     // Nothing to ask a provider for: the demo wallet is a public address the
-    // app reads from the chain. (Its story data is re-seeded by the caller —
-    // seedDemoData is an idempotent upsert.)
-    return connectDemoAccount(saved.nimiqAddress)
+    // app reads from the chain. Always the CURRENT sample address, so a session
+    // saved before the sample wallet changed restores onto the new one.
+    return connectDemoAccount(DEMO_WALLET_ADDRESS)
   }
 
   // Silent restore, no wallet prompt: the host's account list is a native

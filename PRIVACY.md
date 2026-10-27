@@ -27,7 +27,7 @@ address you connect:
 | An unstake you started, until the chain finishes it | `nimbooks:pendingUnstake:<address>` |
 | Portfolio address list, currency, theme, session | `nimbooks:portfolio:addresses`, `nimbooks:currency`, … |
 | Nimiq Pay's device ID, so your currency is remembered per device | `nimbooks:deviceId`, `nimbooks:d:<id>:currency` |
-| Caches (history, prices, price charts, validators, rewards) | `nimbooks:txs:*`, `nimbooks:rates`, `nimbooks:fx`, `nimbooks:nim-history:*`, … |
+| Caches (history, prices, price charts, validators, rewards) | `nimbooks:txs:*`, `nimbooks:rates`, `nimbooks:fx`, `nimbooks:nim-history:*`, `nimbooks:is-validator:*`, … |
 | Nimiq Pay's settled payment contracts, so their history loads once | `nimbooks:htlc-archive:<address>` |
 | Your counting choice and backup reminder | `nimbooks:connect-count`, `nimbooks:backup-state` |
 | When you last visited, so the Earn card can show your rewards since then | `nimbooks:last-visit:<address>` |

@@ -116,12 +116,18 @@ export function isNimiqAddress(address: string): boolean {
   return rem === 1
 }
 
-/** The sample wallet's address (src/lib/demoData.ts). Its record is a demo, not a user. */
-const SAMPLE_WALLET_ADDRESS = 'NQ43 Y1RH P1K7 JH78 LRTS 95RY GAUU UBDK FFGX'
+/**
+ * Sample-wallet addresses, current and former (src/lib/demoData.ts). Their
+ * records are the demo, not users.
+ */
+const SAMPLE_WALLET_ADDRESSES = ['NQ82 6GYU NXUU 05DM 1M7F 0SJJ D42E NUNS KELR', 'NQ43 Y1RH P1K7 JH78 LRTS 95RY GAUU UBDK FFGX']
 
 /** Real wallets on record: every wallet: key except the sample wallet's. */
 export async function countWalletRecords(kv: KVNamespace): Promise<number> {
-  const demoKeys = new Set([await walletKey('demo'), await walletKey(SAMPLE_WALLET_ADDRESS)])
+  const demoKeys = new Set([
+    await walletKey('demo'),
+    ...(await Promise.all(SAMPLE_WALLET_ADDRESSES.map((a) => walletKey(a)))),
+  ])
   let total = 0
   let cursor: string | undefined
   do {

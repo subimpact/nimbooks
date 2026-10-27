@@ -299,7 +299,7 @@ export const FEATURES: FeatureDef[] = [
     goodToKnow: [
       'The check confirms the signer is the sender or the recipient, and that the amount, the time (within a minute) and the note match the chain. A transaction that failed, or does not exist, fails it.',
       'The signature is not on-chain: a receipt is kept on the device that signed it and inside its link. Back up from Export to keep it through a reset; a link you shared keeps working either way.',
-      'The sample wallet is read-only. It includes one receipt signed in advance.',
+      'The sample wallet is read-only, so it cannot sign a receipt.',
     ],
     tryView: { view: 'receipts' },
   },

@@ -5,9 +5,9 @@ your stake earns and why, every reward in your history, and statements, tax
 files and proofs when you need them. It works inside Nimiq Pay and with Nimiq
 Wallet in any browser.
 
-_Last updated 25 October 2026. Dates are targets._
+_Last updated 27 October 2026. Dates are targets._
 
-## Shipped since Cycle 2 (v1.14 → v1.39)
+## Shipped since Cycle 2 (v1.14 → v1.40)
 
 **Prices and currencies (v1.37)**
 - Total value never shows $0.00 when a price service is busy: the last known price stays on screen, dated ("as of HH:MM") when older than 30 minutes, or "Price unavailable" when none exists.
@@ -43,7 +43,7 @@ _Last updated 25 October 2026. Dates are targets._
 
 **Trust and usability**
 - `nimbooks-mcp`: a local, read-only AI server that never signs (v1.15).
-- Guided tour of the sample wallet, and a landing page that explains every feature before you connect (v1.16, v1.25).
+- Guided tour of the sample wallet, and a landing page that explains every feature before you connect (v1.16, v1.25). The sample wallet is a live Nimiq Pay wallet staking with ImpactZero (v1.40).
 - 10-second refresh that keeps history, statements, tax and portfolio current (v1.25).
 - An honest usage count, consent before counting, and "forget me" (v1.27).
 - Backup reminders, because receipts and cashlink keys live only on the device (v1.27).

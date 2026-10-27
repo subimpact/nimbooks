@@ -136,7 +136,7 @@ import {
   type StoredInvoice,
 } from './lib/invoice'
 import { buildStakeLink, parseStakeLink, type StakeLinkIntent } from './lib/stakeLink'
-import { seedDemoData } from './lib/demoData'
+import { DEMO_WALLET_ADDRESS } from './lib/demoData'
 import { getAllRestakeRewardTxs } from './lib/stakingEvents'
 import {
   isInNimiqPay,
@@ -1687,15 +1687,9 @@ export default function App() {
     // would land on top of it and hide the link notice, so skip it once.
     skipTourOfferRef.current = (!!entry && !entry.tour) || !!stakeLinkIntent
     try {
-      // Public mainnet address with real human activity — read-only demo mode.
-      // (NQ43 Y1RH P1K7 JH78 LRTS 95RY GAUU UBDK FFGX: seeded story wallet —
-      //  client payments, staking rewards, cooled-down unstaking. Funded + curated
-      //  for the Sep 16 competition demo; read-only in app, keys held by owner.)
-      const acc = connectDemoAccount('NQ43 Y1RH P1K7 JH78 LRTS 95RY GAUU UBDK FFGX')
-      // Bake the demo story into localStorage BEFORE the account lands, so the
-      // receipts/invoices load effects pick it up: a real signed receipt and a
-      // chain-paid request appear in the tabs on any device, no console seed.
-      seedDemoData(acc.nimiqAddress ?? 'NQ43 Y1RH P1K7 JH78 LRTS 95RY GAUU UBDK FFGX')
+      // Public mainnet address with real activity, read-only demo mode
+      // (lib/demoData.ts: a live Nimiq Pay wallet staking with ImpactZero).
+      const acc = connectDemoAccount(DEMO_WALLET_ADDRESS)
       setPayConsensus(acc.consensus ?? null)
       setAccount(acc)
       if (entry) {
@@ -2031,11 +2025,6 @@ export default function App() {
         setRestoring(false)
         return
       }
-      // Demo story data goes in before the account lands, exactly as on the
-      // connect path — the receipts/invoices effects read it the moment the
-      // account is set. seedDemoData is an idempotent upsert, so a restore
-      // never duplicates what is already there.
-      if (acc.provider === 'demo' && acc.nimiqAddress) seedDemoData(acc.nimiqAddress)
       const savedView = getSavedSessionView()
       // One batch, so the connect screen never flashes between the two:
       // `restoring` only goes false with an account in hand.

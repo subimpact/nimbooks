@@ -330,5 +330,87 @@ export async function getAllRestakeRewardTxs(
   }
 
   merged.sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
-  return { txs: merged, complete }
+  // Filtered after the merge, so rows cached before this check get it too.
+  const verdicts = await validatorVerdicts(merged.map((t) => t.sender))
+  return { txs: merged.filter((t) => verdicts.get(flatUpper(t.sender)) !== false), complete }
+}
+
+// --- Only validators pay rewards
+//
+// The restake feed also carries stake that arrives through a contract: a stake
+// made in Nimiq Pay travels through an HTLC, and the feed lists that deposit as
+// a "restake" from the HTLC's address (seen live on a Pay wallet: single
+// windows of 1,001, 2,000 and 3,000 NIM next to ~2 NIM a day from its pool).
+// Counted as rewards, those deposits inflated History, the statement, the tax
+// income and the Earn card's actual yield. So each sender is checked once
+// against Nimiq Watch's validator record (retired validators are still on
+// record, so old rewards stay): 200 = validator, 404 = not, anything else =
+// unknown and the rows stay, as before this check existed.
+
+const VALIDATOR_CHECK_PREFIX = 'nimbooks:is-validator:'
+/** A "not a validator" answer is re-checked after this long; a "yes" is kept. */
+const NOT_VALIDATOR_TTL_MS = 30 * DAY_MS
+
+function flatUpper(address: string): string {
+  return (address ?? '').replace(/\s+/g, '').toUpperCase()
+}
+
+/** Cached verdict for one address, or null when there is none worth trusting. */
+function readValidatorVerdict(flat: string, now: number): boolean | null {
+  try {
+    const raw = localStorage.getItem(VALIDATOR_CHECK_PREFIX + flat)
+    if (!raw) return null
+    const entry = JSON.parse(raw) as { v?: unknown; at?: unknown }
+    if (entry?.v === true) return true
+    if (entry?.v === false && typeof entry.at === 'number' && now - entry.at < NOT_VALIDATOR_TTL_MS) return false
+  } catch {
+    /* corrupt entry - ask again */
+  }
+  return null
+}
+
+async function fetchValidatorVerdict(flat: string): Promise<boolean | null> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 15000)
+  try {
+    const res = await fetch(`${V2_API}/validator/${encodeURIComponent(flat)}`, { signal: controller.signal })
+    if (res.status === 404) return false
+    if (!res.ok) return null
+    const json = await res.json()
+    return flatUpper(json?.address ?? '') === flat ? true : null
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/**
+ * Whether each distinct sender is a validator: true, false, or absent when it
+ * could not be told (network failure). Cached per address; never throws.
+ */
+export async function validatorVerdicts(
+  senders: readonly string[],
+  now = Date.now()
+): Promise<Map<string, boolean>> {
+  const out = new Map<string, boolean>()
+  const unique = [...new Set(senders.map(flatUpper).filter(Boolean))]
+  await Promise.all(
+    unique.map(async (flat) => {
+      const cached = readValidatorVerdict(flat, now)
+      if (cached !== null) {
+        out.set(flat, cached)
+        return
+      }
+      const verdict = await fetchValidatorVerdict(flat)
+      if (verdict === null) return
+      out.set(flat, verdict)
+      try {
+        localStorage.setItem(VALIDATOR_CHECK_PREFIX + flat, JSON.stringify({ v: verdict, at: now }))
+      } catch {
+        /* storage full - ask again next time */
+      }
+    })
+  )
+  return out
 }

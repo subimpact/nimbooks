@@ -7,7 +7,7 @@
 // Badge text. Spelled out rather than built from a version constant so the exact
 // label ships as one string in the bundle (JSX would emit "v" as a separate node).
 // package.json carries the machine-readable version.
-export const APP_VERSION_LABEL = 'v1.39.0'
+export const APP_VERSION_LABEL = 'v1.40.0'
 
 export interface ChangelogEntry {
   version: string
@@ -16,6 +16,14 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '1.40.0',
+    date: '2026-10-27',
+    items: [
+      "The sample wallet is now a live Nimiq Pay wallet that stakes with ImpactZero, so you can see Nimiq Pay's transfers, the Hide internal switch and staking rewards on real history. It no longer comes with a ready-made receipt or payment request",
+      'Staking rewards count only what your pool paid. A stake made in Nimiq Pay was also being counted as a reward, which inflated Rewards in History, the statement, the tax report and the actual yield on the Earn card',
+    ],
+  },
   {
     version: '1.39.0',
     date: '2026-10-26',

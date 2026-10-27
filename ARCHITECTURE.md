@@ -143,7 +143,10 @@ says so, locks the form against a second send and checks the chain. History
 refreshes on a 10-second heartbeat. Staking rewards come from Nimiq Watch's
 restake events and appear as one row per validator per day, back to January
 2025: fetched in calendar chunks (closed years, the year to date, the running
-month) with closed periods cached on the device.
+month) with closed periods cached on the device. Only a validator pays a reward:
+each sender is checked once against Nimiq Watch's validator record, because the
+feed also lists stake that arrives through a contract (a Nimiq Pay stake goes
+through an HTLC) as a restake.
 
 **Earning numbers.** A validator's net yield is one year of protocol emission
 ÷ total network stake × (1 − fee), the same formula Nimiq's own wallet uses
