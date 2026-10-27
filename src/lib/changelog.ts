@@ -22,6 +22,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     items: [
       "The sample wallet is now a live Nimiq Pay wallet that stakes with ImpactZero, so you can see Nimiq Pay's transfers, the Hide internal switch and staking rewards on real history. It no longer comes with a ready-made receipt or payment request",
       'Staking rewards count only what your pool paid. A stake made in Nimiq Pay was also being counted as a reward, which inflated Rewards in History, the statement, the tax report and the actual yield on the Earn card',
+      'The guided tour scrolls to the Send and Receive buttons before pointing at them, so the highlight no longer lands on the tab bar (found in phone test by subimpact)',
     ],
   },
   {

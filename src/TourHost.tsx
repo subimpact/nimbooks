@@ -112,6 +112,27 @@ function CoachCard({
   )
 }
 
+/**
+ * Bring an in-page target into view before it is spotlighted. Nothing else
+ * scrolls the page during the tour, so a target below the fold (the quick
+ * send/receive buttons sit under a tall Earn card on a busy wallet) had its
+ * rect clamped onto the dock and the ring glowed around the wrong thing.
+ * Dock tabs are always on screen and are left alone.
+ */
+function scrollTargetIntoView(id: string): void {
+  if (isBottomSpotlight(id)) return
+  const el = document.querySelector<HTMLElement>(`[data-tour="${id}"]`)
+  if (!el) return
+  const r = el.getBoundingClientRect()
+  if (r.width === 0 && r.height === 0) return
+  // Room the topbar and the floating dock take at either edge.
+  const topReserve = 72
+  const bottomReserve = 168
+  if (r.top >= topReserve && r.bottom <= window.innerHeight - bottomReserve) return
+  const tall = r.height > window.innerHeight * 0.55
+  el.scrollIntoView({ block: tall ? 'start' : 'center', behavior: 'auto' })
+}
+
 /** Recompute the spotlight rect whenever the tour's step/phase changes, and
  * keep tracking the target: layout shifts (late data landing, sheet content)
  * re-read the rect instead of leaving the ring stranded on stale coordinates. */
@@ -134,7 +155,11 @@ function useSpotlightRect(step: TourStepDef): Rect {
         setRect(clampRectForSystemBars(readRect(ids)))
       })
     }
+    scrollTargetIntoView(ids)
     recompute()
+    // Capture phase: the page may scroll inside an inner container, and
+    // scroll events do not bubble.
+    window.addEventListener('scroll', recompute, true)
     window.addEventListener('resize', recompute)
     window.addEventListener('orientationchange', recompute)
     const mo = new MutationObserver(recompute)
@@ -142,6 +167,7 @@ function useSpotlightRect(step: TourStepDef): Rect {
     // Re-read once the DOM settles (spotlighted element may mount late).
     const t = window.setTimeout(recompute, 120)
     return () => {
+      window.removeEventListener('scroll', recompute, true)
       window.removeEventListener('resize', recompute)
       window.removeEventListener('orientationchange', recompute)
       mo.disconnect()
