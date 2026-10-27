@@ -30,7 +30,9 @@ const check = (name, ok, info = '') => {
 // is never what this probe tests, so dismiss it before reading the DOM.
 async function dismissTour(page) {
   for (let i = 0; i < 3; i++) {
-    const btn = page.locator('button:has-text("Not now")').first()
+    // Scoped to the offer card: the dashboard's stake-this-payment prompt has
+    // its own "Not now", and clicking that one leaves the offer up.
+    const btn = page.locator('.tour-offer-card button:has-text("Not now")').first()
     if ((await btn.count()) === 0) return
     await btn.click({ timeout: 3000 }).catch(() => {})
     await page.waitForTimeout(300)
@@ -85,6 +87,9 @@ const clickChip = async (page, label) => {
       await sample.click()
       await page.waitForSelector('.topbar', { timeout: 60000 })
     }
+    // The offer lands after the first refresh, which takes a few seconds on a
+    // busy sample wallet: wait for it rather than racing it.
+    await page.waitForSelector('.tour-offer-card', { timeout: 20000 }).catch(() => {})
     await dismissTour(page)
     // Let the first history read and the reward chunks land.
     await page.waitForTimeout(6000)

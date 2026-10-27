@@ -11,7 +11,7 @@ const { firefox } = require('playwright')
 const BASE = process.argv[2] || 'http://127.0.0.1:8099'
 const SHOTS = process.argv[3] || '/tmp'
 
-const DEMO = 'NQ43 Y1RH P1K7 JH78 LRTS 95RY GAUU UBDK FFGX'
+const DEMO = 'NQ82 6GYU NXUU 05DM 1M7F 0SJJ D42E NUNS KELR' // the sample wallet (src/lib/demoData.ts)
 // ImpactZero, the validator that keeps NimBooks running: a valid extra address.
 const EXTRA = 'NQ08 ACT8 T0FE PTG8 P5RL H2S3 QGXH V15R NVXY'
 const SYNTH_HASH = 'c0ffee'.repeat(10) + 'beef'

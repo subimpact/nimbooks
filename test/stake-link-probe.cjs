@@ -4,7 +4,7 @@
 //   NODE_PATH=/root/projects/mykopi-my/node_modules node test/stake-link-probe.cjs [BASE_URL]
 const { firefox } = require('playwright')
 const BASE = process.env.BASE_URL || process.argv[2] || 'http://127.0.0.1:8099'
-const ADDR = 'NQ43 Y1RH P1K7 JH78 LRTS 95RY GAUU UBDK FFGX'
+const ADDR = 'NQ82 6GYU NXUU 05DM 1M7F 0SJJ D42E NUNS KELR' // the sample wallet (src/lib/demoData.ts)
 const FLAT = ADDR.replace(/\s+/g, '')
 const IZ = 'NQ08 ACT8 T0FE PTG8 P5RL H2S3 QGXH V15R NVXY'
 const IZ_FLAT = IZ.replace(/\s+/g, '')
