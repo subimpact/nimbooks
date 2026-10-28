@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   TOUR_STEP_COUNT,
   tourStepAt,
@@ -51,6 +51,29 @@ function CoachCard({
   const rect = useSpotlightRect(step)
   const placement = coachPlacement(step, rect)
   const primaryLabel = step.primaryLabel || 'Next'
+  const cardRef = useRef<HTMLDivElement>(null)
+  const liftedFor = useRef<TourStepDef | null>(null)
+
+  // On a short phone a tall target and the coach card cannot both fit: the
+  // card covered the Earn card's buttons, which the step's text is about. Once
+  // per step, lift the target until its bottom clears the card, keeping its
+  // top on screen when it fits and letting the top edge go when it does not
+  // (the actions matter more than the label above the headline figure).
+  useLayoutEffect(() => {
+    if (!rect || placement !== 'bottom' || liftedFor.current === step) return
+    const id = step.spotlights[0]
+    if (!id || isBottomSpotlight(id)) return
+    const card = cardRef.current
+    // Read the target live: `rect` can still be the previous step's for one
+    // render after a step change.
+    const el = document.querySelector<HTMLElement>(`[data-tour="${id}"]`)
+    if (!card || !el) return
+    liftedFor.current = step
+    const coachTop = card.getBoundingClientRect().top
+    const overlap = el.getBoundingClientRect().bottom - (coachTop - 12)
+    if (overlap <= 0) return
+    scrollParentOf(el).scrollBy({ top: overlap, behavior: 'auto' })
+  }, [rect, placement, step])
 
   useEffect(() => {
     if (step.route) onNavigate(step.route)
@@ -85,7 +108,7 @@ function CoachCard({
         aria-modal="true"
         aria-labelledby="tour-coach-title"
       >
-        <div className="tour-coach-card">
+        <div className="tour-coach-card" ref={cardRef}>
           <div className="tour-coach-top">
             <p className="tour-coach-step">
               {stepIndex + 1} / {TOUR_STEP_COUNT}
@@ -131,6 +154,15 @@ function scrollTargetIntoView(id: string): void {
   if (r.top >= topReserve && r.bottom <= window.innerHeight - bottomReserve) return
   const tall = r.height > window.innerHeight * 0.55
   el.scrollIntoView({ block: tall ? 'start' : 'center', behavior: 'auto' })
+}
+
+/** The element that scrolls `el` (an inner container, or the page). */
+function scrollParentOf(el: HTMLElement): { scrollBy: (o: ScrollToOptions) => void } {
+  for (let p = el.parentElement; p && p !== document.body && p !== document.documentElement; p = p.parentElement) {
+    const oy = getComputedStyle(p).overflowY
+    if ((oy === 'auto' || oy === 'scroll') && p.scrollHeight > p.clientHeight) return p
+  }
+  return window
 }
 
 /** Recompute the spotlight rect whenever the tour's step/phase changes, and

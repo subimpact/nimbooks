@@ -37,7 +37,7 @@ async function run(viewport) {
           const cut = document.querySelector('.tour-cutout')
           const dock = document.querySelector('.dock, nav.tabs, .tabbar') || document.querySelector('[data-tour="history-tab"]')?.closest('nav,div')
           const r = (e) => (e ? e.getBoundingClientRect().toJSON() : null)
-          return { el: r(el), cut: r(cut), dock: r(dock), vh: window.innerHeight }
+          return { el: r(el), cut: r(cut), dock: r(dock), coach: r(document.querySelector('.tour-coach-card')), vh: window.innerHeight }
         }, id)
         const near = (a, b) => Math.abs(a - b) <= 3
         // Dock tabs: TourHost lifts the ring up to 44px clear of the screen's
@@ -47,7 +47,25 @@ async function run(viewport) {
         const onTarget =
           f.el && f.cut && Math.abs(f.el.top - f.cut.top) <= dy && near(f.el.left, f.cut.left) && near(f.el.height, f.cut.height)
         check(`${tag} step ${i + 1} (${id}): ring sits on its target`, !!onTarget, JSON.stringify({ el: f.el && [f.el.top, f.el.bottom], cut: f.cut && [f.cut.top, f.cut.bottom] }))
-        check(`${tag} step ${i + 1} (${id}): ring inside the viewport`, !!f.cut && f.cut.top >= -1 && f.cut.bottom <= f.vh + 1, JSON.stringify(f.cut))
+        // A target taller than the room above the coach card cannot be shown
+        // whole: TourHost then keeps its bottom (the buttons) in view and lets
+        // the top edge go. Anything else must sit wholly on screen.
+        const tooTall = !!f.cut && !!f.coach && f.coach.top > f.vh / 2 && f.cut.height > f.coach.top - 12
+        const inView = !!f.cut && (tooTall ? f.cut.bottom > 0 && f.cut.bottom <= f.coach.top + 1 : f.cut.top >= -1) && f.cut.bottom <= f.vh + 1
+        check(`${tag} step ${i + 1} (${id}): ring inside the viewport${tooTall ? ' (tall: bottom kept above the card)' : ''}`, inView, JSON.stringify(f.cut))
+        if (!DOCK_IDS.has(id)) {
+          // The step text talks about the target's buttons: none of them may
+          // sit under the coach card (360x640 had the Earn card's covered).
+          const covered = await page.evaluate((id) => {
+            const card = document.querySelector('.tour-coach-card')?.getBoundingClientRect()
+            if (!card) return []
+            return [...document.querySelectorAll(`[data-tour="${id}"] button`)]
+              .map((b) => ({ t: (b.textContent || '').trim().slice(0, 24), r: b.getBoundingClientRect() }))
+              .filter(({ r }) => r.height > 0 && r.bottom > card.top + 1 && r.top < card.bottom - 1)
+              .map(({ t }) => t)
+          }, id)
+          check(`${tag} step ${i + 1} (${id}): no button of the target under the coach card`, covered.length === 0, covered.join(', '))
+        }
         if (!DOCK_IDS.has(id) && f.dock && f.cut && f.cut.height < f.vh * 0.55) {
           check(`${tag} step ${i + 1} (${id}): ring clear of the dock`, f.cut.bottom <= f.dock.top + 2, JSON.stringify({ cutBottom: f.cut.bottom, dockTop: f.dock.top }))
         }
