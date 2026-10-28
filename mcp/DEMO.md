@@ -1,16 +1,18 @@
-# Demo — nimbooks-mcp (16 Sep)
+# Demo: nimbooks-mcp
 
 Three beats, about four minutes. The point to land: **your books, answerable in plain
 language, and the assistant still cannot spend a single Luna.**
 
-Demo wallet: `NQ43 Y1RH P1K7 JH78 LRTS 95RY GAUU UBDK FFGX`
+Demo wallet: `NQ82 6GYU NXUU 05DM 1M7F 0SJJ D42E NUNS KELR` (the app's sample wallet since
+v1.40.0: a live Nimiq Pay wallet staking with ImpactZero). Figures below were read live on
+28 Oct 2026; the wallet is real and they move.
 
 ## Before you start
 
 ```bash
 cd mcp && npm install && npm run build
 claude mcp add nimbooks -- node "$PWD/dist/index.js" \
-  --address "NQ43 Y1RH P1K7 JH78 LRTS 95RY GAUU UBDK FFGX"
+  --address "NQ82 6GYU NXUU 05DM 1M7F 0SJJ D42E NUNS KELR"
 ```
 
 Have the NimBooks app open in a second window — beat 2 ends by pasting a link into it.
@@ -31,16 +33,17 @@ Calls `get_summary`. Expected shape:
 
 ```json
 {
-  "address": "NQ43 Y1RH P1K7 JH78 LRTS 95RY GAUU UBDK FFGX",
-  "balanceLuna": "38200000",
-  "balanceNim": "382",
+  "address": "NQ82 6GYU NXUU 05DM 1M7F 0SJJ D42E NUNS KELR",
+  "balanceLuna": "400010",
+  "balanceNim": "4.0001",
   "staked": {
-    "activeNim": "700.65888",
-    "delegation": "NQ29 FBVT B4GM S27H UBP4 1MTC GNKQ VPBT 099M",
+    "activeNim": "7642.40622",
+    "delegation": "NQ08 ACT8 T0FE PTG8 P5RL H2S3 QGXH V15R NVXY",
     "note": "Staked NIM sits in the staking contract, so it is not part of balanceLuna above."
   },
-  "inNim": "1082", "outNim": "700", "netNim": "382",
-  "txCount": 7, "inCount": 6, "outCount": 1
+  "inNim": "69117.90486", "outNim": "69064.5124", "netNim": "53.39246",
+  "rewardsReceivedNim": "49.39236",
+  "txCount": 216, "inCount": 187, "outCount": 29
 }
 ```
 
@@ -48,25 +51,27 @@ Note that the address is never spoken: `--address` is configured above, the serv
 in its instructions, and the tools use it when none is given. If you are running without a
 default, name the address in this first question.
 
-**Say:** the balance reads 382, but there are another 700 NIM staked — the app splits those
-out because they live in the staking contract, and so does this. Nothing here is an
-estimate: Luna are integers all the way through.
+**Say:** the balance reads 4 NIM, but there are another 7,642 NIM staked. The app splits those
+out because they live in the staking contract, and so does this. The 49 NIM of rewards are
+validator payouts only: a stake made in Nimiq Pay shows up in the public rewards feed too,
+and the server leaves it out, exactly as the app does. Nothing here is an estimate: Luna are
+integers all the way through.
 
 > **Follow-up:** *"Show me the last few transactions."*
 
-Calls `list_transactions`. The row to point at is the cashlink:
+Calls `list_transactions`. The row to point at is the swap:
 
 ```json
-{ "kind": "payment", "direction": "received", "amountNim": "1",
-  "counterparty": "NQ42 EEBN LRBV ACLQ K11Y BPUN 8PLA K3AB SMS3",
-  "memo": "Cashlink",
-  "timestamp": "2026-09-12T10:08:08.752Z",
-  "hash": "7ddeed7ceb22a180f71f1fb62084a74ab2e67c8631403d29ccb9976915732897" }
+{ "kind": "swap", "direction": "sent", "amountNim": "6.01708",
+  "counterparty": "NQ27 QCTR DRNT 1YF1 9E7F XTL1 7Q26 JF96 BENU",
+  "timestamp": "2026-10-17T01:43:51.293Z",
+  "hash": "1fe218c921b040fbae789820766d3dddcacb1489b940faf1616152192c01a8b5" }
 ```
 
-**Say:** that memo is five bytes of protocol furniture on chain. The app names it
-"Cashlink" rather than printing hex, and this server had to agree — the classification is
-tested against the app's own module, row for row.
+**Say:** that is Nimiq Pay funding a swap contract, not a payment to someone. The app files
+it as a swap rather than money spent, and this server had to agree: the classification is
+tested against the app's own module, row for row. The rows around it are ordinary payments
+with their memos as written ("nego thanked you on Cinima").
 
 *(Optional, if there's time: "Statement for September, priced in dollars." → `get_statement`,
 day rows with the CoinGecko UTC close for each day. Days with no close come back `null`
@@ -86,7 +91,7 @@ Calls `create_payment_request`:
   "link": "https://nimbooks.subimpact.net/#/invoice/eyJhcHAiOiJuaW1ib29rcyIsInYiOjEsImlkIjoiZGVtbzEyMzQ1NiIs…",
   "amountNim": "25",
   "amountLuna": "2500000",
-  "payee": "NQ43 Y1RH P1K7 JH78 LRTS 95RY GAUU UBDK FFGX",
+  "payee": "NQ82 6GYU NXUU 05DM 1M7F 0SJJ D42E NUNS KELR",
   "expiresAt": "2026-09-20T14:34:52.538Z",
   "onChainReference": "nimbooks:invoice:demo123456",
   "note": "Nothing was signed. This is a request, not a payment: only the payer’s wallet can move money, and only when its owner approves. Share the link; when it is paid, the payment carries the reference nimbooks:invoice:demo123456, and check_request_paid will find it."
@@ -111,10 +116,12 @@ any kind. The most it can do is ask.
 
 ## Beat 3 — "Did they pay?"
 
-> **Prompt:** *"Has request 4u010r140g been paid?"*
+> **Prompt:** *"Has request 4u010r140g to NQ43 Y1RH P1K7 JH78 LRTS 95RY GAUU UBDK FFGX been paid?"*
 
-Calls `check_request_paid`, which looks for the `nimbooks:invoice:<id>` reference in the
-address's transactions — the same match the app uses to reconcile:
+The sample wallet has no paid request of its own yet, so this beat names the former sample
+wallet, which does. Calls `check_request_paid` with that `address`, and it looks for the
+`nimbooks:invoice:<id>` reference in the address's transactions, the same match the app
+uses to reconcile:
 
 ```json
 {
@@ -133,7 +140,7 @@ address's transactions — the same match the app uses to reconcile:
 
 Then the one that didn't land:
 
-> **Prompt:** *"What about demo123456?"* → `{ "paid": false, "scanned": 7, "note": "No payment tagged nimbooks:invoice:demo123456 was found…" }`
+> **Prompt:** *"And the one you just drafted?"* → `{ "paid": false, "scanned": 176, "note": "No payment tagged nimbooks:invoice:<id> was found in the newest 176 transactions…" }`
 
 **Say:** it reports; it doesn't decide. Even here it won't mark anything paid — the app
 reconciles its own books from the same chain data.
@@ -149,18 +156,18 @@ Calls `get_staking`, then `project_yield`:
 ```json
 {
   "staked": true,
-  "activeNim": "700.65888",
-  "stakedNim": "700.65888",
+  "activeNim": "7642.40622",
+  "stakedNim": "7642.40622",
   "validator": {
     "address": "NQ08 ACT8 T0FE PTG8 P5RL H2S3 QGXH V15R NVXY",
     "name": "ImpactZero stake",
     "feePercent": 0,
-    "netYieldPercent": 4.66,
+    "netYieldPercent": 7.97,
     "compounds": true,
     "payout": "adds rewards to your stake",
     "buildersPool": true
   },
-  "estimate": { "firstYearRewardsNim": "32.62", "annualRatePercent": 4.66 }
+  "estimate": { "firstYearRewardsNim": 632.1585, "annualRatePercent": 7.97 }
 }
 ```
 

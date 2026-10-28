@@ -27,7 +27,8 @@ This is the part to read first.
   marked paid — not on chain, and not in your app's own books.
 - **It has no server.** The only hosts this process contacts are `rpc.nimiqwatch.com`
   (the public Nimiq RPC the NimBooks app already uses), `v2.nimiqwatch.com` (Nimiq Watch's
-  public analytics API, the same endpoint the app reads for staking rewards),
+  public analytics API, the same endpoint the app reads for staking rewards and for the
+  validator record that confirms who paid them),
   `validators-api-main.je-cf9.workers.dev` (the validator list the NimBooks app reads:
   names, fees, reliability) and `api.coingecko.com` (public daily prices, for statements).
   It never calls `nimbooks.subimpact.net`. The links it
@@ -71,7 +72,7 @@ npm run build     # → dist/index.js
       "command": "npx",
       "args": [
         "-y", "nimbooks-mcp",
-        "--address", "NQ43 Y1RH P1K7 JH78 LRTS 95RY GAUU UBDK FFGX"
+        "--address", "NQ82 6GYU NXUU 05DM 1M7F 0SJJ D42E NUNS KELR"
       ]
     }
   }
@@ -84,7 +85,7 @@ Restart Claude Desktop. The eleven tools appear under the tools icon.
 
 ```bash
 claude mcp add nimbooks -- npx -y nimbooks-mcp \
-  --address "NQ43 Y1RH P1K7 JH78 LRTS 95RY GAUU UBDK FFGX"
+  --address "NQ82 6GYU NXUU 05DM 1M7F 0SJJ D42E NUNS KELR"
 ```
 
 Built from source instead? Point both commands at
@@ -144,7 +145,7 @@ chain instead.
   answer says so, in those words. The NimBooks app has the same ceiling. A paid CoinGecko
   key would lift it; this server does not take one, because taking one would mean holding
   a credential.
-- Addresses may be typed `NQ43 Y1RH …`, flat, lower-case, or as 40 hex characters. They
+- Addresses may be typed `NQ82 6GYU …`, flat, lower-case, or as 40 hex characters. They
   are checksum-validated: a typo is refused, never quietly looked up.
 - Amounts come back in both Luna (integer, exact) and NIM (exact decimal string). No
   float arithmetic touches money anywhere in this package.
@@ -154,7 +155,11 @@ chain instead.
 - `get_rewards` only sees restaking (compounding) pools: a direct-payout pool's rewards
   arrive as ordinary incoming transactions and show up in `list_transactions`. The
   public rewards data starts January 2025 and can lag by a day; per-day rows are
-  capped at the newest 400.
+  capped at the newest 400. Only validators pay rewards: the public feed also lists a
+  stake made in Nimiq Pay (it travels through a contract) as a "restake", so each payer
+  is checked against Nimiq Watch's validator record and anything that is not a
+  validator is left out, as in the app since v1.40.0. A payer whose record cannot be
+  read is kept.
 - Yield figures are labelled as projections: emission falling with the supply curve is
   modelled, the network's total stake is held at today's level, and none of it is a
   promise.

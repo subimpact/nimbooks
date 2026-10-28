@@ -336,6 +336,14 @@ const VALIDATOR_REWARD_PREFIX = 'NQ81 C01N BASE'
 // History row per UTC day per validator.
 const V2_API = 'https://v2.nimiqwatch.com/api/v2'
 
+/**
+ * The ONE call site for the v2 host (restake feed and validator records), so
+ * the fence keeps one `fetch(` per host.
+ */
+function v2Get(path: string, signal: AbortSignal): Promise<Response> {
+  return fetch(`${V2_API}${path}`, { signal })
+}
+
 /** One 15-minute restaking window, exactly as the v2 API returns it. */
 export interface RestakeGroup {
   sender_address: string // validator that paid out
@@ -399,10 +407,9 @@ export async function getRestakeEventsReport(
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 20000)
   try {
-    const res = await fetch(
-      `${V2_API}/staker/${encodeURIComponent(address.replace(/\s+/g, ''))}` +
-        `/events/restake-grouped?from=${from}&to=${to}`,
-      { signal: controller.signal }
+    const res = await v2Get(
+      `/staker/${encodeURIComponent(address.replace(/\s+/g, ''))}` + `/events/restake-grouped?from=${from}&to=${to}`,
+      controller.signal
     )
     if (!res.ok) throw new Error(`Restake events HTTP ${res.status}`)
     const json: unknown = await res.json()
@@ -499,7 +506,73 @@ export async function getRestakeRewardTxsReport(
       )
     )
   }
-  return { rows: rows.sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0)), failedYears }
+  // Only validators pay rewards: drop rows whose sender is known NOT to be one
+  // (a Nimiq Pay stake arrives through an HTLC and the feed lists it as a
+  // restake from the contract). Unknown verdicts keep their rows.
+  const verdicts = await validatorVerdicts(rows.map((r) => r.sender))
+  const kept = rows.filter((r) => verdicts.get(flatUpper(r.sender)) !== false)
+  return { rows: kept.sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0)), failedYears }
+}
+
+// --- Only validators pay rewards (the app's v1.40.0 rule, src/lib/stakingEvents.ts)
+//
+// The restake feed also carries stake that arrives through a contract: a stake
+// made in Nimiq Pay travels through an HTLC, and the feed lists that deposit as
+// a "restake" from the HTLC's address (seen live on a Pay wallet: single
+// windows of 1,001, 2,000 and 3,000 NIM next to ~2 NIM a day from its pool).
+// Each sender is checked once against Nimiq Watch's validator record (retired
+// validators stay on record, so old rewards stay): 200 = validator, 404 = not,
+// anything else = unknown and the rows stay. The app caches verdicts in
+// localStorage; this CLI keeps them for the life of the process only.
+
+const validatorVerdictCache = new Map<string, boolean>()
+
+function flatUpper(address: string): string {
+  return (address ?? '').replace(/\s+/g, '').toUpperCase()
+}
+
+async function fetchValidatorVerdict(flat: string): Promise<boolean | null> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 15000)
+  try {
+    const res = await v2Get(`/validator/${encodeURIComponent(flat)}`, controller.signal)
+    if (res.status === 404) return false
+    if (!res.ok) return null
+    const json = (await res.json()) as { address?: unknown } | null
+    return flatUpper(typeof json?.address === 'string' ? json.address : '') === flat ? true : null
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/**
+ * Whether each distinct sender is a validator: true, false, or absent when it
+ * could not be told (network failure). Never throws.
+ */
+export async function validatorVerdicts(senders: readonly string[]): Promise<Map<string, boolean>> {
+  const out = new Map<string, boolean>()
+  const unique = [...new Set(senders.map(flatUpper).filter(Boolean))]
+  await Promise.all(
+    unique.map(async (flat) => {
+      const cached = validatorVerdictCache.get(flat)
+      if (cached !== undefined) {
+        out.set(flat, cached)
+        return
+      }
+      const verdict = await fetchValidatorVerdict(flat)
+      if (verdict === null) return
+      validatorVerdictCache.set(flat, verdict)
+      out.set(flat, verdict)
+    })
+  )
+  return out
+}
+
+/** Test hook: forget every cached verdict. */
+export function clearValidatorVerdicts(): void {
+  validatorVerdictCache.clear()
 }
 
 export async function getRestakeRewardTxs(

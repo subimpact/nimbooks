@@ -17,11 +17,22 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { getRestakeRewardTxs, rollUpRestakeRewards, REWARDS_FLOOR_DAY } from '../src/chain.ts'
+import {
+  clearValidatorVerdicts,
+  getRestakeRewardTxs,
+  getRestakeRewardTxsReport,
+  rollUpRestakeRewards,
+  REWARDS_FLOOR_DAY,
+} from '../src/chain.ts'
 
 const OWN = 'NQ62 68D7 RQHN MSTR 1Y0T SY1P HU89 5QJ5 YV05'
 const V1 = 'NQ97 H1NR S3X0 CVFQ VJ9Y 9A0Y FRQN Q6EU D0PL'
 const V1_HASH_TAIL = 'NQ97H1NRS3X0CVFQVJ9Y9A0YFRQNQ6EUD0PL'
+// A Nimiq Pay HTLC: the feed lists a stake made through it as a "restake".
+// Nimiq Watch has no validator record for it (404).
+const HTLC = 'NQ71 8LJQ 8AYJ 31UU 9CVP 9F1J J99S CHVC C8Q3'
+// A sender whose validator lookup fails (5xx): its rows must stay.
+const FLAKY = 'NQ08 ACT8 T0FE PTG8 P5RL H2S3 QGXH V15R NVXY'
 
 const NOW = Date.parse('2026-02-10T10:00:00Z')
 const OCT19 = Date.parse('2026-10-19T08:00:00Z')
@@ -48,6 +59,10 @@ const GROUPS = [
 // + 77 (Dec 31: 27 + 50) + 440 (Jan 1: 400 + 40) + 700 + 800.
 const EXPECTED_TOTAL = 300 + 77 + 440 + 700 + 800
 
+// Extra windows a single test mixes in (the contract-stake tests below).
+let extraGroups: typeof GROUPS = []
+let validatorLookups: string[] = []
+
 type Call = { from: string; to: string }
 let calls: Call[] = []
 let failFor: string | null = null
@@ -72,6 +87,15 @@ async function withClock(ms: number, body: () => Promise<void>): Promise<void> {
 
 globalThis.fetch = (async (input: string | URL | Request) => {
   const url = input instanceof Request ? input.url : String(input)
+  const validatorPath = new URL(url).pathname.match(/\/api\/v2\/validator\/([^/]+)$/)
+  if (validatorPath) {
+    const flat = decodeURIComponent(validatorPath[1])
+    validatorLookups.push(flat)
+    const flatOf = (a: string) => a.replace(/\s+/g, '')
+    if (flat === flatOf(V1)) return { ok: true, status: 200, json: async () => ({ address: V1 }) } as unknown as Response
+    if (flat === flatOf(HTLC)) return { ok: false, status: 404, json: async () => ({ error: true }) } as unknown as Response
+    return { ok: false, status: 503, json: async () => ({}) } as unknown as Response
+  }
   const params = new URL(url).searchParams
   const from = params.get('from') ?? ''
   const to = params.get('to') ?? ''
@@ -84,12 +108,13 @@ globalThis.fetch = (async (input: string | URL | Request) => {
   // Same leak shape the app's oracle mocks: the response carries the last
   // window before `from` and the first at/after `to`, alongside the inside
   // ones. Only the inside ones may survive.
-  const inside = GROUPS.filter((g) => {
+  const all = [...GROUPS, ...extraGroups].sort((a, b) => Date.parse(a.time_window) - Date.parse(b.time_window))
+  const inside = all.filter((g) => {
     const t = Date.parse(g.time_window)
     return t >= lo && t < hi
   })
-  const before = GROUPS.filter((g) => Date.parse(g.time_window) < lo).slice(-1)
-  const after = GROUPS.filter((g) => {
+  const before = all.filter((g) => Date.parse(g.time_window) < lo).slice(-1)
+  const after = all.filter((g) => {
     const t = Date.parse(g.time_window)
     return t >= hi && t < clock
   }).slice(0, 1)
@@ -263,4 +288,40 @@ test('rollUpRestakeRewards still collides rows day by day', () => {
   assert.equal(txs.length, 1)
   assert.equal(txs[0].value, '100')
   assert.equal(txs[0].hash, 'restake:2025-03-10:NQ97H1NRS3X0CVFQVJ9Y9A0YFRQNQ6EUD0PL')
+})
+// v1.40.0 rule, same as the app: only validators pay rewards. A Nimiq Pay stake
+// travels through an HTLC and the feed lists it as a restake from the contract.
+test('a contract-borne stake in the restake feed is not counted as a reward', async () => {
+  calls = []
+  failFor = null
+  validatorLookups = []
+  clearValidatorVerdicts()
+  extraGroups = [{ sender_address: HTLC, time_window: '2026-01-20T10:15:00.000Z', aggregated_value: 200_000_000 }]
+  try {
+    const report = await getRestakeRewardTxsReport(OWN, Date.parse('2025-03-10T00:00:00Z'), Date.parse('2026-02-05T12:00:00Z'))
+    assert.equal(report.rows.reduce((s, t) => s + Number(t.value), 0), EXPECTED_TOTAL)
+    assert.ok(report.rows.every((t) => t.sender === V1))
+    assert.deepEqual(report.failedYears, [])
+    // One lookup per distinct sender, and a second ask reuses the verdicts.
+    assert.deepEqual([...validatorLookups].sort(), [HTLC, V1].map((a) => a.replace(/\s+/g, '')).sort())
+    await getRestakeRewardTxsReport(OWN, Date.parse('2025-03-10T00:00:00Z'), Date.parse('2026-02-05T12:00:00Z'))
+    assert.equal(validatorLookups.length, 2)
+  } finally {
+    extraGroups = []
+  }
+})
+
+test('a sender whose validator lookup fails keeps its rows', async () => {
+  calls = []
+  failFor = null
+  validatorLookups = []
+  clearValidatorVerdicts()
+  extraGroups = [{ sender_address: FLAKY, time_window: '2026-01-20T10:15:00.000Z', aggregated_value: 55 }]
+  try {
+    const txs = await getRestakeRewardTxs(OWN, Date.parse('2025-03-10T00:00:00Z'), Date.parse('2026-02-05T12:00:00Z'))
+    assert.equal(txs.reduce((s, t) => s + Number(t.value), 0), EXPECTED_TOTAL + 55)
+    assert.ok(txs.some((t) => t.sender === FLAKY))
+  } finally {
+    extraGroups = []
+  }
 })

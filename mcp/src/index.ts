@@ -10,8 +10,8 @@
 //     its owner's approval, can move money.
 //   - phone home. The only hosts this process contacts are the public Nimiq
 //     RPC (rpc.nimiqwatch.com), the public Nimiq Watch analytics API
-//     (v2.nimiqwatch.com — for staking rewards, the same second API the
-//     NimBooks app reads), the validator list the app reads for its stake
+//     (v2.nimiqwatch.com — for staking rewards and the validator record that
+//     confirms who paid them, the same second API the NimBooks app reads), the validator list the app reads for its stake
 //     panel (validators-api-main.je-cf9.workers.dev: names, fees,
 //     reliability) and CoinGecko's public price API. There is no
 //     NimBooks server — the app has none either — and this server never calls
@@ -82,7 +82,7 @@ import {
   type ValidatorInfo,
 } from './staking.ts'
 
-const VERSION = '1.2.1'
+const VERSION = '1.2.2'
 
 // How far back a tool will walk the transaction index. The RPC pages 50 at a
 // time and is rate-limited, so these are budgets, not guesses — every tool
@@ -178,7 +178,7 @@ function addressArg(input: string | undefined): string {
   if (!raw) {
     throw new ToolError(
       'No address given, and no default is configured. Pass one (e.g. ' +
-        '"NQ43 Y1RH P1K7 JH78 LRTS 95RY GAUU UBDK FFGX"), or start the server ' +
+        '"NQ82 6GYU NXUU 05DM 1M7F 0SJJ D42E NUNS KELR"), or start the server ' +
         'with --address <NQ…>.'
     )
   }
@@ -313,7 +313,7 @@ server.registerTool(
       address: z
         .string()
         .optional()
-        .describe(`Nimiq address — "NQ43 Y1RH …", the flat form, or 40 hex characters. ${DEFAULTS_TO_CONFIGURED}`),
+        .describe(`Nimiq address — "NQ82 6GYU …", the flat form, or 40 hex characters. ${DEFAULTS_TO_CONFIGURED}`),
       since: z.string().optional().describe('Start of the window, YYYY-MM-DD or ISO 8601 (UTC). Default: no start.'),
       until: z.string().optional().describe('End of the window, YYYY-MM-DD or ISO 8601 (UTC). Default: now.'),
     },

@@ -8,12 +8,12 @@
     "source": "github"
   },
   "websiteUrl": "https://nimbooks.subimpact.net/mcp/",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "nimbooks-mcp",
-      "version": "1.2.1",
+      "version": "1.2.2",
       "transport": {
         "type": "stdio"
       },

@@ -16,7 +16,7 @@ import { resolve } from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 
-const DEMO = 'NQ43 Y1RH P1K7 JH78 LRTS 95RY GAUU UBDK FFGX'
+const DEMO = 'NQ82 6GYU NXUU 05DM 1M7F 0SJJ D42E NUNS KELR'
 const SERVER = resolve('dist/index.js')
 
 if (!process.env.NIMBOOKS_SMOKE) {
