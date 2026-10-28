@@ -188,6 +188,27 @@ const synthRow = (timestamp) => ({
     const row = document.querySelectorAll('.portfolio-card .portfolio-row')[1]
     return !!row && !/…/.test(row.querySelector('.portfolio-row-stats')?.innerText || '…')
   }, null, { timeout: 60000 })
+  // Settle gate: a busy wallet keeps loading history after the first build (the
+  // NQ82 sample wallet walks its Nimiq Pay contract archive for about 40 s), so
+  // its totals still move by more than the injected amount. Take the baseline
+  // only once the books have held still across two heartbeats (22 s), max 120 s.
+  {
+    const settleStart = Date.now()
+    const key = (v) => JSON.stringify([v.received, v.closing, v.count, v.walletLiquid])
+    let last = key(await readView(page))
+    let stableSince = Date.now()
+    while (Date.now() - stableSince < 22000 && Date.now() - settleStart < 120000) {
+      await sleep(1000)
+      const k = key(await readView(page))
+      if (k !== last) {
+        last = k
+        stableSince = Date.now()
+      }
+    }
+    const settled = Date.now() - stableSince >= 22000
+    note(`books ${settled ? 'settled' : 'still moving'} after ${((Date.now() - settleStart) / 1000).toFixed(1)}s`)
+    check('baseline: books stop moving within 120 s of the first build', settled)
+  }
   const tBase = Date.now()
   const base = await readView(page)
   const baseExtra = await readExtra(page)
