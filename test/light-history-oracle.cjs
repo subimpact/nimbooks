@@ -9,7 +9,6 @@
 // Run: node test/light-history-oracle.cjs
 const { execSync } = require('child_process')
 const path = require('path')
-const fs = require('fs')
 const os = require('os')
 const root = path.resolve(__dirname, '..')
 const out = path.join(os.tmpdir(), `chain-light-${process.pid}.cjs`)
@@ -62,7 +61,13 @@ global.fetch = async (_url, init) => {
 }
 
 const chain = require(out)
-const { setLightFetcherForTests, getNimiqTransactionHistory } = chain
+const {
+  setLightFetcherForTests,
+  getNimiqTransactionHistory,
+  getLightStatus,
+  subscribeLightStatus,
+  warmLightClient,
+} = chain
 
 // The seam replaces client.getTransactionsByAddress: it returns the raw rows
 // the network would, and the page mapping under test runs on them.
@@ -369,6 +374,104 @@ const slot = (address) => JSON.parse(ls[`nimbooks:txs:${clean(address)}`] || 'nu
     JSON.stringify(txCalls()[0]?.params)
   )
   check('(i) light empty: the pre-PoS rows are returned', iGot.length === 30 && sameHashes(iGot, i), iGot.length)
+
+  // ---- progress line status -------------------------------------------------
+  // The status store is global (the UI subscribes to it), so each case records
+  // only the notifications its own walk emits. `phases` and `rows` together
+  // pin the order the user sees.
+  let statusLog = []
+  let stopStatus = null
+  const recordStatus = () => {
+    statusLog = []
+    stopStatus = subscribeLightStatus((next) => statusLog.push({ phase: next.phase, rows: next.rows }))
+  }
+  const stopRecording = () => {
+    if (stopStatus) stopStatus()
+    stopStatus = null
+  }
+  const statusPhases = () => statusLog.map((s) => s.phase)
+  const statusRows = () => statusLog.map((s) => s.rows)
+
+  // (j) A light walk with a continuation reports each page, then the older
+  // step, then done. The rows counted are the light rows read so far.
+  reset()
+  const j = makeRows(600, 'j')
+  lightRows = j.map(toLight)
+  recordStatus()
+  const jGot = await getNimiqTransactionHistory(ADDR, 1000)
+  stopRecording()
+  check(
+    '(j) progress: two light pages report loading(500), loading(600), then older, then done',
+    statusPhases().join(',') === 'loading,loading,older,done',
+    JSON.stringify(statusLog)
+  )
+  check(
+    '(j) progress: loading carries the running light row count',
+    statusRows()[0] === 500 && statusRows()[1] === 600 && statusRows()[2] === 600,
+    JSON.stringify(statusRows())
+  )
+  check(
+    '(j) progress: done carries the merged row count',
+    statusRows()[3] === jGot.length && jGot.length === 600,
+    JSON.stringify(statusRows())
+  )
+
+  // (k) Light fails on its first page, the RPC walk succeeds. Exact rule:
+  // fallback while the public node walks, then done when that walk answers
+  // with a complete list (or any rows); failed is reserved for a fallback that
+  // returns no rows and no complete list.
+  reset()
+  const k = makeRows(120, 'k')
+  rpcChains.set(clean(ADDR), k.map(toRpc))
+  lightFailsAt = 1
+  recordStatus()
+  const kGot = await getNimiqTransactionHistory(ADDR, 1000)
+  stopRecording()
+  check(
+    '(k) progress: light failure then RPC success reports fallback, then done',
+    statusPhases().join(',') === 'fallback,done',
+    JSON.stringify(statusLog)
+  )
+  check('(k) progress: the fallback walk still returns the whole history', kGot.length === 120 && sameHashes(kGot, k), kGot.length)
+  check('(k) progress: done carries the fallback row count', statusRows()[1] === 120, JSON.stringify(statusRows()))
+
+  // (k2) Neither source works: the fallback ends in failed rather than a done
+  // that would hide the Retry button.
+  reset()
+  failTxRpc = true
+  lightFailsAt = 1
+  recordStatus()
+  const k2Got = await getNimiqTransactionHistory(ADDR, 1000)
+  stopRecording()
+  check('(k2) progress: light and RPC both fail ends in failed', statusPhases().join(',') === 'fallback,failed', JSON.stringify(statusLog))
+  check('(k2) progress: a failed walk returns no rows', k2Got.length === 0, k2Got.length)
+
+  // (l) The RPC-only support switch must not touch the status store at all.
+  reset()
+  const l = makeRows(120, 'l')
+  rpcChains.set(clean(ADDR), l.map(toRpc))
+  lightRows = makeRows(10, 'll').map(toLight)
+  ls['nimbooks:historySource'] = 'rpc'
+  const beforeRpcOnly = JSON.stringify(getLightStatus())
+  recordStatus()
+  const lGot = await getNimiqTransactionHistory(ADDR, 1000)
+  stopRecording()
+  check('(l) progress: the RPC-only path emits no status change', statusLog.length === 0, JSON.stringify(statusLog))
+  check('(l) progress: the RPC-only path leaves the previous status untouched', JSON.stringify(getLightStatus()) === beforeRpcOnly, JSON.stringify(getLightStatus()))
+  check('(l) progress: the RPC-only path still returns the rows', lGot.length === 120 && sameHashes(lGot, l), lGot.length)
+  delete ls['nimbooks:historySource']
+
+  // (m) Warm-up must be a no-op when an oracle has replaced the client fetch:
+  // no import, no fetch call, no status change. (The oracle installed the
+  // fetcher before chain.ts was required.)
+  reset()
+  const beforeWarm = JSON.stringify(getLightStatus())
+  recordStatus()
+  warmLightClient()
+  stopRecording()
+  check('(m) warm-up: no-op with a test fetcher, no status change', statusLog.length === 0, JSON.stringify(statusLog))
+  check('(m) warm-up: no-op with a test fetcher, status untouched', JSON.stringify(getLightStatus()) === beforeWarm, JSON.stringify(getLightStatus()))
+  check('(m) warm-up: no-op with a test fetcher, no client page call', lightCalls.length === 0, lightCalls.length)
 
   console.log(`\n${pass} passed, ${fail} failed`)
   process.exit(fail ? 1 : 0)

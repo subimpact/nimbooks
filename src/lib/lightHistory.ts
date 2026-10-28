@@ -28,6 +28,50 @@ const CONSENSUS_TIMEOUT_MS = 30_000
 // Hard per-call ceiling of the client (1000 throws).
 export const LIGHT_WALK_PAGE = 500
 
+// localStorage switch that pins history to the RPC (the support escape hatch).
+// Shared with chain.ts so a warm-up and a walk can never disagree about it.
+export const HISTORY_SOURCE_KEY = 'nimbooks:historySource'
+
+// What the first history load is doing, for the one-line progress indicator.
+// It lives here, beside the client, because the WASM download and consensus
+// wait happen before chain.ts asks for a page. `rows` is the number of light
+// rows read so far.
+export type LightPhase =
+  | 'idle'
+  | 'downloading'
+  | 'connecting'
+  | 'loading'
+  | 'older'
+  | 'done'
+  | 'fallback'
+  | 'failed'
+
+export interface LightStatus {
+  phase: LightPhase
+  rows: number
+}
+
+let lightStatus: LightStatus = { phase: 'idle', rows: 0 }
+const lightStatusListeners = new Set<(status: LightStatus) => void>()
+
+export function getLightStatus(): LightStatus {
+  return lightStatus
+}
+
+export function subscribeLightStatus(fn: (status: LightStatus) => void): () => void {
+  lightStatusListeners.add(fn)
+  return () => {
+    lightStatusListeners.delete(fn)
+  }
+}
+
+/** Report a step to the progress line. Exported for chain.ts's history walk. */
+export function setLightStatus(phase: LightPhase, rows = 0): void {
+  if (lightStatus.phase === phase && lightStatus.rows === rows) return
+  lightStatus = { phase, rows }
+  for (const fn of lightStatusListeners) fn(lightStatus)
+}
+
 let clientPromise: Promise<Client> | null = null
 let readyClient: Client | null = null
 
@@ -58,10 +102,14 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 }
 
 async function startClient(): Promise<Client> {
+  // Both steps are skipped when readyClient is already set: getLightClient
+  // returns before startClient, so a warm client never reports them again.
+  setLightStatus('downloading')
   const Nimiq = await import('@nimiq/core')
   const config = new Nimiq.ClientConfiguration()
   config.logLevel('warn')
   const client = await Nimiq.Client.create(config.build())
+  setLightStatus('connecting')
   try {
     await withTimeout(client.waitForConsensusEstablished(), CONSENSUS_TIMEOUT_MS)
   } catch (e) {
@@ -81,6 +129,29 @@ async function startClient(): Promise<Client> {
   }
   readyClient = client
   return client
+}
+
+/**
+ * Start the client before history asks for it, so the 3.2 MB WASM download and
+ * consensus wait overlap the wallet handshake instead of following it. Called
+ * when a wallet is being chosen or a saved session is restored, never from the
+ * landing page: a visitor who does not connect must not pay for the download.
+ *
+ * No-op where the light path would not be used (no window, the RPC support
+ * switch, or an oracle's test fetcher). Errors are swallowed: the next history
+ * walk retries and reports the failure to the progress line.
+ */
+export function warmLightClient(): void {
+  if (typeof window === 'undefined' || testFetcher) return
+  try {
+    if (localStorage.getItem(HISTORY_SOURCE_KEY) === 'rpc') return
+  } catch {
+    /* storage unavailable: use the default for this environment */
+  }
+  if (readyClient || clientPromise) return
+  void getLightClient().catch(() => {
+    /* a later history load retries; the progress line reports that attempt */
+  })
 }
 
 function getLightClient(): Promise<Client> {

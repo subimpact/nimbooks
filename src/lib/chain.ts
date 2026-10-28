@@ -5,13 +5,23 @@ import {
   getLightBalance,
   getLightTransactions,
   hasLightFetcherForTests,
+  HISTORY_SOURCE_KEY,
   isLightReady,
   LIGHT_WALK_PAGE,
+  setLightStatus,
 } from './lightHistory'
 
 // Oracles drive the light path through lightHistory's seam. Re-exported so a
-// bundle of chain.ts can flip it without a second module instance.
-export { setLightFetcherForTests } from './lightHistory'
+// bundle of chain.ts can flip it without a second module instance. The status
+// store rides along for the loading-progress oracle and the app's component.
+export {
+  getLightStatus,
+  setLightFetcherForTests,
+  subscribeLightStatus,
+  warmLightClient,
+  type LightPhase,
+  type LightStatus,
+} from './lightHistory'
 
 const RPC_URL = 'https://rpc.nimiqwatch.com'
 
@@ -533,8 +543,6 @@ export const TX_WALK_PAGE = 500
 // light client cannot start. localStorage 'nimbooks:historySource' = 'rpc'
 // pins the old path, and the test seam makes Node oracles take the light path
 // without a window.
-const HISTORY_SOURCE_KEY = 'nimbooks:historySource'
-
 function lightHistoryPreferred(): boolean {
   try {
     if (localStorage.getItem(HISTORY_SOURCE_KEY) === 'rpc') return false
@@ -594,6 +602,9 @@ async function walkLightHistory(
     }
     if (!page.length) break
     rows.push(...page)
+    // The progress line counts what the network has delivered so far, not the
+    // merged list: the RPC continuation has its own step.
+    setLightStatus('loading', rows.length)
     // A short page is the end of what the client has for this address.
     if (page.length < want || rows.length >= maxTotal) break
     // The client returns newest→oldest; the oldest hash becomes the cursor.
@@ -603,23 +614,38 @@ async function walkLightHistory(
   }
   const lightRows = rows.slice(0, maxTotal)
   if (stopped) {
+    setLightStatus('fallback', lightRows.length)
     const fallback = await walkTransactionHistoryRpc(address, maxTotal)
-    if (fallback.complete) return fallback
-    if (!lightRows.length) return fallback
+    if (fallback.complete) {
+      setLightStatus('done', fallback.txs.length)
+      return fallback
+    }
+    // A later light page died and the RPC could not finish either. The light
+    // rows already read are still correct, so keep them rather than show
+    // nothing; only an empty result is a real failure.
+    if (!lightRows.length) {
+      setLightStatus('failed')
+      return fallback
+    }
+    setLightStatus('done', lightRows.length)
     return { txs: lightRows, complete: false }
   }
   // One continuation only, even for a light walk that found nothing: an
   // address may hold pre-PoS history alone. startAt null asks for the newest
   // RPC rows, which is the same as "everything" for the 1000-row cap.
   if (lightRows.length < maxTotal) {
+    setLightStatus('older', lightRows.length)
     const oldestLightHash = lightRows.length ? lightRows[lightRows.length - 1].hash : null
     try {
       const older = await getNimiqTransactions(address, maxTotal - lightRows.length, oldestLightHash)
-      return { txs: mergeHistoryRows(lightRows, older, maxTotal), complete: true }
+      const merged = mergeHistoryRows(lightRows, older, maxTotal)
+      setLightStatus('done', merged.length)
+      return { txs: merged, complete: true }
     } catch (e) {
       console.warn('History continuation from the public node failed, keeping light rows:', e)
     }
   }
+  setLightStatus('done', lightRows.length)
   return { txs: lightRows, complete: true }
 }
 
@@ -630,7 +656,17 @@ async function walkTransactionHistory(
   if (lightHistoryPreferred()) {
     const light = await walkLightHistory(address, maxTotal)
     if (light) return light
+    // The client could not read its first page at all: the public node takes
+    // over the whole walk. The progress line says so, then reports how that
+    // walk ended instead of leaving a stale "connecting".
+    setLightStatus('fallback')
+    const rpc = await walkTransactionHistoryRpc(address, maxTotal)
+    if (!rpc.complete && rpc.txs.length === 0) setLightStatus('failed')
+    else setLightStatus('done', rpc.txs.length)
+    return rpc
   }
+  // The RPC-only path reports nothing: the progress line belongs to the light
+  // client, and the support switch must behave exactly as it did before it.
   return walkTransactionHistoryRpc(address, maxTotal)
 }
 

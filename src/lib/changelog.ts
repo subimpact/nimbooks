@@ -21,6 +21,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     date: '2026-10-29',
     items: [
       'History now loads straight from the Nimiq network through a light client built into NimBooks, so it keeps working when Nimiq\'s public node is busy or down. Transactions from before 19 Nov 2024 still come from the public node',
+      'While history loads, a progress line shows each step, and your balance says Loading instead of a $0.00 that isn\'t real',
       "History loads in fewer, bigger requests to Nimiq's public node (500 transactions at a time instead of 50), so it uses half of the node's allowance per phone and \"public node is busy, retrying\" should show up far less often. Most wallets now load in one request",
       'History filters wrap onto a second line on phones instead of sitting in one long row you had to scroll sideways (found in phone test by subimpact)',
       'Portfolio reports now say plainly how the unlock works: stake 1,000 NIM with ImpactZero, the validator run by the person who builds NimBooks, so you know who you are trusting. Your NIM stays in your wallet and you can unstake at any time',
