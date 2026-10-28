@@ -136,7 +136,7 @@ import {
   type StoredInvoice,
 } from './lib/invoice'
 import { buildStakeLink, parseStakeLink, type StakeLinkIntent } from './lib/stakeLink'
-import { DEMO_WALLET_ADDRESS } from './lib/demoData'
+import { DEMO_WALLET_ADDRESS, seedDemoData } from './lib/demoData'
 import { getAllRestakeRewardTxs } from './lib/stakingEvents'
 import {
   isInNimiqPay,
@@ -1690,6 +1690,10 @@ export default function App() {
       // Public mainnet address with real activity, read-only demo mode
       // (lib/demoData.ts: a live Nimiq Pay wallet staking with ImpactZero).
       const acc = connectDemoAccount(DEMO_WALLET_ADDRESS)
+      // Bake the demo story into localStorage BEFORE the account lands, so the
+      // receipts/invoices load effects pick it up: real signed receipts and a
+      // chain-paid request appear in the tabs on any device.
+      seedDemoData(acc.nimiqAddress ?? DEMO_WALLET_ADDRESS)
       setPayConsensus(acc.consensus ?? null)
       setAccount(acc)
       if (entry) {
@@ -2025,6 +2029,10 @@ export default function App() {
         setRestoring(false)
         return
       }
+      // Demo story data goes in before the account lands, exactly as on the
+      // connect path. seedDemoData is an idempotent upsert, so a restore never
+      // duplicates what is already there.
+      if (acc.provider === 'demo' && acc.nimiqAddress) seedDemoData(acc.nimiqAddress)
       const savedView = getSavedSessionView()
       // One batch, so the connect screen never flashes between the two:
       // `restoring` only goes false with an account in hand.
@@ -6187,9 +6195,19 @@ export default function App() {
                 <div className="tx-sub">
                   {r.txHash.slice(0, 12)}… · {new Date(r.timestamp * 1000).toLocaleDateString(lang)}
                 </div>
-                {r.memo && (
-                  <div className="tx-memo">{decodeMemo(r.memo)}</div>
-                )}
+                {r.memo &&
+                  (() => {
+                    // A receipt stores the tx's data field as hex. When it does
+                    // not decode to text it is contract data (a Nimiq Pay swap
+                    // contract's setup), not a note anyone wrote: name it rather
+                    // than print a 160-character hex blob. A request reference
+                    // shows the request's own description, as in History.
+                    const memo = decodeMemo(r.memo)
+                    if (memo === r.memo) return <div className="tx-memo">Contract data, no note</div>
+                    const invId = parseInvoiceMemo(memo)
+                    const inv = invId ? invoices.find((i) => i.id === invId) : undefined
+                    return <div className="tx-memo">{inv?.memo ? `${inv.memo} (${memo})` : memo}</div>
+                  })()}
                 <button className="btn-small" onClick={() => shareReceipt(r)}>
                   Share verification link
                 </button>
