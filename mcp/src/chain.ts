@@ -156,8 +156,11 @@ async function rpcCall(method: string, params: unknown[]): Promise<any> {
     throw new ToolError('The chain read offline gate NIMBOOKS_MCP_NO_CHAIN=1 is set, so the Nimiq RPC was not called.')
   }
   let lastErr: unknown
-  for (let attempt = 0; attempt <= RETRIES; attempt++) {
-    if (attempt > 0) await new Promise((r) => setTimeout(r, 600))
+  let rateLimited = false
+  // A 429 is the public RPC asking for a pause, not an outage: give it two
+  // longer retries (1.5 s, then 3 s) instead of the single quick one.
+  for (let attempt = 0; attempt <= (rateLimited ? RETRIES + 1 : RETRIES); attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, rateLimited ? 1500 * attempt : 600))
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
     try {
@@ -167,6 +170,7 @@ async function rpcCall(method: string, params: unknown[]): Promise<any> {
         body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
         signal: controller.signal,
       })
+      if (res.status === 429) rateLimited = true
       if (!res.ok) throw new Error(`RPC HTTP ${res.status}`)
       const json: any = await res.json()
       if (json.error) {
@@ -321,6 +325,105 @@ export async function getTransactionHistory(
     if (i < 19) await new Promise((r) => setTimeout(r, 250))
   }
   return { txs: all, overrun }
+}
+
+// --- Nimiq Pay contracts (for the HTLC netting in htlcFlows.ts) ---
+//
+// Nimiq Pay parks a wallet's NIM in HTLC contracts and most of it comes back:
+// those round trips are the wallet's own money moving, not payments. The app
+// nets them with splitHtlcFlows, fed by two things it already holds: the
+// contracts that still hold the wallet's NIM, and the contracts' own rows
+// (a stake made in Pay leaves FROM the contract and never touches the basic
+// list). This reads the same two things from the chain.
+//
+// Only contracts that have not paid back their whole funding matter: for a
+// settled contract the netting is already decided by the basic list alone
+// (what it can still count as the user's is capped at the funding). So the
+// cost is two reads per unsettled contract, not per contract.
+
+export interface PayContractContext {
+  heldContracts: string[]
+  contractTxs: NimiqTx[]
+  /** Unsettled contracts this wallet funded (the ones that were read). */
+  checked: number
+  /** Contracts whose reads failed: their stakes, if any, count as spending. */
+  failed: string[]
+  /** Unsettled contracts past the read cap, not read at all. */
+  skipped: number
+}
+
+/** At most this many contracts are read per answer (two RPC calls each). */
+export const MAX_CONTRACT_READS = 40
+const CONTRACT_CACHE_MS = 5 * 60 * 1000
+const contractCache = new Map<string, { at: number; held: boolean; txs: NimiqTx[] }>()
+
+export async function getPayContractContext(ownAddress: string, txs: readonly NimiqTx[]): Promise<PayContractContext> {
+  const own = cleanAddress(ownAddress).toUpperCase()
+  const flat = (a: string) => cleanAddress(a ?? '').toUpperCase()
+  const funded = new Map<string, bigint>()
+  const returned = new Map<string, bigint>()
+  for (const t of txs) {
+    if (t.executionResult === false || !/^\d+$/.test(t.value)) continue
+    if (flat(t.sender) === own && t.toType === 2) {
+      const c = flat(t.recipient)
+      funded.set(c, (funded.get(c) ?? 0n) + BigInt(t.value))
+    }
+  }
+  for (const t of txs) {
+    if (t.executionResult === false || !/^\d+$/.test(t.value)) continue
+    const s = flat(t.sender)
+    if (flat(t.recipient) === own && funded.has(s)) returned.set(s, (returned.get(s) ?? 0n) + BigInt(t.value))
+  }
+  const unsettled = [...funded.keys()].filter((c) => (returned.get(c) ?? 0n) < (funded.get(c) ?? 0n))
+  const toRead = unsettled.slice(0, MAX_CONTRACT_READS)
+  const out: PayContractContext = {
+    heldContracts: [],
+    contractTxs: [],
+    checked: toRead.length,
+    failed: [],
+    skipped: unsettled.length - toRead.length,
+  }
+  if (process.env.NIMBOOKS_MCP_NO_CONTRACTS === '1') {
+    out.failed = toRead
+    return out
+  }
+  const now = Date.now()
+  const readOne = async (c: string): Promise<boolean> => {
+    const hit = contractCache.get(c)
+    if (hit && now - hit.at < CONTRACT_CACHE_MS) {
+      if (hit.held) out.heldContracts.push(c)
+      out.contractTxs.push(...hit.txs)
+      return true
+    }
+    try {
+      const account = await rpcCall('getAccountByAddress', [c])
+      const held = BigInt(/^\d+$/.test(String(account?.balance ?? '0')) ? String(account.balance) : '0') > 0n
+      const walk = await getTransactionHistory(c, 200)
+      // An empty walk is a failure too: a contract this wallet funded has at
+      // least the funding row, so nothing back means the reads did not land.
+      if (walk.overrun || walk.txs.length === 0) throw new Error('contract history not read')
+      contractCache.set(c, { at: now, held, txs: walk.txs })
+      if (held) out.heldContracts.push(c)
+      out.contractTxs.push(...walk.txs)
+      return true
+    } catch {
+      return false
+    } finally {
+      await new Promise((r) => setTimeout(r, 150))
+    }
+  }
+  const missed: string[] = []
+  for (const c of toRead) if (!(await readOne(c))) missed.push(c)
+  // One more pass for the ones the public RPC turned away (usually a rate
+  // limit), after a pause.
+  if (missed.length) await new Promise((r) => setTimeout(r, 2000))
+  for (const c of missed) if (!(await readOne(c))) out.failed.push(c)
+  return out
+}
+
+/** Test hook: forget every cached contract read. */
+export function clearPayContractCache(): void {
+  contractCache.clear()
 }
 
 // --- Transaction classification (verbatim rules from the app) ---

@@ -44,9 +44,12 @@ import {
   getValidatorsSnapshot,
   isValidNimiqAddress,
   REWARDS_FLOOR_DAY,
+  getPayContractContext,
   type NimiqTx,
+  type PayContractContext,
   type StakingHolding,
 } from './chain.ts'
+import { splitHtlcFlows } from './htlcFlows.ts'
 import {
   encodeInvoice,
   formatLunaExact,
@@ -82,7 +85,7 @@ import {
   type ValidatorInfo,
 } from './staking.ts'
 
-const VERSION = '1.2.2'
+const VERSION = '1.3.0'
 
 // How far back a tool will walk the transaction index. The RPC pages 50 at a
 // time and is rate-limited, so these are budgets, not guesses — every tool
@@ -131,6 +134,34 @@ const options = parseArgs(process.argv.slice(2))
 // tolerant by design, but the offline test suite must stay offline: the test
 // script sets this so statement/summary tests never reach the second host.
 const REWARDS_DISABLED = process.env.NIMBOOKS_MCP_NO_REWARDS === '1'
+
+/**
+ * The app's Nimiq Pay netting for a tx list: reads the wallet's unsettled Pay
+ * contracts (held ones, and their own rows) and splits every transfer into its
+ * real and internal parts. `note` says when part of it could not be read.
+ */
+async function payNetting(addr: string, basicTxs: NimiqTx[], allTxs: NimiqTx[]) {
+  const ctx: PayContractContext = await getPayContractContext(addr, basicTxs)
+  const splits = splitHtlcFlows(allTxs, addr, { heldContracts: ctx.heldContracts, contractTxs: ctx.contractTxs })
+  const gaps: string[] = []
+  if (ctx.failed.length) {
+    gaps.push(
+      `${ctx.failed.length} of the wallet's ${ctx.checked + ctx.skipped} open Nimiq Pay contract(s) could not be read, ` +
+        `so NIM still parked there or staked from there may be counted as sent`
+    )
+  }
+  if (ctx.skipped) gaps.push(`${ctx.skipped} more open contract(s) were past the read cap and were not checked`)
+  return {
+    splits,
+    contractsChecked: ctx.checked,
+    note: gaps.length ? gaps.join('; ') + '.' : undefined,
+  }
+}
+
+const INTERNAL_NOTE =
+  'Nimiq Pay moves a wallet’s NIM through its own contracts (HTLCs) and back. Those round trips are ' +
+  'reported as internalIn/internalOut, not as money in or out, the same split the NimBooks app makes ' +
+  '(its Hide internal switch). Net still counts both.'
 
 function log(msg: string): void {
   // stdout is the protocol. Diagnostics go to stderr, always.
@@ -308,7 +339,10 @@ server.registerTool(
       'staked NIM is reported separately because it lives in the staking contract. ' +
       'Money out includes transfers into the staking contract and out of it — the ' +
       'same treatment as the app’s statement; validator rewards arrive through a ' +
-      'separate channel and are reported as their own line (rewardsReceivedNim).',
+      'separate channel and are reported as their own line (rewardsReceivedNim). ' +
+      'Nimiq Pay’s round trips through its own contracts are the wallet’s own money ' +
+      'and are reported as internalIn/internalOut, not as money in or out, the same ' +
+      'split the app makes; netNim counts both.',
     inputSchema: {
       address: z
         .string()
@@ -352,9 +386,15 @@ server.registerTool(
       const rewardTxs = rewardReport.rows
       const rewardsNote = rewardNotes(rewardReport.failedYears, askedFrom)
       const txs = [...walk.txs, ...rewardTxs].sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
+      // Netting runs over the whole history read, before the window, as the
+      // app's does: a contract funded before the window and refunded inside it
+      // still nets out.
+      const netting = await payNetting(addr, walk.txs, txs)
 
       let inLuna = 0n
       let outLuna = 0n
+      let internalInLuna = 0n
+      let internalOutLuna = 0n
       let feeLuna = 0n
       let inCount = 0
       let outCount = 0
@@ -370,12 +410,23 @@ server.registerTool(
         const value = BigInt(/^\d+$/.test(tx.value) ? tx.value : '0')
         const fee = BigInt(/^\d+$/.test(tx.fee) ? tx.fee : '0')
         const isOut = tx.sender.replace(/\s+/g, '').toUpperCase() === addr
+        const sp = netting.splits.get(tx.hash)
         if (isOut) {
-          outLuna += value
+          if (sp) {
+            outLuna += BigInt(sp.realOut)
+            internalOutLuna += BigInt(sp.internalOut)
+          } else {
+            outLuna += value
+          }
           feeLuna += fee // sender pays
           outCount++
         } else {
-          inLuna += value
+          if (sp) {
+            inLuna += BigInt(sp.realIn)
+            internalInLuna += BigInt(sp.internalIn)
+          } else {
+            inLuna += value
+          }
           inCount++
           if (txLabel(tx, addr) === 'reward') rewardLuna += value
         }
@@ -409,12 +460,18 @@ server.registerTool(
         inNim: formatLunaExact(inLuna.toString()),
         outLuna: outLuna.toString(),
         outNim: formatLunaExact(outLuna.toString()),
+        internalInLuna: internalInLuna.toString(),
+        internalInNim: formatLunaExact(internalInLuna.toString()),
+        internalOutLuna: internalOutLuna.toString(),
+        internalOutNim: formatLunaExact(internalOutLuna.toString()),
+        internalNote: internalInLuna > 0n || internalOutLuna > 0n ? INTERNAL_NOTE : undefined,
+        payContractsNote: netting.note,
         feesPaidLuna: feeLuna.toString(),
         feesPaidNim: formatLunaExact(feeLuna.toString()),
         rewardsReceivedLuna: rewardLuna.toString(),
         rewardsReceivedNim: formatLunaExact(rewardLuna.toString()),
-        netLuna: (inLuna - outLuna - feeLuna).toString(),
-        netNim: formatLunaExact((inLuna - outLuna - feeLuna).toString()),
+        netLuna: (inLuna + internalInLuna - outLuna - internalOutLuna - feeLuna).toString(),
+        netNim: formatLunaExact((inLuna + internalInLuna - outLuna - internalOutLuna - feeLuna).toString()),
         txCount: inCount + outCount,
         inCount,
         outCount,
@@ -515,7 +572,9 @@ server.registerTool(
       'transactions are excluded and fees are counted on outgoing transactions ' +
       'only. Staking rewards (restaking payouts) are included as in-day income; ' +
       'moving NIM into or out of the staking contract is not a fiat flow, so it ' +
-      'is excluded, exactly like the app’s statement. Days with no price ' +
+      'is excluded, exactly like the app’s statement. Nimiq Pay’s round trips ' +
+      'through its own contracts go in internalInNim/internalOutNim, not in or ' +
+      'out, as in the app. Days with no price ' +
       'available come back with closeUsd: null rather than a guess.',
     inputSchema: {
       address: z
@@ -542,7 +601,8 @@ server.registerTool(
       const rewardTxs = rewardReport.rows
       const txs = [...walk.txs, ...rewardTxs].sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
       const prices = await getDailyCloses(bounds.from, Math.min(bounds.to, Date.now()))
-      const statement = computeStatement(txs, addr, bounds, prices)
+      const netting = await payNetting(addr, walk.txs, txs)
+      const statement = computeStatement(txs, addr, bounds, prices, netting.splits)
 
       return ok({
         address: spacedAddress(addr),
@@ -552,6 +612,8 @@ server.registerTool(
           date: r.date,
           inNim: Number(r.inNim.toFixed(5)),
           outNim: Number(r.outNim.toFixed(5)),
+          internalInNim: Number(r.internalInNim.toFixed(5)),
+          internalOutNim: Number(r.internalOutNim.toFixed(5)),
           feeNim: Number(r.feeNim.toFixed(5)),
           closeUsd: r.closeUsd,
           inUsd: r.inUsd === null ? null : Number(r.inUsd.toFixed(6)),
@@ -559,6 +621,9 @@ server.registerTool(
           txCount: r.txCount,
         })),
         totals: statement.totals,
+        internalNote:
+          statement.totals.internalInNim > 0 || statement.totals.internalOutNim > 0 ? INTERNAL_NOTE : undefined,
+        payContractsNote: netting.note,
         rewardsNote: rewardNotes(rewardReport.failedYears, bounds.from),
         priceNote:
           statement.pricesMissing > 0

@@ -15,6 +15,7 @@
 // only the window moves.
 
 import { classifyTx, cleanAddress, ToolError, type NimiqTx } from './chain.ts'
+import type { FlowSplit } from './htlcFlows.ts'
 
 const COINGECKO_RANGE =
   'https://api.coingecko.com/api/v3/coins/nimiq-2/market_chart/range?vs_currency=usd'
@@ -52,6 +53,10 @@ export interface DailyRow {
   date: string // YYYY-MM-DD (UTC)
   inNim: number
   outNim: number
+  // Nimiq Pay contract round trips (the wallet's own money): kept out of
+  // in/out, still part of net. Zero when no split was passed.
+  internalInNim: number
+  internalOutNim: number
   feeNim: number
   stakedNim: number
   unstakedNim: number
@@ -69,6 +74,8 @@ export interface StatementResult {
   totals: {
     inNim: number
     outNim: number
+    internalInNim: number
+    internalOutNim: number
     feeNim: number
     stakedNim: number
     unstakedNim: number
@@ -142,7 +149,10 @@ export function computeStatement(
   txs: NimiqTx[],
   ownAddress: string,
   bounds: { from: number; to: number; label: string },
-  prices: Record<string, number>
+  prices: Record<string, number>,
+  // The app's HTLC split (splitHtlcFlows over the WHOLE history, before the
+  // period filter, as the app does). Omitted: the gross legacy figures.
+  splits?: Map<string, FlowSplit>
 ): StatementResult {
   const own = cleanAddress(ownAddress).toUpperCase()
   const dayMap = new Map<string, DailyRow>()
@@ -160,6 +170,8 @@ export function computeStatement(
         date: day,
         inNim: 0,
         outNim: 0,
+        internalInNim: 0,
+        internalOutNim: 0,
         feeNim: 0,
         stakedNim: 0,
         unstakedNim: 0,
@@ -191,6 +203,19 @@ export function computeStatement(
       row.unstakedNim += Number.isFinite(value) ? value : 0
     } else if (sender === own && recipient === own) {
       // Self-transfer: only network fee paid
+    } else if (splits) {
+      // The app's rule: a wallet transfer goes in by its split; rewards are
+      // income from the received side as before. No split entry = no flow.
+      const sp = splits.get(t.hash)
+      if (sp) {
+        row.outNim += sp.realOut / 100000
+        row.internalOutNim += sp.internalOut / 100000
+        row.inNim += sp.realIn / 100000
+        row.internalInNim += sp.internalIn / 100000
+      } else if (recipient === own && kind === 'reward') {
+        row.inNim += Number.isFinite(value) ? value : 0
+      }
+      if (recipient === own && kind === 'reward') row.rewardsNim += Number.isFinite(value) ? value : 0
     } else if (sender === own) {
       row.outNim += Number.isFinite(value) ? value : 0
     } else if (recipient === own) {
@@ -202,6 +227,8 @@ export function computeStatement(
   const totals = {
     inNim: 0,
     outNim: 0,
+    internalInNim: 0,
+    internalOutNim: 0,
     feeNim: 0,
     stakedNim: 0,
     unstakedNim: 0,
@@ -217,7 +244,8 @@ export function computeStatement(
 
   const rows = [...ordered].sort().map((day) => {
     const row = dayMap.get(day)!
-    row.netNim = row.inNim - row.outNim - row.feeNim
+    // Same net either way: real + internal = the gross figure.
+    row.netNim = row.inNim + row.internalInNim - row.outNim - row.internalOutNim - row.feeNim
     row.closeUsd = prices[day] ?? null
     if (row.closeUsd === null) {
       usdAvailable = false
@@ -228,6 +256,8 @@ export function computeStatement(
 
     totals.inNim += row.inNim
     totals.outNim += row.outNim
+    totals.internalInNim += row.internalInNim
+    totals.internalOutNim += row.internalOutNim
     totals.feeNim += row.feeNim
     totals.stakedNim += row.stakedNim
     totals.unstakedNim += row.unstakedNim

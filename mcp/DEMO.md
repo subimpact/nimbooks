@@ -41,7 +41,8 @@ Calls `get_summary`. Expected shape:
     "delegation": "NQ08 ACT8 T0FE PTG8 P5RL H2S3 QGXH V15R NVXY",
     "note": "Staked NIM sits in the staking contract, so it is not part of balanceLuna above."
   },
-  "inNim": "69117.90486", "outNim": "69064.5124", "netNim": "53.39246",
+  "inNim": "24986.29342", "outNim": "16729.90096", "netNim": "53.39246",
+  "internalInNim": "44131.61144", "internalOutNim": "52334.61144",
   "rewardsReceivedNim": "49.39236",
   "txCount": 216, "inCount": 187, "outCount": 29
 }
@@ -52,7 +53,9 @@ in its instructions, and the tools use it when none is given. If you are running
 default, name the address in this first question.
 
 **Say:** the balance reads 4 NIM, but there are another 7,642 NIM staked. The app splits those
-out because they live in the staking contract, and so does this. The 49 NIM of rewards are
+out because they live in the staking contract, and so does this. In and out are real money
+only: about 44,000 NIM each way was Nimiq Pay moving the wallet's own NIM through its
+contracts and back, and that sits in its own internal line, as in the app. The 49 NIM of rewards are
 validator payouts only: a stake made in Nimiq Pay shows up in the public rewards feed too,
 and the server leaves it out, exactly as the app does. Nothing here is an estimate: Luna are
 integers all the way through.

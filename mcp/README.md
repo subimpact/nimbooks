@@ -115,9 +115,9 @@ chain instead.
 
 | Tool | Answers |
 | --- | --- |
-| `get_summary` | Balance now, plus money in/out, fees, rewards and transaction counts over a window. |
+| `get_summary` | Balance now, plus money in/out, fees, rewards and transaction counts over a window. Nimiq Pay's round trips through its own contracts are reported apart, as internal. |
 | `list_transactions` | Classified rows — kind, direction, counterparty, memo, hash. |
-| `get_statement` | Day-by-day in/out for a year or month, priced at each day's CoinGecko UTC close. |
+| `get_statement` | Day-by-day in/out for a year or month, priced at each day's CoinGecko UTC close, with Nimiq Pay's internal round trips in their own columns. |
 | `create_payment_request` | **Drafts** a request and returns a shareable link. Signs nothing. |
 | `draft_stake` | **Drafts** a stake link that opens the app's stake panel pre-filled. Signs nothing. |
 | `check_request_paid` | Whether a payment tagged with a request's reference has landed. |
@@ -131,6 +131,14 @@ chain instead.
 
 - `get_summary` and `get_statement` read up to the newest **1000** transactions;
   `check_request_paid` scans the newest **200**. When a cap is hit, the answer says so.
+- **Nimiq Pay wallets:** Pay moves your NIM through its own contracts (HTLCs) and most of
+  it comes back. Like the app (its Hide internal switch), `get_summary` and
+  `get_statement` keep those round trips out of money in/out and report them as
+  `internalIn`/`internalOut`; net counts both. To tell a contract that still holds your
+  NIM, or that staked it from inside Pay, the server reads each contract you funded that
+  has not paid it all back (two RPC calls each, at most 40 contracts, kept for 5 minutes).
+  A busy Pay wallet's first answer can take 15 to 25 seconds. If a contract cannot be
+  read, `payContractsNote` says so: NIM still in it may then be counted as sent.
 - `get_summary` windows default to *all available history* → *now*. `since`/`until` take
   `YYYY-MM-DD` or ISO 8601, read as UTC.
 - `list_transactions` returns 50 rows by default, 500 at most.
@@ -192,7 +200,8 @@ combination of amount (`1`, `0.5`, `12.5`, `100000`, and `0.000001`, which both 
 must *refuse*, being finer than a Luna), memo (ASCII, emoji/CJK, none) and expiry (none,
 set), with and without a named payer, then round-trips each link back through the app's
 own decoder. Transaction classification and statement aggregation are pinned the same
-way, row for row, including the cashlink tag, the `nimbooks:invoice:<id>` reference, and
+way, row for row, including the cashlink tag, the `nimbooks:invoice:<id>` reference, the
+Nimiq Pay netting (tx by tx against the app's own module, on a real Pay wallet's history), and
 the staking legs.
 
 ---

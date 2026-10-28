@@ -69,6 +69,20 @@ await step('get_summary returns a funded account', async () => {
   assert.ok(BigInt(s.inLuna) > 0n, 'something came in')
 })
 
+await step('get_summary nets Nimiq Pay round trips out of in/out (the app\'s split)', async () => {
+  const res = await client.callTool({ name: 'get_summary', arguments: {} })
+  assert.notEqual(res.isError, true, text(res))
+  const s = JSON.parse(text(res))
+  console.log(`       real in ${s.inNim} · real out ${s.outNim} · internal ${s.internalInNim} in / ${s.internalOutNim} out`)
+  for (const k of ['internalInLuna', 'internalOutLuna']) assert.ok(/^\d+$/.test(s[k]), `${k}: ${s[k]}`)
+  // The sample wallet is a Nimiq Pay wallet: its contract round trips exist.
+  assert.ok(BigInt(s.internalInLuna) > 0n, 'internal flow found')
+  // Net is unchanged by the split: in + internalIn - out - internalOut - fees.
+  const net = BigInt(s.inLuna) + BigInt(s.internalInLuna) - BigInt(s.outLuna) - BigInt(s.internalOutLuna) - BigInt(s.feesPaidLuna)
+  assert.equal(net.toString(), s.netLuna)
+  assert.equal(s.payContractsNote, undefined, `every open contract was read: ${s.payContractsNote}`)
+})
+
 await step('get_summary honours a window', async () => {
   const res = await client.callTool({
     name: 'get_summary',
