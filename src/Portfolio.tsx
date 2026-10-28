@@ -604,14 +604,14 @@ export function Portfolio({
             {cardBody}
           </div>
           <div className="gate-overlay">
-            <h3>Support NimBooks to unlock</h3>
+            <h3>Stake to unlock</h3>
             <p className="hint">
               {gate.reason === 'not-staked' &&
-                "Portfolio reports unlock when you stake 1,000 NIM or more with ImpactZero, the validator that keeps NimBooks running. Stakes with other validators don't count. Your NIM stays yours, keeps earning staking rewards, and helps secure the Nimiq network."}
+                "Stake 1,000 NIM or more with ImpactZero to unlock portfolio reports. There is nothing to buy: ImpactZero is the validator run by the person who builds NimBooks, and stakes with it are how NimBooks is paid for. Staking with it means trusting that operator to run the validator well. Your NIM never leaves your wallet, keeps earning rewards, and you can unstake at any time (usually 12 hours to 4 days). Stakes with other validators don't count."}
               {gate.reason === 'below-min' &&
                 `You have ${gate.activeNim.toLocaleString(lang, { maximumFractionDigits: 5 })} NIM staked with ImpactZero. Add ${Math.ceil(gate.missingNim).toLocaleString(lang)} NIM more to unlock portfolio reports. Thank you for supporting NimBooks.`}
               {gate.reason === 'other-validator' &&
-                "Stakes with other validators don't unlock this. Only ImpactZero does. Portfolio reports need 1,000 NIM or more staked with ImpactZero, the validator that keeps NimBooks running. To switch, unstake from your current validator in the Stake panel, then restake with ImpactZero."}
+                "Stakes with other validators don't unlock this. Only ImpactZero does: the validator run by the person who builds NimBooks, so staking with it means trusting that operator. Portfolio reports need 1,000 NIM or more staked with ImpactZero. To switch, unstake from your current validator in the Stake panel, then restake with ImpactZero."}
             </p>
             <button className="btn-primary" onClick={onStake}>
               {gate.reason === 'other-validator' ? 'Open Stake panel' : 'Stake with ImpactZero'}

@@ -468,7 +468,7 @@ export const FEATURES: FeatureDef[] = [
       },
       {
         title: 'Unlock it by staking',
-        body: 'Reports unlock when you stake 1,000 NIM or more with ImpactZero. The sample wallet is unlocked.',
+        body: 'Stake to unlock: reports open when you stake 1,000 NIM or more with ImpactZero, the validator run by the person who builds NimBooks. Your NIM stays in your wallet and keeps earning. The sample wallet is unlocked.',
       },
     ],
     behindTheScenes: [

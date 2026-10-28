@@ -416,7 +416,7 @@ async function sheetFacts(page) {
       check(`${label}: support section shows a QR code`, facts.qr)
       check(`${label}: "Total raised: 21,809 NIM" (whole NIM, rounded down)`, /Total raised:\s*21,809 NIM/.test(facts.total), facts.total)
       check(`${label}: "Support NimBooks" heading and copy line`, facts.title === 'Support NimBooks' && /free and built by one person/.test(facts.text), JSON.stringify({ title: facts.title }))
-      check(`${label}: ImpactZero staking line`, /Staking with ImpactZero also supports NimBooks/.test(facts.text))
+      check(`${label}: ImpactZero staking line`, /Staking with ImpactZero, the validator run by the person who builds NimBooks, also supports it/.test(facts.text))
       check(`${label}: supporters list shows "Wool" with his amount`,
         facts.list.some((li) => /Wool/.test(li) && /21,809 NIM/.test(li)), JSON.stringify(facts.list))
       check(`${label}: body text carries no supporter address ("NQ88")`, !(await page.evaluate(() => document.body.innerText)).includes('NQ88'))

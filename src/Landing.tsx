@@ -340,7 +340,7 @@ function SupportSection() {
         NimBooks is free and built by one person. If it saves you time, you can support it by sending some NIM to the address below.
       </p>
       <p className="learn-support-lead">
-        Staking with ImpactZero also supports NimBooks and keeps your NIM earning.
+        Staking with ImpactZero, the validator run by the person who builds NimBooks, also supports it and keeps your NIM earning.
       </p>
       <div className="learn-support-card">
         <QrCode

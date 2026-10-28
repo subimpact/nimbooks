@@ -4881,7 +4881,7 @@ export default function App() {
         <header className="hero">
           <div className="logo">📒</div>
           <h1>NimBooks</h1>
-          <p className="tagline">Earn on your NIM: stake it, follow every reward and keep the books - in Nimiq Pay or with Nimiq Wallet in any browser.</p>
+          <p className="tagline">Earn on your NIM: stake from Nimiq Pay, even NIM still on its way to you, or from any browser, and every reward lands in your books and tax in your own currency.</p>
         </header>
         <main className="connect-panel">
           <div className="stake-progress" role="status" aria-live="polite">
@@ -4918,7 +4918,7 @@ export default function App() {
             </div>
             <div className="logo">📒</div>
             <h1>NimBooks</h1>
-            <p className="tagline">Earn on your NIM: stake it, follow every reward and keep the books - in Nimiq Pay or with Nimiq Wallet in any browser.</p>
+            <p className="tagline">Earn on your NIM: stake from Nimiq Pay, even NIM still on its way to you, or from any browser, and every reward lands in your books and tax in your own currency.</p>
             {publicStats && publicStats.uniqueWallets > 0 && (
               <div
                 className="hero-metric-pill"

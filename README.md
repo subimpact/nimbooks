@@ -1,6 +1,6 @@
 # 📒 NimBooks
 
-**Earn on your NIM: stake it, follow every reward and keep the books — in Nimiq Pay or with Nimiq Wallet in any browser.**
+**Earn on your NIM: stake from Nimiq Pay, even NIM still on its way to you, or from any browser, and every reward lands in your books and tax in your own currency.**
 
 NimBooks is a Nimiq Pay Mini App that answers the question every payments wallet user eventually asks: *"What do I actually have, and what happened to it?"*
 
@@ -14,7 +14,7 @@ It shows your NIM balance and transaction history with fiat values, lets you **s
 
 ## Features
 
-- **NIM balance + full transaction history** with fiat conversion in **37 currencies** (currency switcher, remembered per device)
+- **NIM balance + full transaction history** with fiat conversion in **148 currencies** (currency switcher, remembered per device)
 - **Staking** — stake and unstake with a validator picker (live APY estimates, pool fee and reliability), reward rollups in history, and an HTLC-aware balance breakdown (Available / Locked in swaps / Staked / Unstaking / Ready to withdraw / Vesting); Nimiq Pay signs the staking transactions itself, and a browser session builds them locally and has the **Nimiq Hub** sign them, so the full deactivate → retire → withdraw flow works on desktop too
 - **Cashlinks** — send NIM as a claimable link with the money inside: the key is generated on-device, the funding transaction carries the Hub's own cashlink tag (so `hub.nimiq.com/cashlink` claims it), and the sender keeps a local shelf with live status and one-tap revert
 - **Payment requests (invoices)** — amount + memo + optional expiry → shareable link and QR; the payer settles it in-app, and the tagged transaction (`nimbooks:invoice:<id>`) marks the request paid automatically when it lands on-chain
