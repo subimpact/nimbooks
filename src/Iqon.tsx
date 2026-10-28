@@ -1,6 +1,14 @@
 import { useEffect, useState } from 'react'
 // @ts-expect-error - @nimiq/identicons does not ship TS types
 import Identicons from '@nimiq/identicons'
+import identiconsSvgUrl from '@nimiq/identicons/dist/identicons.min.svg?url'
+
+// The library fetches its part sprites from /node_modules/@nimiq/identicons/...
+// by default. The dev server serves that path; the production build does not,
+// so the SPA fallback answered with index.html, the sprite parse failed (an
+// "XML Parsing Error" in the console) and every Iqon rendered without its face,
+// top, side and bottom. Point it at the hashed asset Vite emits instead.
+Identicons.svgPath = identiconsSvgUrl
 
 const cache = new Map<string, string>()
 

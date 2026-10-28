@@ -7,7 +7,7 @@
 // Badge text. Spelled out rather than built from a version constant so the exact
 // label ships as one string in the bundle (JSX would emit "v" as a separate node).
 // package.json carries the machine-readable version.
-export const APP_VERSION_LABEL = 'v1.40.0'
+export const APP_VERSION_LABEL = 'v1.40.1'
 
 export interface ChangelogEntry {
   version: string
@@ -16,6 +16,14 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '1.40.1',
+    date: '2026-10-28',
+    items: [
+      'Wallet Iqons now show their full picture. On the live site they had been drawn as a plain coloured circle since they arrived, because the shapes they are built from never loaded',
+      'NimBooks MCP 1.2.2 counts staking rewards the same way as the app: a stake made in Nimiq Pay is no longer read as a reward',
+    ],
+  },
   {
     version: '1.40.0',
     date: '2026-10-27',
