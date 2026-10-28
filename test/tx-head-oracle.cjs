@@ -123,6 +123,8 @@ const sameHashes = (a, b) => a.length === b.length && a.every((t, i) => t.hash =
   const cold = await refreshTransactionHead(ADDR)
   check('cold start walks the full history (120 rows)', cold.length === 120, cold.length)
   check('cold start matches the chain order', sameHashes(cold, chains.get(clean(ADDR))))
+  check('cold start asks for TX_WALK_PAGE rows per call', rpcLog.filter((c) => c.method === 'getTransactionsByAddress').every((c) => c.params[1] === chain.TX_WALK_PAGE), JSON.stringify(rpcLog.map((c) => c.params[1])))
+  check('a 120-row wallet costs at most 2 calls (one page + the empty end)', calls('getTransactionsByAddress') <= 2, calls())
   check('cold start writes a complete slot', slot(ADDR) && slot(ADDR).partial === undefined && slot(ADDR).txs.length === 120)
 
   // 2. Warm tick with 3 new payments: one head page, the new rows on top, nothing lost.
@@ -182,11 +184,13 @@ const sameHashes = (a, b) => a.length === b.length && a.every((t, i) => t.hash =
   check('a gap ends with the whole chain', sameHashes(gap, chains.get(clean(ADDR))), `${gap.length} vs ${chains.get(clean(ADDR)).length}`)
 
   // 8. Partial slot (an earlier walk died): the heartbeat walks again and heals it.
+  // Deep enough that the walk needs more than one page of TX_WALK_PAGE rows.
+  mine(ADDR, chain.TX_WALK_PAGE + 100, 'deep')
   clearTxCache(ADDR)
-  failCalls = new Set([callNo + 3]) // third call of the next walk fails: 2 pages survive
+  failCalls = new Set([callNo + 2]) // second call of the next walk fails: 1 page survives
   const partialManual = await getNimiqTransactionHistory(ADDR, 1000)
   failCalls = new Set()
-  check('a walk that dies partway returns what it has', partialManual.length === 100, partialManual.length)
+  check('a walk that dies partway returns what it has', partialManual.length === chain.TX_WALK_PAGE, partialManual.length)
   check('a partial walk is flagged in the slot', slot(ADDR).partial === true)
   resetLog()
   const healed = await refreshTransactionHead(ADDR)
@@ -207,8 +211,10 @@ const sameHashes = (a, b) => a.length === b.length && a.every((t, i) => t.hash =
 
   // 10. Cap: the list is held at maxTotal, the oldest rows give way.
   mine(ADDR2, 1000, 'cap')
+  resetLog()
   const capped = await refreshTransactionHead(ADDR2)
   check('1000 rows are kept as they are', capped.length === 1000, capped.length)
+  check('1000 rows cost 2 calls of 500 (was 20 of 50)', calls('getTransactionsByAddress') === 2, calls('getTransactionsByAddress'))
   const fiveNew = mine(ADDR2, 5, 'cap5')
   const overflow = await refreshTransactionHead(ADDR2)
   check('the cap holds at 1000', overflow.length === 1000, overflow.length)

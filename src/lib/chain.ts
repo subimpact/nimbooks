@@ -373,8 +373,8 @@ export async function getNimiqTransactions(
 }
 
 // Full transaction history is walked by the startAt cursor until exhausted (cap
-// at maxTotal to bound the request), newest→oldest. A small delay between pages
-// keeps us under the RPC rate limiter (bursts of 20 rapid calls trip 429s).
+// at maxTotal to bound the request), newest→oldest, in TX_WALK_PAGE pages. A
+// small delay between pages keeps us under the RPC rate limiter.
 const TX_CACHE_PREFIX = 'nimbooks:txs'
 const TX_CACHE_TTL = 2 * 60 * 1000 // 2 min — balances move, but not every second
 // The heartbeat reads just the newest page (the RPC's own page size).
@@ -495,16 +495,27 @@ export function clearTxCache(address?: string) {
 // at maxTotal, at the end of the history, or at the first page that fails.
 // `complete` is false only when a page failed, so a caller can tell a short
 // history from a walk that was cut short.
+// Page size for the walk. nimiqwatch charges one rate-limit token per started
+// 100 rows (20 tokens per 10 s per IP), so 50-row pages paid full price for half
+// the rows: the old 20 x 50 walk spent a phone's whole allowance on one address,
+// and a Nimiq Pay wallet walks two or more (its swap contracts too), which is
+// what surfaced as "public node is busy". 500-row pages fetch the same 1000 rows
+// for 10 tokens in 2 calls, and most wallets fit in the first call.
+export const TX_WALK_PAGE = 500
+
 async function walkTransactionHistory(
   address: string,
   maxTotal: number
 ): Promise<{ txs: NimiqTx[]; complete: boolean }> {
   const all: NimiqTx[] = []
   let cursor: string | null = null
-  for (let i = 0; i < 20; i++) {
+  const maxPages = Math.max(1, Math.ceil(maxTotal / TX_WALK_PAGE))
+  for (let i = 0; i < maxPages; i++) {
     let page: NimiqTx[]
     try {
-      page = await getNimiqTransactions(address, 50, cursor)
+      // Never ask for more than the cap still needs: the token bill follows the
+      // rows requested, not the rows kept.
+      page = await getNimiqTransactions(address, Math.min(TX_WALK_PAGE, maxTotal - all.length), cursor)
     } catch (e) {
       // A mid-pagination failure (rate limit, flaky network) must not wipe the
       // whole history — return what we already have so the user sees txs.
@@ -518,9 +529,9 @@ async function walkTransactionHistory(
     const oldest = page[page.length - 1]
     if (!oldest?.hash || oldest.hash === cursor) break
     cursor = oldest.hash
-    if (i < 19) await new Promise((r) => setTimeout(r, 250))
+    if (i < maxPages - 1) await new Promise((r) => setTimeout(r, 250))
   }
-  return { txs: all, complete: true }
+  return { txs: all.slice(0, maxTotal), complete: true }
 }
 
 // Fetch the full transaction history, newest→oldest. Served from the cache while

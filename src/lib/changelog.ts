@@ -7,7 +7,7 @@
 // Badge text. Spelled out rather than built from a version constant so the exact
 // label ships as one string in the bundle (JSX would emit "v" as a separate node).
 // package.json carries the machine-readable version.
-export const APP_VERSION_LABEL = 'v1.41.0'
+export const APP_VERSION_LABEL = 'v1.41.1'
 
 export interface ChangelogEntry {
   version: string
@@ -17,9 +17,10 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
-    version: '1.41.0',
+    version: '1.41.1',
     date: '2026-10-29',
     items: [
+      "History loads in fewer, bigger requests to Nimiq's public node (500 transactions at a time instead of 50), so it uses half of the node's allowance per phone and \"public node is busy, retrying\" should show up far less often. Most wallets now load in one request",
       'History filters wrap onto a second line on phones instead of sitting in one long row you had to scroll sideways (found in phone test by subimpact)',
       'Portfolio reports now say plainly how the unlock works: stake 1,000 NIM with ImpactZero, the validator run by the person who builds NimBooks, so you know who you are trusting. Your NIM stays in your wallet and you can unstake at any time',
       'The headline now leads with what NimBooks does differently: stake from Nimiq Pay, even NIM still on its way to you, and every reward lands in your books and tax in your own currency',
