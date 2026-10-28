@@ -1746,21 +1746,18 @@ a:focus-visible {
   padding: 24px 0;
 }
 
-/* History filters: one scrollable row of chips, no wrap on phones. The chips
-   reuse Analytics' .period look so the two screens read as one app. */
+/* History filters: chips wrap onto extra lines on narrow screens instead of a
+   sideways-scrolling strip (a phone tester read the strip as a long scroll
+   bar). The chips reuse Analytics' .period look so the two screens read as one
+   app. */
 .history-filters {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: 4px;
-  overflow-x: auto;
   padding: 3px;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  scrollbar-width: none;
-}
-.history-filters::-webkit-scrollbar {
-  display: none;
 }
 .history-filters .period {
   flex: 0 0 auto;
