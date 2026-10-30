@@ -17,6 +17,7 @@ import {
 export {
   getLightStatus,
   setLightFetcherForTests,
+  setLightQueryTimeoutForTests,
   subscribeLightStatus,
   warmLightClient,
   type LightPhase,

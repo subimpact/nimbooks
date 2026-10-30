@@ -25,6 +25,18 @@ import { normalizeTimestamp, type NimiqTx } from './chain'
 // websockets, CSP, no peers) from holding history hostage forever: the caller
 // falls back to the RPC.
 const CONSENSUS_TIMEOUT_MS = 30_000
+// A peer can stop answering a query after consensus (seen around an epoch's
+// election block): without a ceiling one history page could hang for good and
+// the progress line would never end. The slowest page measured on a busy
+// address took 9.9 s; past this the walk falls back to the RPC.
+const LIGHT_QUERY_TIMEOUT_MS = 20_000
+let lightQueryTimeoutMs = LIGHT_QUERY_TIMEOUT_MS
+
+/** Oracles shorten the per-query ceiling; null restores the default. */
+export function setLightQueryTimeoutForTests(ms: number | null): void {
+  lightQueryTimeoutMs = ms ?? LIGHT_QUERY_TIMEOUT_MS
+}
+
 // Hard per-call ceiling of the client (1000 throws).
 export const LIGHT_WALK_PAGE = 500
 
@@ -93,10 +105,10 @@ export function hasLightFetcherForTests(): boolean {
   return testFetcher !== null
 }
 
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+function withTimeout<T>(promise: Promise<T>, ms: number, what = 'answer'): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`Light client did not reach consensus within ${ms} ms`)), ms)
+    timer = setTimeout(() => reject(new Error(`Light client did not ${what} within ${ms} ms`)), ms)
   })
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
 }
@@ -121,7 +133,7 @@ async function startClient(): Promise<Client> {
   // still pending and holds a borrow on it, so free() throws "attempted to
   // take ownership of Rust value while it was borrowed" as an uncaught page
   // error. It keeps connecting in the background and the next call reuses it.
-  await withTimeout(client.waitForConsensusEstablished(), CONSENSUS_TIMEOUT_MS)
+  await withTimeout(client.waitForConsensusEstablished(), CONSENSUS_TIMEOUT_MS, 'reach consensus')
   readyClient = client
   return client
 }
@@ -207,16 +219,12 @@ export async function getLightTransactions(
   const limit = Math.min(max, LIGHT_WALK_PAGE)
   let rows: PlainTransactionDetails[]
   if (testFetcher) {
-    rows = await testFetcher(address, limit, startAt)
+    rows = await withTimeout(testFetcher(address, limit, startAt), lightQueryTimeoutMs)
   } else {
     const client = await getLightClient()
-    rows = await client.getTransactionsByAddress(
-      cleanLightAddress(address),
-      null,
-      null,
-      startAt,
-      limit,
-      null
+    rows = await withTimeout(
+      client.getTransactionsByAddress(cleanLightAddress(address), null, null, startAt, limit, null),
+      lightQueryTimeoutMs
     )
   }
   return rows.filter((t) => t.blockHeight != null).map(mapLightTx)
@@ -225,6 +233,6 @@ export async function getLightTransactions(
 /** Account balance in Luna, read from the network. */
 export async function getLightBalance(address: string): Promise<number> {
   const client = await getLightClient()
-  const account = await client.getAccount(cleanLightAddress(address))
+  const account = await withTimeout(client.getAccount(cleanLightAddress(address)), lightQueryTimeoutMs)
   return account.balance
 }

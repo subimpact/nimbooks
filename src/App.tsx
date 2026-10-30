@@ -1782,6 +1782,20 @@ export default function App() {
             return { ok: false as const, holding: null }
           }
         )
+        // A full load waits on history, which comes from the light client and
+        // can take 10-25 s on a first visit. The staker record answers in about
+        // a second: show it as soon as it lands, so the stake card and the
+        // Portfolio gate never read "not staked" for a staker while history is
+        // still loading. The join below sets the same record again (a no-op).
+        if (!heartbeat) {
+          void stakingRead.then((staking) => {
+            if (staking.ok) {
+              setStakingHolding((prev) =>
+                sameStakingHolding(prev, staking.holding) ? prev : staking.holding
+              )
+            }
+          })
+        }
         // The wallet's remote HTLC relay history. Nimiq Pay keeps funds in a
         // separate contract address (accounts[1]); the relay hops are the
         // user's real transactions but never show on the basic address list.

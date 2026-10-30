@@ -63,6 +63,7 @@ global.fetch = async (_url, init) => {
 const chain = require(out)
 const {
   setLightFetcherForTests,
+  setLightQueryTimeoutForTests,
   getNimiqTransactionHistory,
   getLightStatus,
   subscribeLightStatus,
@@ -74,10 +75,13 @@ const {
 let lightRows = []
 let lightCalls = []
 let lightFailsAt = 0
+let lightHangsAt = 0
 setLightFetcherForTests(async (_address, max, startAt) => {
   const call = { max, startAt, returned: 0 }
   lightCalls.push(call)
   if (lightFailsAt && lightCalls.length === lightFailsAt) throw new Error('light client down')
+  // A peer that never answers (seen around an election block).
+  if (lightHangsAt && lightCalls.length === lightHangsAt) return new Promise(() => {})
   const start = startAt === null ? 0 : lightRows.findIndex((r) => r.transactionHash === startAt) + 1
   const page = lightRows.slice(start, start + max)
   call.returned = page.length
@@ -241,6 +245,34 @@ const slot = (address) => JSON.parse(ls[`nimbooks:txs:${clean(address)}`] || 'nu
   check('(f) light down: the light client was tried once', lightCalls.length === 1, JSON.stringify(lightCalls))
   check('(f) light down: the RPC walk ran (page plus end cursor)', txCalls().length === 2, txCalls().length)
   check('(f) light down: a complete RPC walk is not partial', fSlot && fSlot.partial === undefined)
+
+  // (f2) Light hangs on its first call: the per-query ceiling ends it and the
+  // RPC walk supplies the rows, instead of a history that never arrives.
+  reset()
+  const f2 = makeRows(120, 'f2')
+  rpcChains.set(clean(ADDR), f2.map(toRpc))
+  lightHangsAt = 1
+  setLightQueryTimeoutForTests(50)
+  const f2Start = performance.now()
+  const f2Got = await getNimiqTransactionHistory(ADDR, 1000)
+  const f2Ms = performance.now() - f2Start
+  setLightQueryTimeoutForTests(null)
+  lightHangsAt = 0
+  check('(f2) light hangs: the RPC walk supplies the rows', f2Got.length === 120 && sameHashes(f2Got, f2), f2Got.length)
+  check('(f2) light hangs: ended by the query ceiling, not left waiting', f2Ms < 2000, `${f2Ms.toFixed(0)} ms`)
+
+  // (f3) Light hangs on a later page: the walk falls back to the RPC, which
+  // completes, so the full list is returned.
+  reset()
+  const f3 = makeRows(700, 'f3')
+  rpcChains.set(clean(ADDR), f3.map(toRpc))
+  lightRows = f3.map(toLight)
+  lightHangsAt = 2
+  setLightQueryTimeoutForTests(50)
+  const f3Got = await getNimiqTransactionHistory(ADDR, 1000)
+  setLightQueryTimeoutForTests(null)
+  lightHangsAt = 0
+  check('(f3) light hangs on page 2: the full list still arrives', f3Got.length === 700 && sameHashes(f3Got, f3), f3Got.length)
 
   // (g) The support switch pins the old RPC path, light is never called.
   reset()

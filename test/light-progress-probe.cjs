@@ -12,6 +12,8 @@
 //   NODE_PATH=/root/projects/nimbooks/node_modules:/root/projects/mykopi-my/node_modules \
 //     node test/light-progress-probe.cjs http://127.0.0.1:8099 /tmp/shots
 const { firefox } = require('playwright')
+const PAY_UA =
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) NimiqPay/2.0.3 Mobile/15E148'
 const path = require('path')
 const fs = require('fs')
 
@@ -38,7 +40,10 @@ const historyRows = (page) => page.locator('section.history .tx')
   fs.mkdirSync(SHOT_DIR, { recursive: true })
   const browser = await firefox.launch()
   // Fresh context: no localStorage, no sessionStorage, no cache.
-  const ctx = await browser.newContext({ viewport: { width: 375, height: 812 } })
+  // Nimiq Pay's user agent: Pay is the host that reloads the app under the
+  // user and the only one where a saved session (sample wallet included) is
+  // restored on reload, which (e) relies on. A desktop tab returns to landing.
+  const ctx = await browser.newContext({ viewport: { width: 375, height: 812 }, userAgent: PAY_UA })
   await ctx.addInitScript(() => {
     // Keep the consent notice out of the way of the progress line.
     try {
@@ -150,7 +155,7 @@ const historyRows = (page) => page.locator('section.history .tx')
   // return on the same screen.
   const beforeReloadRows = await historyRows(page).count()
   const reloadAt = Date.now()
-  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 })
   let cachedAt = 0
   let cachedRows = 0
   let reloadLine = ''

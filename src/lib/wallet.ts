@@ -195,19 +195,11 @@ export function getSavedSessionView(): string | null {
  * render a reconnecting state instead of flashing the connect screen at
  * someone who never disconnected.
  *
- * Nimiq Pay or this tab's sample wallet. A Pay record is restored only in the
- * host that reloads the app under the user. A demo record lives in
- * sessionStorage, so it can only belong to this tab and survives its reload.
- * A desktop browser keeps its Hub login flow exactly as it is.
+ * Nimiq Pay only, deliberately: it is the host that reloads the app under the
+ * user. A desktop browser keeps its Hub login flow exactly as it is.
  */
 export function hasRestorableSession(): boolean {
-  const saved = readSavedSession()
-  if (!saved) return false
-  // A demo record lives in this tab's sessionStorage, so only this tab wrote
-  // it and a reload should keep the sample wallet (see DEMO_SESSION_KEY). A Pay
-  // record is restored only inside the host that reloads the app under the
-  // user; a desktop browser keeps its Hub login flow exactly as it is.
-  return saved.provider === 'demo' || isOrWillBeInNimiqPay()
+  return isOrWillBeInNimiqPay() && readSavedSession() !== null
 }
 
 function bytesToHex(bytes: Uint8Array): string {
@@ -302,14 +294,16 @@ export async function connectWallet(): Promise<WalletAccount> {
  * transient hiccup, so the next boot can still restore.
  */
 export async function restoreWalletSession(): Promise<WalletAccount | null> {
+  if (!isInNimiqPay() && !isNimiqPayUserAgent()) return null
   const saved = readSavedSession()
   if (!saved) return null
-  // A demo session needs no host. The sample wallet is a public address this
-  // tab chose; a reload in the same tab keeps it.
+
   if (saved.provider === 'demo') {
+    // Nothing to ask a provider for: the demo wallet is a public address the
+    // app reads from the chain. Always the CURRENT sample address, so a session
+    // saved before the sample wallet changed restores onto the new one.
     return connectDemoAccount(DEMO_WALLET_ADDRESS)
   }
-  if (!isInNimiqPay() && !isNimiqPayUserAgent()) return null
 
   // Silent restore, no wallet prompt: the host's account list is a native
   // confirmation dialog, so asking for it again on a page the user only just
