@@ -5183,6 +5183,7 @@ export default function App() {
     restakeGainNim: restakeGain,
     inNimiqPay: inNimiqPay,
     reminder: reminder,
+    pending: historyPendingFirstLoad,
   }
   // In beta the earn card is rebuilt on the kit inside BetaOverview; the
   // classic card only ever renders in the classic look.
@@ -6002,6 +6003,7 @@ export default function App() {
               currency={currency}
               heldContracts={analyticsHeldContracts}
               contractTxs={contractTxsForAnalytics}
+              pending={historyPendingFirstLoad}
             />
           </section>
         )}

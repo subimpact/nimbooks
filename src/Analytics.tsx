@@ -261,6 +261,7 @@ export default function Analytics({
   currency,
   heldContracts = NO_HELD_CONTRACTS,
   contractTxs = NO_CONTRACT_TXS,
+  pending = false,
 }: {
   txs: NimiqTx[]
   currentBalanceNim: string | null
@@ -278,6 +279,9 @@ export default function Analytics({
   // stakes OUT of its contracts — see htlcFlows.ts header). Without it a stake
   // made in Pay would count as real spending.
   contractTxs?: readonly NimiqTx[]
+  // The first history read for this wallet has not answered yet: the stats
+  // would read +0 / -0, which looks like a quiet wallet rather than a loading one.
+  pending?: boolean
 }) {
   const ownNorm = (ownAddress ?? '').replace(/\s+/g, '').toUpperCase()
   // Day key (YYYY-MM-DD) of the bar being drilled into, not an index: the
@@ -783,6 +787,17 @@ export default function Analytics({
       </button>
     </div>
   ) : null
+
+  if (pending) {
+    return (
+      <section className="analytics" data-learn="analytics" data-probe="analytics-pending">
+        <div className="analytics-head">
+          <h2>Analytics</h2>
+        </div>
+        <p className="hint small dim">Loading…</p>
+      </section>
+    )
+  }
 
   return (
     <section className="analytics" data-learn="analytics">

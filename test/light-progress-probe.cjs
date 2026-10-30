@@ -59,6 +59,12 @@ const historyRows = (page) => page.locator('section.history .tx')
   let historyClicked = false
   let fakeZero = null
   let rowsAt = 0
+  // (f) While the dashboard is still loading, Analytics and the Earn card must
+  // not show figures that only mean "not answered yet" (+0 / -0, "Staking
+  // starts at 100 NIM" before the balance is known).
+  let dashPolls = 0
+  let analyticsZero = null
+  let earnTooEarly = null
 
   // (b) polls every 250 ms. One loop also catches (a), takes the 360px shot and
   // opens History, so nothing is missed between separate waits.
@@ -80,7 +86,22 @@ const historyRows = (page) => page.locator('section.history .tx')
         await page.setViewportSize({ width: 375, height: 812 })
         shotTaken = true
       }
-      if (!historyClicked) {
+      if (!historyClicked && rowsAt === 0) {
+        const dash = await page.evaluate(() => {
+          const a = document.querySelector('section.analytics')
+          const e = document.querySelector('[data-learn="earn"], .earn-card')
+          return {
+            statGrid: a && a.querySelector('.stat-grid') ? a.innerText.replace(/\s+/g, ' ').slice(0, 160) : null,
+            pending: !!document.querySelector('[data-probe="analytics-pending"]'),
+            earn: e ? e.innerText.replace(/\s+/g, ' ') : document.body.innerText,
+          }
+        })
+        dashPolls++
+        if (dash.statGrid && !analyticsZero) analyticsZero = dash.statGrid
+        if (/Staking starts at/.test(dash.earn) && !earnTooEarly) earnTooEarly = dash.earn.slice(0, 160)
+      }
+      // Stay on the dashboard for 3 s of loading so (f) sees it, then open History.
+      if (!historyClicked && Date.now() - progressSeenAt > 3000) {
         const tab = page.locator('button[data-tour="history-tab"]').first()
         if (await tab.count()) {
           await tab.click()
@@ -101,6 +122,8 @@ const historyRows = (page) => page.locator('section.history .tx')
     `${progressSeenAt ? progressSeenAt - start : 'never'} ms`
   )
   check('(b) the page never shows "$0.00" while history loads', fakeZero === null, fakeZero || '')
+  check('(f) Analytics shows Loading, not +0 / -0, while history loads', dashPolls > 0 && analyticsZero === null, analyticsZero || `${dashPolls} polls`)
+  check('(f) Earn card does not say "Staking starts at" before the balance is known', dashPolls > 0 && earnTooEarly === null, earnTooEarly || `${dashPolls} polls`)
   check('(c) history rows render within 45 s', rowsAt > 0 && rowsAt - start <= 45_000, rowsAt ? `${rowsAt - start} ms` : 'none')
   check('(shot) 360px screenshot saved while the line is visible', shotTaken, path.join(SHOT_DIR, 'light-progress-360.png'))
   if (historyClicked) check('(history) History opened and shows rows', rowsAt > 0)

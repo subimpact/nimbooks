@@ -101,32 +101,27 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
 }
 
+// The client once created, consensus or not. A timeout keeps it: a retry waits
+// on the same client instead of downloading and dialling a second one.
+let createdClient: Client | null = null
+
 async function startClient(): Promise<Client> {
   // Both steps are skipped when readyClient is already set: getLightClient
   // returns before startClient, so a warm client never reports them again.
-  setLightStatus('downloading')
-  const Nimiq = await import('@nimiq/core')
-  const config = new Nimiq.ClientConfiguration()
-  config.logLevel('warn')
-  const client = await Nimiq.Client.create(config.build())
-  setLightStatus('connecting')
-  try {
-    await withTimeout(client.waitForConsensusEstablished(), CONSENSUS_TIMEOUT_MS)
-  } catch (e) {
-    // Free the half-started client: a retry should dial fresh instead of
-    // leaving a second client connecting in the background.
-    try {
-      await client.disconnectNetwork()
-    } catch {
-      /* best effort */
-    }
-    try {
-      client.free()
-    } catch {
-      /* best effort */
-    }
-    throw e
+  if (!createdClient) {
+    setLightStatus('downloading')
+    const Nimiq = await import('@nimiq/core')
+    const config = new Nimiq.ClientConfiguration()
+    config.logLevel('warn')
+    createdClient = await Nimiq.Client.create(config.build())
   }
+  const client = createdClient
+  setLightStatus('connecting')
+  // Never free() or disconnect the client on a timeout: waitForConsensus is
+  // still pending and holds a borrow on it, so free() throws "attempted to
+  // take ownership of Rust value while it was borrowed" as an uncaught page
+  // error. It keeps connecting in the background and the next call reuses it.
+  await withTimeout(client.waitForConsensusEstablished(), CONSENSUS_TIMEOUT_MS)
   readyClient = client
   return client
 }
