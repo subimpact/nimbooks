@@ -64,6 +64,8 @@ const chain = require(out)
 const {
   setLightFetcherForTests,
   setLightQueryTimeoutForTests,
+  setHistoryRpcFirst,
+  setSampleRpcRetryForTests,
   getNimiqTransactionHistory,
   getLightStatus,
   subscribeLightStatus,
@@ -283,6 +285,57 @@ const slot = (address) => JSON.parse(ls[`nimbooks:txs:${clean(address)}`] || 'nu
   const gGot = await getNimiqTransactionHistory(ADDR, 1000)
   check('(g) historySource = rpc: the RPC walk supplies the rows', gGot.length === 120 && sameHashes(gGot, g), gGot.length)
   check('(g) historySource = rpc: zero light calls', lightCalls.length === 0, lightCalls.length)
+
+  // (g2) The sample wallet reads the public node first: the RPC supplies the
+  // rows, the light client is never called and the progress line stays quiet.
+  reset()
+  const g2 = makeRows(120, 'g2')
+  rpcChains.set(clean(ADDR), g2.map(toRpc))
+  lightRows = makeRows(10, 'g2l').map(toLight)
+  setHistoryRpcFirst(true)
+  const g2Phases = []
+  const g2Unsub = subscribeLightStatus((s) => g2Phases.push(s.phase))
+  const g2Got = await getNimiqTransactionHistory(ADDR, 1000)
+  g2Unsub()
+  check('(g2) sample wallet: the RPC walk supplies the rows', g2Got.length === 120 && sameHashes(g2Got, g2), g2Got.length)
+  check('(g2) sample wallet: zero light calls', lightCalls.length === 0, lightCalls.length)
+  check('(g2) sample wallet: no progress-line steps', g2Phases.length === 0, g2Phases.join(','))
+
+  // (g3) The sample wallet with the public node down: the light client takes over.
+  reset()
+  setSampleRpcRetryForTests(10)
+  const g3 = makeRows(80, 'g3')
+  lightRows = g3.map(toLight)
+  failTxRpc = true
+  const g3Got = await getNimiqTransactionHistory(ADDR, 1000)
+  failTxRpc = false
+  check('(g3) sample wallet, node down: the light client supplies the rows', g3Got.length === 80 && sameHashes(g3Got, g3), g3Got.length)
+  check('(g3) sample wallet, node down: light was called', lightCalls.length > 0, lightCalls.length)
+  check('(g3) sample wallet, node down: the node got one retry first', txCalls().length >= 2, txCalls().length)
+
+  // (g4) The node refuses once (busy) and answers the retry: the sample wallet
+  // gets the RPC rows and never starts the light client.
+  reset()
+  const g4 = makeRows(60, 'g4')
+  rpcChains.set(clean(ADDR), g4.map(toRpc))
+  lightRows = makeRows(10, 'g4l').map(toLight)
+  let g4Refusals = 1
+  const realFetch = global.fetch
+  global.fetch = async (url, init) => {
+    const body = JSON.parse(init.body)
+    if (body.method === 'getTransactionsByAddress' && g4Refusals > 0) {
+      g4Refusals--
+      rpcLog.push({ method: body.method, params: body.params })
+      return { ok: false, status: 429, json: async () => ({}) }
+    }
+    return realFetch(url, init)
+  }
+  const g4Got = await getNimiqTransactionHistory(ADDR, 1000)
+  global.fetch = realFetch
+  setSampleRpcRetryForTests(null)
+  setHistoryRpcFirst(false)
+  check('(g4) sample wallet, node busy once: the RPC retry supplies the rows', g4Got.length === 60 && sameHashes(g4Got, g4), g4Got.length)
+  check('(g4) sample wallet, node busy once: zero light calls', lightCalls.length === 0, lightCalls.length)
 
   // (h) Mapping of raw client rows to NimiqTx.
   reset()

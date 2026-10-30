@@ -14,6 +14,7 @@ import {
   getHubRedirectError,
   getSavedSessionView,
   hasRestorableSession,
+  savedSessionIsDemo,
   restoreWalletSession,
   saveSessionView,
   isDemoMode,
@@ -1692,7 +1693,8 @@ export default function App() {
   // `entry` comes from a learn-page explainer: it lands on that screen, and only
   // a tour entry keeps the tour offer. The plain button passes nothing.
   const connectDemo = async (entry?: SampleEntry) => {
-    warmLightClient()
+    // No light-client warm-up: the sample wallet reads the public node first
+    // (see setHistoryRpcFirst) and starts the client only if that fails.
     setConnecting(true)
     setError(null)
     // A waiting stake link opens the stake panel on entry; the tour offer
@@ -2045,8 +2047,9 @@ export default function App() {
     }
     if (!restoring) return
     // A saved wallet is about to come back: warm the client while the host is
-    // asked, so consensus overlaps the restore instead of following it.
-    warmLightClient()
+    // asked, so consensus overlaps the restore instead of following it. The
+    // sample wallet reads the public node first, so it skips the warm-up.
+    if (!savedSessionIsDemo()) warmLightClient()
     void (async () => {
       let acc: WalletAccount | null = null
       try {

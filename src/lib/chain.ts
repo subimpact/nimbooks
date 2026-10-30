@@ -5,6 +5,7 @@ import {
   getLightBalance,
   getLightTransactions,
   hasLightFetcherForTests,
+  historyRpcFirst,
   HISTORY_SOURCE_KEY,
   isLightReady,
   LIGHT_WALK_PAGE,
@@ -16,6 +17,7 @@ import {
 // store rides along for the loading-progress oracle and the app's component.
 export {
   getLightStatus,
+  setHistoryRpcFirst,
   setLightFetcherForTests,
   setLightQueryTimeoutForTests,
   subscribeLightStatus,
@@ -95,6 +97,18 @@ export async function getNimiqBalance(address: string): Promise<string> {
     // a wrong balance is worse than a slow one. The light client can read the
     // same account from the network; only when it cannot start either does
     // the original RPC error reach the caller.
+    if (historyRpcFirst()) {
+      // The sample wallet: a refusal is usually the node's per-IP allowance
+      // (HTTP 429), which refills in seconds. One retry before starting a
+      // 3.2 MB client, the same rule as its history walk.
+      await new Promise((r) => setTimeout(r, sampleRpcRetryMs))
+      try {
+        const data = await rpcCall('getAccountByAddress', [cleanAddress(address)])
+        return String(data?.balance ?? '0')
+      } catch {
+        /* still refused: the light client below */
+      }
+    }
     try {
       return String(await getLightBalance(address))
     } catch {
@@ -544,6 +558,15 @@ export const TX_WALK_PAGE = 500
 // light client cannot start. localStorage 'nimbooks:historySource' = 'rpc'
 // pins the old path, and the test seam makes Node oracles take the light path
 // without a window.
+// The sample wallet's pause before its one RPC retry (see walkTransactionHistory).
+const SAMPLE_RPC_RETRY_MS = 3000
+let sampleRpcRetryMs = SAMPLE_RPC_RETRY_MS
+
+/** Oracles shorten the sample wallet's RPC retry pause; null restores it. */
+export function setSampleRpcRetryForTests(ms: number | null): void {
+  sampleRpcRetryMs = ms ?? SAMPLE_RPC_RETRY_MS
+}
+
 function lightHistoryPreferred(): boolean {
   try {
     if (localStorage.getItem(HISTORY_SOURCE_KEY) === 'rpc') return false
@@ -654,6 +677,23 @@ async function walkTransactionHistory(
   address: string,
   maxTotal: number
 ): Promise<{ txs: NimiqTx[]; complete: boolean }> {
+  if (lightHistoryPreferred() && historyRpcFirst()) {
+    // The sample wallet: the public node first, the light client only when the
+    // node fails or stops part way. Nothing reaches the progress line unless
+    // the light client is actually used.
+    let rpc = await walkTransactionHistoryRpc(address, maxTotal)
+    if (rpc.complete) return rpc
+    // Usually a busy node (HTTP 429: 20 tokens per 10 s per IP), not a dead
+    // one. Its allowance refills within seconds, while a cold light client
+    // needs 10 to 33 s, so give the node one more try first.
+    await new Promise((r) => setTimeout(r, sampleRpcRetryMs))
+    rpc = await walkTransactionHistoryRpc(address, maxTotal)
+    if (rpc.complete) return rpc
+    const light = await walkLightHistory(address, maxTotal)
+    if (light && light.txs.length >= rpc.txs.length) return light
+    if (!light) setLightStatus(rpc.txs.length ? 'done' : 'failed', rpc.txs.length)
+    return rpc
+  }
   if (lightHistoryPreferred()) {
     const light = await walkLightHistory(address, maxTotal)
     if (light) return light

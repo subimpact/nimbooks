@@ -87,6 +87,29 @@ export function setLightStatus(phase: LightPhase, rows = 0): void {
 let clientPromise: Promise<Client> | null = null
 let readyClient: Client | null = null
 
+// The sample wallet reads history from Nimiq's public node first and turns to
+// the light client only when that node fails. A cold light client takes 10 to
+// 33 s to deliver history against 1 to 5 s from the node, and the sample
+// wallet is the first thing a new visitor (or a judge) opens. Real wallets stay
+// light first. wallet.ts sets this whenever the active provider changes.
+let rpcFirst = false
+
+export function setHistoryRpcFirst(on: boolean): void {
+  rpcFirst = on
+}
+
+// localStorage 'nimbooks:historySource' = 'light' keeps the sample wallet light
+// first too (probes of the progress line, and support checks of the client).
+export function historyRpcFirst(): boolean {
+  if (!rpcFirst) return false
+  try {
+    if (localStorage.getItem(HISTORY_SOURCE_KEY) === 'light') return false
+  } catch {
+    /* storage unavailable: the sample wallet stays RPC first */
+  }
+  return true
+}
+
 // Replaces the client call in oracles. Returns PlainTransactionDetails, the
 // same rows the network would, so mapping runs exactly as in production.
 export type LightFetcherForTests = (
@@ -149,7 +172,9 @@ async function startClient(): Promise<Client> {
  * walk retries and reports the failure to the progress line.
  */
 export function warmLightClient(): void {
-  if (typeof window === 'undefined' || testFetcher) return
+  // The sample wallet only needs the client if the public node fails, and a
+  // warm-up would put "Downloading the Nimiq network client" on its screen.
+  if (typeof window === 'undefined' || testFetcher || historyRpcFirst()) return
   try {
     if (localStorage.getItem(HISTORY_SOURCE_KEY) === 'rpc') return
   } catch {

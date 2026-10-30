@@ -20,7 +20,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     version: '1.41.2',
     date: '2026-10-29',
     items: [
-      'History now loads straight from the Nimiq network through a light client built into NimBooks, so it keeps working when Nimiq\'s public node is busy or down. Transactions from before 19 Nov 2024 still come from the public node',
+      'History now loads straight from the Nimiq network through a light client built into NimBooks, so it keeps working when Nimiq\'s public node is busy or down. Transactions from before 19 Nov 2024 still come from the public node. The sample wallet still opens from the public node, which is faster on a first visit, and switches to the light client if that node is down',
       'While history loads, a progress line shows each step, and your balance, Analytics and Earn card say Loading instead of a $0.00, +0 or "Staking starts at 100 NIM" that isn\'t real',
       "History loads in fewer, bigger requests to Nimiq's public node (500 transactions at a time instead of 50), so it uses half of the node's allowance per phone and \"public node is busy, retrying\" should show up far less often. Most wallets now load in one request",
       'History filters wrap onto a second line on phones instead of sitting in one long row you had to scroll sideways (found in phone test by subimpact)',

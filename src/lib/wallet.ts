@@ -17,6 +17,7 @@ import { canonicalPayload } from './receipt'
 import { broadcastRawTransaction, getNimiqBlockNumber } from './chain'
 import { isInNimiqPay, isMobileDevice, isNimiqPayUserAgent } from './device'
 import { DEMO_WALLET_ADDRESS } from './demoData'
+import { setHistoryRpcFirst } from './lightHistory'
 
 export interface WalletAccount {
   nimiqAddress?: string
@@ -190,6 +191,11 @@ export function getSavedSessionView(): string | null {
   return readSavedSession()?.view ?? null
 }
 
+/** The saved session is the sample wallet (it restores RPC first, so no warm-up). */
+export function savedSessionIsDemo(): boolean {
+  return readSavedSession()?.provider === 'demo'
+}
+
 /**
  * Is there a session `restoreWalletSession()` could bring back? Lets the app
  * render a reconnecting state instead of flashing the connect screen at
@@ -215,6 +221,7 @@ function bytesToHex(bytes: Uint8Array): string {
 async function readPayAccount(): Promise<WalletAccount> {
   const account: WalletAccount = { provider: 'pay', consensus: null }
   activeProvider = 'pay'
+  setHistoryRpcFirst(false)
 
   try {
     nimiqProvider = await init({ timeout: 10000 })
@@ -451,6 +458,7 @@ export async function checkHubRedirect(): Promise<WalletAccount | null> {
         return
       }
       activeProvider = 'hub'
+      setHistoryRpcFirst(false)
       currentAccount = { nimiqAddress: result.address, provider: 'hub', consensus: true }
       picked.account = currentAccount
     },
@@ -495,6 +503,7 @@ export async function connectHub(): Promise<WalletAccount> {
   const result = await getHub().chooseAddress({ appName: 'NimBooks' })
   if (!result?.address) throw new Error('No address returned from Nimiq Hub.')
   activeProvider = 'hub'
+  setHistoryRpcFirst(false)
   currentAccount = { nimiqAddress: result.address, provider: 'hub', consensus: true }
   return currentAccount
 }
@@ -503,6 +512,7 @@ export async function connectHub(): Promise<WalletAccount> {
 // correctly disabled (a demo address is not owned by the user).
 export function connectDemoAccount(address: string): WalletAccount {
   activeProvider = 'demo'
+  setHistoryRpcFirst(true)
   currentAccount = { nimiqAddress: address, provider: 'demo', consensus: null }
   // Per tab, unlike a real wallet: a reload keeps the sample wallet, a fresh
   // visit still starts at the landing screen.
@@ -514,6 +524,7 @@ export function connectDemoAccount(address: string): WalletAccount {
 export function disconnectWallet(): void {
   currentAccount = null
   activeProvider = 'pay'
+  setHistoryRpcFirst(false)
   // Disconnect means disconnect: nothing is left for the next load to restore.
   clearSavedSession()
 }

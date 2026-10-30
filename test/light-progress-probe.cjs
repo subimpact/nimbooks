@@ -48,6 +48,9 @@ const historyRows = (page) => page.locator('section.history .tx')
     // Keep the consent notice out of the way of the progress line.
     try {
       localStorage.setItem('nimbooks:connect-count', 'no')
+      // The sample wallet reads the public node first (v1.41.2); this probe is
+      // about the light client's progress line, so keep the sample on it.
+      localStorage.setItem('nimbooks:historySource', 'light')
     } catch {
       /* storage unavailable */
     }
