@@ -53,7 +53,9 @@ export default function BetaOverview({
   currency,
   currencyFlag,
   onCurrencyPicker,
+  progress,
   balanceHero,
+  balanceLoading,
   totalValueFiat,
   totalValueNote,
   nimBalance,
@@ -74,8 +76,12 @@ export default function BetaOverview({
   currencyFlag?: string
   onCurrencyPicker: () => void
 
+  /** The one-line history progress, above the balance card. */
+  progress?: ReactNode
   /** The hero line, exactly the text the classic balance tile shows. */
   balanceHero: string
+  /** True while the first history read has not answered a real figure yet. */
+  balanceLoading?: boolean
   /** The value under the hero: the total value in the display currency. */
   totalValueFiat: string
   /** Dated-price note ("as of HH:MM") for that value, or null when live. */
@@ -156,6 +162,7 @@ export default function BetaOverview({
 
   return (
     <div className="tw:flex tw:flex-col tw:gap-4">
+      {progress}
       {/* 1. Balance card */}
       <Card data-probe="balance-card">
         <CardHeader>
@@ -180,7 +187,14 @@ export default function BetaOverview({
           </CardAction>
         </CardHeader>
         <CardContent className="tw:flex tw:flex-col tw:gap-2">
-          <p className="tw:m-0 tw:text-3xl tw:font-semibold tw:tracking-tight" data-probe="balance-hero">
+          <p
+            className={
+              balanceLoading
+                ? 'tw:m-0 tw:text-3xl tw:font-semibold tw:tracking-tight tw:text-muted-foreground'
+                : 'tw:m-0 tw:text-3xl tw:font-semibold tw:tracking-tight'
+            }
+            data-probe="balance-hero"
+          >
             {balanceHero}
           </p>
           <p className="tw:m-0 tw:text-sm tw:text-muted-foreground">

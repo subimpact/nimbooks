@@ -2,6 +2,8 @@ import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type
 import './App.css'
 import HeroBackground from './HeroBackground'
 import Iqon from './Iqon'
+import HistoryProgress from './components/HistoryProgress'
+import { warmLightClient } from './lib/lightHistory'
 import { applyTheme, getInitialTheme, type Theme } from './lib/theme'
 import {
   connectWallet,
@@ -12,6 +14,7 @@ import {
   getHubRedirectError,
   getSavedSessionView,
   hasRestorableSession,
+  savedSessionIsDemo,
   restoreWalletSession,
   saveSessionView,
   isDemoMode,
@@ -919,6 +922,10 @@ export default function App() {
   const [lang, setLang] = useState<string>('en')
   const [receipts, setReceipts] = useState<SignedReceipt[]>([])
   const [loading, setLoading] = useState(false)
+  // The address whose first history read has landed this session. The first
+  // read for a different address (or none yet) paints "Loading…" instead of a
+  // $0.00 that only means "not answered yet"; later heartbeats never do.
+  const [historyReadyAddress, setHistoryReadyAddress] = useState<string | null>(null)
   const [signingHash, setSigningHash] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(() => {
     // A redirect login that came back refused or cancelled has nowhere else to
@@ -1654,6 +1661,11 @@ export default function App() {
   }
 
   const connect = async () => {
+    // A no-op on the default node-first path. With historySource = 'light' it
+    // starts the 3.2 MB client download behind the provider handshake. The
+    // landing page itself never warms (a visitor who does not connect pays
+    // nothing).
+    warmLightClient()
     consentFromLanding()
     setCountConsentState(getCountConsent())
     setConnecting(true)
@@ -1677,6 +1689,7 @@ export default function App() {
   }
 
   const connectWithHub = async () => {
+    warmLightClient()
     consentFromLanding()
     setCountConsentState(getCountConsent())
     setHubConnecting(true)
@@ -1696,6 +1709,8 @@ export default function App() {
   // `entry` comes from a learn-page explainer: it lands on that screen, and only
   // a tour entry keeps the tour offer. The plain button passes nothing.
   const connectDemo = async (entry?: SampleEntry) => {
+    // No light-client warm-up: every wallet reads the public node first
+    // (see historyRpcFirst) and starts the client only if that fails.
     setConnecting(true)
     setError(null)
     // A waiting stake link opens the stake panel on entry; the tour offer
@@ -1824,6 +1839,20 @@ export default function App() {
             return { ok: false as const, holding: null }
           }
         )
+        // A full load waits on history, which comes from the light client and
+        // can take 10-25 s on a first visit. The staker record answers in about
+        // a second: show it as soon as it lands, so the stake card and the
+        // Portfolio gate never read "not staked" for a staker while history is
+        // still loading. The join below sets the same record again (a no-op).
+        if (!heartbeat) {
+          void stakingRead.then((staking) => {
+            if (staking.ok) {
+              setStakingHolding((prev) =>
+                sameStakingHolding(prev, staking.holding) ? prev : staking.holding
+              )
+            }
+          })
+        }
         // The wallet's remote HTLC relay history. Nimiq Pay keeps funds in a
         // separate contract address (accounts[1]); the relay hops are the
         // user's real transactions but never show on the basic address list.
@@ -1881,6 +1910,9 @@ export default function App() {
         // statement (which reads the first two) is built once rather than twice.
         const [txs, staking, head] = await Promise.all([txsRead, stakingRead, getCurrentBlock()])
         setNimTxs((prev) => (sameTxList(prev, txs) ? prev : txs))
+        // From here the first read for this address has answered, even if the
+        // answer is a real zero. Later refreshes keep the figures, not "Loading…".
+        setHistoryReadyAddress(cleanAddr(addr))
         if (staking.ok) {
           setStakingHolding((prev) =>
             sameStakingHolding(prev, staking.holding) ? prev : staking.holding
@@ -2071,10 +2103,15 @@ export default function App() {
   useEffect(() => {
     const redirected = getConnectedAccount()
     if (redirected) {
+      warmLightClient()
       void refresh(redirected)
       return
     }
     if (!restoring) return
+    // A saved wallet is about to come back. Only a light-first wallet
+    // (historySource = 'light') warms the client here, so consensus overlaps
+    // the restore; the default node-first path makes this a no-op.
+    if (!savedSessionIsDemo()) warmLightClient()
     void (async () => {
       let acc: WalletAccount | null = null
       try {
@@ -2348,6 +2385,16 @@ export default function App() {
   const effectiveBalanceLuna = (Number(nimBalance) || 0) + htlcLuna
   const offBalanceLuna = htlcLuna + stakedLuna + vestedLuna
   const totalNimLuna = effectiveBalanceLuna + stakedLuna + vestedLuna
+  // No cached rows and the first history read for this address is still
+  // running: the totals below are not known yet. Show a neutral placeholder
+  // rather than a $0.00 / 0 NIM that would read as an empty wallet. Cached rows
+  // and the 10s heartbeat keep today's figures (historyReadyAddress matches).
+  const historyPendingFirstLoad =
+    !!account?.nimiqAddress &&
+    loading &&
+    nimTxs.length === 0 &&
+    historyReadyAddress !== cleanAddr(account.nimiqAddress)
+  const lightLoadActive = !!account?.nimiqAddress && loading
 
   const totalFiat = useMemo(() => {
     let total = 0
@@ -5241,6 +5288,7 @@ export default function App() {
       openStake()
       setUnstakeOpen(true)
     },
+    pending: historyPendingFirstLoad,
   }
   // In beta the earn card is rebuilt on the kit inside BetaOverview; the
   // classic card only ever renders in the classic look.
@@ -5679,6 +5727,13 @@ export default function App() {
         {view === 'dashboard' && (
           <section className="dashboard">
             {!uiBeta && (
+              <HistoryProgress
+                active={lightLoadActive}
+                lang={lang}
+                onRetry={account ? () => void refresh(account) : undefined}
+              />
+            )}
+            {!uiBeta && (
               <div className="stat-row">
               <div className="card total" data-learn="total">
                 <div className="total-header">
@@ -5728,8 +5783,12 @@ export default function App() {
                     </svg>
                   </button>
                 </div>
-                <span className="value">{formatFiat(totalFiat, currency)}</span>
-                {totalFiatSubNote && (
+                {historyPendingFirstLoad ? (
+                  <span className="value dim">Loading…</span>
+                ) : (
+                  <span className="value">{formatFiat(totalFiat, currency)}</span>
+                )}
+                {!historyPendingFirstLoad && totalFiatSubNote && (
                   <span className="sub dim" data-probe="price-asof">
                     {totalFiatSubNote}
                   </span>
@@ -5741,8 +5800,8 @@ export default function App() {
                   NIM balance
                   <InfoIcon text="Your NIM on the Nimiq chain: available, staked, unstaking, and funds held in HTLC swap contracts (shown as in transit)." />
                 </span>
-                {nimBalance === null ? (
-                  <span className="value dim">…</span>
+                {historyPendingFirstLoad || nimBalance === null ? (
+                  <span className="value dim">{historyPendingFirstLoad ? 'Loading…' : '…'}</span>
                 ) : (
                   <>
                     <span className="value">{formatLuna(String(totalNimLuna), lang)} NIM</span>
@@ -5766,9 +5825,10 @@ export default function App() {
             {/* Connected, but the wallet host hasn't caught up and there is
                 nothing on screen yet — say why rather than let it read as an
                 empty wallet. Nothing is gated on this. */}
-            {payConsensus === false && totalNimLuna === 0 && allTxs.length === 0 && (
-              <p className="hint small dim">{PAY_SYNCING_COPY}</p>
-            )}
+            {payConsensus === false &&
+              totalNimLuna === 0 &&
+              allTxs.length === 0 &&
+              !historyPendingFirstLoad && <p className="hint small dim">{PAY_SYNCING_COPY}</p>}
 
             {/* A session restored from before the notice existed never saw it:
                 ask once, and count nothing until answered. */}
@@ -6048,6 +6108,7 @@ export default function App() {
               currency={currency}
               heldContracts={analyticsHeldContracts}
               contractTxs={contractTxsForAnalytics}
+              pending={historyPendingFirstLoad}
             />
           </section>
         )}
@@ -6065,6 +6126,11 @@ export default function App() {
                 </button>
               </div>
             </div>
+            <HistoryProgress
+              active={lightLoadActive}
+              lang={lang}
+              onRetry={account ? () => void refresh(account) : undefined}
+            />
             {/* Single-select filter chips. Counts cover the whole loaded
                 history; a filter with nothing in it is not offered (All always
                 is, so there is always a way back). */}
@@ -6200,7 +6266,6 @@ export default function App() {
                 </strong>
               </p>
             )}
-            {loading && historyTxs.length === 0 && <p className="empty">Loading transactions…</p>}
             {!loading && historyFiltered.length === 0 && (
               <p className="empty">{HISTORY_EMPTY[historyFilter]}</p>
             )}

@@ -25,7 +25,9 @@ const EM_DASH = '\u2014'
 // Environment noise, not page errors: `vite preview` has no Pages Functions, so
 // /api/* answers 404, and CoinGecko rate-limits the sandbox (429, no CORS header).
 // Uncaught exceptions and any other console error still fail the probe.
-const ENV_NOISE = /Cross-Origin|CORS|429|404|Failed to load|XML Parsing Error|NS_ERROR|coingecko|status of 404/i
+// The light client (v1.41.2) dials many Nimiq peers; some are always offline,
+// and the browser logs each failed WebSocket as a console error.
+const ENV_NOISE = /Cross-Origin|CORS|429|404|Failed to load|XML Parsing Error|NS_ERROR|coingecko|status of 404|can.t establish a connection to the server at wss:|connection to wss:.* was interrupted/i
 const noise = []
 
 let pass = 0

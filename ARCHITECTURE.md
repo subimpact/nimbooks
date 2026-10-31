@@ -21,6 +21,7 @@ flowchart LR
 
   subgraph Public["Public data, read-only"]
     RPC["rpc.nimiqwatch.com<br/>balances, history, staker"]
+    LC["Nimiq network peers (wss)<br/>light-client backup for history"]
     V2["v2.nimiqwatch.com<br/>staking reward events"]
     VAL["validators API<br/>fees, reliability, stake"]
     PX["prices.nim.sh · DefiLlama · CoinGecko<br/>crypto prices (tiered)"]
@@ -28,6 +29,7 @@ flowchart LR
     EVM["EVM public RPCs<br/>USDT and native balances"]
   end
   App --> RPC & V2 & VAL & PX & FX & EVM
+  App -.->|only when the node fails| LC
 
   subgraph Edge["nimbooks.subimpact.net (Cloudflare Pages)"]
     FN["Functions<br/>/api/*, /export, /s"]
@@ -132,7 +134,13 @@ exists at all, an unknown rate is stored as NaN, not 0, and the UI says
 "Price unavailable" instead of showing $0.00 for a non-zero balance.
 
 **Balances and history.** The app reads the address's balance, transactions
-and staker record from `rpc.nimiqwatch.com`. Nimiq Pay pays out of an HTLC
+and staker record from `rpc.nimiqwatch.com`. When that node fails twice in a
+row (a busy node usually answers the retry 3 seconds later), the balance and
+history come from a light client built into the app (`@nimiq/core`, loaded only
+then: about 3.2 MB on first use, then 10 to 30 seconds to reach the network),
+so the books keep working through a node outage. The light client sees
+history from the Proof-of-Stake launch (19 Nov 2024) onward; older rows still
+need the node. Nimiq Pay pays out of an HTLC
 contract that it replaces often, so the app finds every contract the
 wallet itself funded, merges their histories into History, and archives each
 settled one on the device (it can no longer change, so it is read once).

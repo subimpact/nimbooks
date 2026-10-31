@@ -190,6 +190,11 @@ export function getSavedSessionView(): string | null {
   return readSavedSession()?.view ?? null
 }
 
+/** The saved session is the sample wallet. */
+export function savedSessionIsDemo(): boolean {
+  return readSavedSession()?.provider === 'demo'
+}
+
 /**
  * Is there a session `restoreWalletSession()` could bring back? Lets the app
  * render a reconnecting state instead of flashing the connect screen at

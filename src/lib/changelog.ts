@@ -20,6 +20,8 @@ export const CHANGELOG: ChangelogEntry[] = [
     version: '1.42.0',
     date: '2026-10-31',
     items: [
+      'History has a second way in: if Nimiq\'s public node is busy or down, NimBooks reads your history straight from the Nimiq network through a light client built into the app, so your books keep working through an outage. On a normal day it still opens from the public node, which takes a few seconds instead of up to half a minute. Transactions from before 19 Nov 2024 always come from the public node',
+      'While history loads, your balance, Analytics and Earn card say Loading instead of a $0.00, +0 or "Staking starts at 100 NIM" that isn\'t real, and when the light client has to step in, a progress line shows each step',
       'The Earn card now says how your validator is doing, read from its own record on the Nimiq chain: active, inactive, jailed or retired. A jailed validator says how long is left and that unstaking waits until the jail ends; a retired one offers to unstake. Your NIM stays yours in every case',
       'The landing now tells one story first: Earn on your NIM. Staking, staking from Nimiq Pay with NIM still on its way, rewards in your books, the yield calculator and crypto tax come first, and the book features fold into a second section behind one button on a phone',
       'The currency tile says 148 currencies, counted from the list itself, instead of 37',

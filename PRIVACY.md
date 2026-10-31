@@ -110,6 +110,7 @@ device calls it.
 | Cloudflare Web Analytics | cookie-free page-view statistics for the site | page, referrer, country, browser; not linked to your wallet |
 | Google Fonts | the app's typefaces | that a page loaded the fonts |
 | `rpc.nimiqwatch.com`, `v2.nimiqwatch.com` | balances, history, staker record, rewards | the Nimiq addresses you look up |
+| Nimiq network peers (only when `rpc.nimiqwatch.com` fails) | the built-in light client reads your balance and history straight from the Nimiq network: it starts at Nimiq's seed nodes and then connects to peers they return, which is why the policy allows any secure WebSocket (`wss:`) | the Nimiq addresses you look up |
 | Validators API | validator fees, reliability, yields | nothing about you |
 | CoinGecko, DefiLlama, `prices.nim.sh` | prices (Nimiq's own price service first, then DefiLlama and CoinGecko as backups) | nothing about you |
 | EVM public RPCs (Polygon, Base, Arbitrum, Optimism, Ethereum) | USDT and native balances | your EVM address |

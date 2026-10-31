@@ -18,6 +18,10 @@
 #   style-src  'unsafe-inline'  React style attributes (validator accent
 #                          colours, chart geometry) are inline styles
 #   connect-src            every origin the app actually calls:
+#                            wss:                        any secure WebSocket, for
+#                          the light client: it starts at Nimiq's seed nodes on
+#                          their own domains, then connects to peers the network
+#                          returns, so peer hosts cannot be listed in advance
 #                            rpc.nimiqwatch.com          balances, history, staker records
 #                            v2.nimiqwatch.com           staking reward events
 #                            api.coingecko.com           fiat rates and daily closes
@@ -36,4 +40,4 @@
 # Deliberately NO frame-ancestors: Nimiq Pay's WebView frames this app, and
 # restricting ancestors would break the mini app it ships as.
 /*
-  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://cloudflareinsights.com https://rpc.nimiqwatch.com https://v2.nimiqwatch.com https://api.coingecko.com https://coins.llama.fi https://prices.nim.sh https://firestore.googleapis.com https://cdn.jsdelivr.net https://open.er-api.com https://validators-api-main.je-cf9.workers.dev https://polygon.drpc.org https://mainnet.base.org https://arb1.arbitrum.io https://mainnet.optimism.io https://ethereum.reth.rs; frame-src https://hub.nimiq.com; object-src 'none'; base-uri 'self'
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' wss: https://cloudflareinsights.com https://rpc.nimiqwatch.com https://v2.nimiqwatch.com https://api.coingecko.com https://coins.llama.fi https://prices.nim.sh https://firestore.googleapis.com https://cdn.jsdelivr.net https://open.er-api.com https://validators-api-main.je-cf9.workers.dev https://polygon.drpc.org https://mainnet.base.org https://arb1.arbitrum.io https://mainnet.optimism.io https://ethereum.reth.rs; frame-src https://hub.nimiq.com; object-src 'none'; base-uri 'self'

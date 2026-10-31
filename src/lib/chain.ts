@@ -1,6 +1,30 @@
 // Nimiq blockchain data client (RPC)
 
 import { CURRENCY_DATA } from './currencyData'
+import {
+  getLightBalance,
+  getLightTransactions,
+  hasLightFetcherForTests,
+  historyRpcFirst,
+  HISTORY_SOURCE_KEY,
+  isLightReady,
+  LIGHT_WALK_PAGE,
+  setLightStatus,
+} from './lightHistory'
+
+// Oracles drive the light path through lightHistory's seam. Re-exported so a
+// bundle of chain.ts can flip it without a second module instance. The status
+// store rides along for the loading-progress oracle and the app's component.
+export {
+  getLightStatus,
+  setHistoryRpcFirst,
+  setLightFetcherForTests,
+  setLightQueryTimeoutForTests,
+  subscribeLightStatus,
+  warmLightClient,
+  type LightPhase,
+  type LightStatus,
+} from './lightHistory'
 
 const RPC_URL = 'https://rpc.nimiqwatch.com'
 
@@ -65,8 +89,32 @@ function cleanAddress(address: string): string {
 }
 
 export async function getNimiqBalance(address: string): Promise<string> {
-  const data = await rpcCall('getAccountByAddress', [cleanAddress(address)])
-  return String(data?.balance ?? '0')
+  try {
+    const data = await rpcCall('getAccountByAddress', [cleanAddress(address)])
+    return String(data?.balance ?? '0')
+  } catch (e) {
+    // The public node is a single point of failure for the balance too, and
+    // a wrong balance is worse than a slow one. The light client can read the
+    // same account from the network; only when it cannot start either does
+    // the original RPC error reach the caller.
+    if (historyRpcFirst()) {
+      // Node first (every wallet): a refusal is usually the node's per-IP allowance
+      // (HTTP 429), which refills in seconds. One retry before starting a
+      // 3.2 MB client, the same rule as its history walk.
+      await new Promise((r) => setTimeout(r, sampleRpcRetryMs))
+      try {
+        const data = await rpcCall('getAccountByAddress', [cleanAddress(address)])
+        return String(data?.balance ?? '0')
+      } catch {
+        /* still refused: the light client below */
+      }
+    }
+    try {
+      return String(await getLightBalance(address))
+    } catch {
+      throw e
+    }
+  }
 }
 
 /**
@@ -544,7 +592,168 @@ export function clearTxCache(address?: string) {
 // for 10 tokens in 2 calls, and most wallets fit in the first call.
 export const TX_WALK_PAGE = 500
 
+// Where history rows come from. Every wallet reads the public node first; the
+// light client (the Nimiq network, read directly from the browser) takes over
+// when the node fails twice. On the light-first path (historySource = 'light')
+// the RPC answers what light clients cannot (rows before the PoS launch, and the
+// tail of a busy address the client truncated to the current epoch).
+// localStorage 'nimbooks:historySource' = 'rpc' pins the node with no light
+// fallback, and the test seam makes Node oracles take the light path without a
+// window.
+// The pause before the one RPC retry (see walkTransactionHistory).
+const SAMPLE_RPC_RETRY_MS = 3000
+let sampleRpcRetryMs = SAMPLE_RPC_RETRY_MS
+
+/** Oracles shorten the sample wallet's RPC retry pause; null restores it. */
+export function setSampleRpcRetryForTests(ms: number | null): void {
+  sampleRpcRetryMs = ms ?? SAMPLE_RPC_RETRY_MS
+}
+
+function lightHistoryPreferred(): boolean {
+  try {
+    if (localStorage.getItem(HISTORY_SOURCE_KEY) === 'rpc') return false
+  } catch {
+    /* storage unavailable: use the default for this environment */
+  }
+  return typeof window !== 'undefined' || hasLightFetcherForTests()
+}
+
+// Merge the light pages with one RPC continuation: drop duplicates (a row can
+// be in both), put the newest first and hold the cap.
+function mergeHistoryRows(newer: NimiqTx[], older: NimiqTx[], maxTotal: number): NimiqTx[] {
+  const seen = new Set<string>()
+  const merged: NimiqTx[] = []
+  for (const t of [...newer, ...older]) {
+    if (t.hash) {
+      if (seen.has(t.hash)) continue
+      seen.add(t.hash)
+    }
+    merged.push(t)
+  }
+  merged.sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
+  return merged.slice(0, maxTotal)
+}
+
+// Light pages newest to oldest, then exactly one RPC continuation. The
+// continuation covers both gaps the light client leaves: pre-PoS rows (it only
+// returns rows since the PoS launch) and the rest of a busy address the client
+// truncated. When the RPC continuation fails the light rows still stand: they
+// are correct, just not the whole history before the PoS launch.
+//
+// `null` means the light client could not even read its first page, and the
+// caller should walk the RPC for the whole address as before. A failure on a
+// later page falls back to that same RPC walk; the light rows gathered so far
+// are kept only when that walk fails too.
+async function walkLightHistory(
+  address: string,
+  maxTotal: number
+): Promise<{ txs: NimiqTx[]; complete: boolean } | null> {
+  const rows: NimiqTx[] = []
+  let cursor: string | null = null
+  let stopped = false
+  const maxPages = Math.max(1, Math.ceil(maxTotal / LIGHT_WALK_PAGE))
+  for (let i = 0; i < maxPages; i++) {
+    let page: NimiqTx[]
+    const want = Math.min(LIGHT_WALK_PAGE, maxTotal - rows.length)
+    try {
+      page = await getLightTransactions(address, want, cursor)
+    } catch (e) {
+      if (i === 0) {
+        console.warn('Light history unavailable, using the public node:', e)
+        return null
+      }
+      console.warn(`Light history stopped at page ${i + 1}:`, e)
+      stopped = true
+      break
+    }
+    if (!page.length) break
+    rows.push(...page)
+    // The progress line counts what the network has delivered so far, not the
+    // merged list: the RPC continuation has its own step.
+    setLightStatus('loading', rows.length)
+    // A short page is the end of what the client has for this address.
+    if (page.length < want || rows.length >= maxTotal) break
+    // The client returns newest→oldest; the oldest hash becomes the cursor.
+    const oldest = page[page.length - 1]
+    if (!oldest?.hash || oldest.hash === cursor) break
+    cursor = oldest.hash
+  }
+  const lightRows = rows.slice(0, maxTotal)
+  if (stopped) {
+    setLightStatus('fallback', lightRows.length)
+    const fallback = await walkTransactionHistoryRpc(address, maxTotal)
+    if (fallback.complete) {
+      setLightStatus('done', fallback.txs.length)
+      return fallback
+    }
+    // A later light page died and the RPC could not finish either. The light
+    // rows already read are still correct, so keep them rather than show
+    // nothing; only an empty result is a real failure.
+    if (!lightRows.length) {
+      setLightStatus('failed')
+      return fallback
+    }
+    setLightStatus('done', lightRows.length)
+    return { txs: lightRows, complete: false }
+  }
+  // One continuation only, even for a light walk that found nothing: an
+  // address may hold pre-PoS history alone. startAt null asks for the newest
+  // RPC rows, which is the same as "everything" for the 1000-row cap.
+  if (lightRows.length < maxTotal) {
+    setLightStatus('older', lightRows.length)
+    const oldestLightHash = lightRows.length ? lightRows[lightRows.length - 1].hash : null
+    try {
+      const older = await getNimiqTransactions(address, maxTotal - lightRows.length, oldestLightHash)
+      const merged = mergeHistoryRows(lightRows, older, maxTotal)
+      setLightStatus('done', merged.length)
+      return { txs: merged, complete: true }
+    } catch (e) {
+      console.warn('History continuation from the public node failed, keeping light rows:', e)
+    }
+  }
+  setLightStatus('done', lightRows.length)
+  return { txs: lightRows, complete: true }
+}
+
 async function walkTransactionHistory(
+  address: string,
+  maxTotal: number
+): Promise<{ txs: NimiqTx[]; complete: boolean }> {
+  if (lightHistoryPreferred() && historyRpcFirst()) {
+    // Every wallet: the public node first, the light client only when the node
+    // fails or stops part way. Nothing reaches the progress line unless the
+    // light client is actually used.
+    let rpc = await walkTransactionHistoryRpc(address, maxTotal)
+    if (rpc.complete) return rpc
+    // Usually a busy node (HTTP 429: 20 tokens per 10 s per IP), not a dead
+    // one. Its allowance refills within seconds, while a cold light client
+    // needs 10 to 33 s, so give the node one more try first.
+    await new Promise((r) => setTimeout(r, sampleRpcRetryMs))
+    rpc = await walkTransactionHistoryRpc(address, maxTotal)
+    if (rpc.complete) return rpc
+    const light = await walkLightHistory(address, maxTotal)
+    if (light && light.txs.length >= rpc.txs.length) return light
+    if (!light) setLightStatus(rpc.txs.length ? 'done' : 'failed', rpc.txs.length)
+    return rpc
+  }
+  if (lightHistoryPreferred()) {
+    const light = await walkLightHistory(address, maxTotal)
+    if (light) return light
+    // The client could not read its first page at all: the public node takes
+    // over the whole walk. The progress line says so, then reports how that
+    // walk ended instead of leaving a stale "connecting".
+    setLightStatus('fallback')
+    const rpc = await walkTransactionHistoryRpc(address, maxTotal)
+    if (!rpc.complete && rpc.txs.length === 0) setLightStatus('failed')
+    else setLightStatus('done', rpc.txs.length)
+    return rpc
+  }
+  // The RPC-only path reports nothing: the progress line belongs to the light
+  // client, and the support switch must behave exactly as it did before it.
+  return walkTransactionHistoryRpc(address, maxTotal)
+}
+
+async function walkTransactionHistoryRpc(
   address: string,
   maxTotal: number
 ): Promise<{ txs: NimiqTx[]; complete: boolean }> {
@@ -604,8 +813,18 @@ export async function refreshTransactionHead(address: string, maxTotal = 1000): 
   try {
     head = await getNimiqTransactions(address, TX_HEAD_PAGE, null)
   } catch {
-    // A failed head fetch never costs the cache: the rows on screen stay.
-    return held
+    // The RPC head is the cheap read, but it is also the one that goes away
+    // with rpc.nimiqwatch.com. If a light client is already in consensus, the
+    // same newest rows can come from the network instead.
+    if (!isLightReady()) {
+      // A failed head fetch never costs the cache: the rows on screen stay.
+      return held
+    }
+    try {
+      head = await getLightTransactions(address, TX_HEAD_PAGE, null)
+    } catch {
+      return held
+    }
   }
   if (head.length === 0) return held
   const heldHashes = new Set(held.map((t) => t.hash))

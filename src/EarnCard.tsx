@@ -21,6 +21,7 @@ export default function EarnCard({
   stakedNim,
   idleNim,
   hasStaker,
+  pending = false,
   rate,
   validatorName,
   compound,
@@ -83,6 +84,8 @@ export default function EarnCard({
   validatorHealth?: ValidatorHealthLine | null
   /** Opens the Stake panel with the unstake flow unfolded (the retired line's way out). */
   onUnstake?: () => void
+  /** The first balance read has not answered yet: say so instead of "Staking starts at 100 NIM". */
+  pending?: boolean
 }) {
   const yearOf = (nim: number) =>
     rate === null ? null : projectStake({ principalNim: nim, annualRateNow: rate, months: 12, compound }).firstYearNim
@@ -151,7 +154,11 @@ export default function EarnCard({
         )}
       </div>
 
-      {hasStaker ? (
+      {pending && !hasStaker ? (
+        <p className="hint small dim" data-probe="earn-pending">
+          Loading your balance…
+        </p>
+      ) : hasStaker ? (
         <>
           <p className="earn-hero">
             {stakedYear === null ? '…' : `≈ ${nimFmt(stakedYear, lang)} NIM`}
