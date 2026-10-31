@@ -7,7 +7,7 @@
 // Badge text. Spelled out rather than built from a version constant so the exact
 // label ships as one string in the bundle (JSX would emit "v" as a separate node).
 // package.json carries the machine-readable version.
-export const APP_VERSION_LABEL = 'v1.42.0'
+export const APP_VERSION_LABEL = 'v1.42.1'
 
 export interface ChangelogEntry {
   version: string
@@ -16,6 +16,13 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '1.42.1',
+    date: '2026-11-01',
+    items: [
+      'On a desktop screen the landing no longer scrolls away from you: the sign-in side stays put while you read through the features, and the feature list stays beside the explainer (suggested by Harsh Yadav)',
+    ],
+  },
   {
     version: '1.42.0',
     date: '2026-10-31',

@@ -5030,124 +5030,126 @@ export default function App() {
     return (
       <div className="app app-landing">
         <HeroBackground />
-        <div className="landing-intro">
-          <header className="hero">
-            <div className="hero-actions">
-              {versionBadge}
-              {mcpChip}
-              <button
-                className="btn-ghost theme-toggle"
-                onClick={toggleTheme}
-                title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-                aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-              >
-                {theme === 'dark' ? '☀️' : '🌙'}
-              </button>
-            </div>
-            <div className="logo">📒</div>
-            <h1>NimBooks</h1>
-            <p className="tagline">Earn on your NIM: stake from Nimiq Pay, even NIM still on its way to you, or from any browser, and every reward lands in your books and tax in your own currency.</p>
-            {publicStats && publicStats.uniqueWallets > 0 && (
-              <div
-                className="hero-metric-pill"
-                role="status"
-                title="Real wallets that connected to NimBooks, and their visits. The sample wallet is not counted."
-              >
-                <span className="live-dot" aria-hidden="true" />
-                <span className="metric-text">
-                  <strong>{publicStats.uniqueWallets.toLocaleString(lang)}</strong> {publicStats.uniqueWallets === 1 ? 'wallet' : 'wallets'} connected
-                  {publicStats.since &&
-                    ` since ${new Date(publicStats.since + 'T00:00:00Z').toLocaleDateString(lang, { month: 'short', day: 'numeric', timeZone: 'UTC' })}`}
-                  {publicStats.totalConnections > 0 && (
-                    // Real spaces either side of the dot: it is aria-hidden, so without them
-                    // screen readers would run the two counts together
-                    <>
-                      {' '}
-                      <span className="metric-sep" aria-hidden="true">·</span>
-                      {' '}
-                      <strong>{publicStats.totalConnections.toLocaleString(lang)}</strong> {publicStats.totalConnections === 1 ? 'visit' : 'visits'}
-                    </>
-                  )}
-                </span>
-              </div>
-            )}
-            {/* Where the visits come from: Pay on phones, the Hub (Nimiq Wallet) in any browser */}
-            {publicStats && publicStats.pay + publicStats.hub > 0 && (
-              <p className="hero-metric-split">
-                {publicStats.pay.toLocaleString(lang)} {publicStats.pay === 1 ? 'visit' : 'visits'} via Nimiq Pay ·{' '}
-                {publicStats.hub.toLocaleString(lang)} via Nimiq Wallet
-              </p>
-            )}
-          </header>
-          <main className="connect-panel">
-            {stakeLinkIntent && (
-              <p className="stake-link-waiting">A stake link is waiting. Connect a wallet to open it.</p>
-            )}
-            {inNimiqPay ? (
-              <>
-                <button className="btn-primary" onClick={connect} disabled={connecting || hubConnecting}>
-                  {connecting ? 'Connecting…' : 'Connect Wallet'}
-                </button>
-                <p className="hint">Connect your Nimiq wallet to start keeping the books.</p>
-                {payConsensus === false && <p className="hint small dim">{PAY_SYNCING_COPY}</p>}
-                <div className="connect-divider">or</div>
-              </>
-            ) : isMobile ? (
-              <>
-                <a
-                  className="btn-primary btn-link"
-                  href={payHandoffHref(stakeLinkIntent)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  Open in Nimiq Pay →
-                </a>
-                <p className="hint">
-                  NimBooks runs inside the Nimiq Pay app, where your NIM wallet lives. Tap it
-                  on your phone.
-                </p>
-                {/* Phone without the app: the Hub login works on mobile browsers
-                    via redirect (lib/wallet.connectHub) — staking included,
-                    since the Hub signing path shipped. */}
+        <div className="landing-intro-col">
+          <div className="landing-intro">
+            <header className="hero">
+              <div className="hero-actions">
+                {versionBadge}
+                {mcpChip}
                 <button
-                  className="btn-ghost-lg"
-                  onClick={connectWithHub}
-                  disabled={connecting || hubConnecting}
+                  className="btn-ghost theme-toggle"
+                  onClick={toggleTheme}
+                  title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+                  aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
                 >
-                  {hubConnecting ? 'Opening Nimiq Hub…' : 'No app? Continue with Nimiq Hub'}
+                  {theme === 'dark' ? '☀️' : '🌙'}
                 </button>
-              </>
-            ) : (
-              <>
-                <button className="btn-primary" onClick={connectWithHub} disabled={connecting || hubConnecting}>
-                  {hubConnecting ? 'Opening Nimiq Hub…' : 'Continue with Nimiq Hub'}
-                </button>
-                <p className="hint">
-                  Sign in with your Nimiq wallet right here in the browser. No app needed.
+              </div>
+              <div className="logo">📒</div>
+              <h1>NimBooks</h1>
+              <p className="tagline">Earn on your NIM: stake from Nimiq Pay, even NIM still on its way to you, or from any browser, and every reward lands in your books and tax in your own currency.</p>
+              {publicStats && publicStats.uniqueWallets > 0 && (
+                <div
+                  className="hero-metric-pill"
+                  role="status"
+                  title="Real wallets that connected to NimBooks, and their visits. The sample wallet is not counted."
+                >
+                  <span className="live-dot" aria-hidden="true" />
+                  <span className="metric-text">
+                    <strong>{publicStats.uniqueWallets.toLocaleString(lang)}</strong> {publicStats.uniqueWallets === 1 ? 'wallet' : 'wallets'} connected
+                    {publicStats.since &&
+                      ` since ${new Date(publicStats.since + 'T00:00:00Z').toLocaleDateString(lang, { month: 'short', day: 'numeric', timeZone: 'UTC' })}`}
+                    {publicStats.totalConnections > 0 && (
+                      // Real spaces either side of the dot: it is aria-hidden, so without them
+                      // screen readers would run the two counts together
+                      <>
+                        {' '}
+                        <span className="metric-sep" aria-hidden="true">·</span>
+                        {' '}
+                        <strong>{publicStats.totalConnections.toLocaleString(lang)}</strong> {publicStats.totalConnections === 1 ? 'visit' : 'visits'}
+                      </>
+                    )}
+                  </span>
+                </div>
+              )}
+              {/* Where the visits come from: Pay on phones, the Hub (Nimiq Wallet) in any browser */}
+              {publicStats && publicStats.pay + publicStats.hub > 0 && (
+                <p className="hero-metric-split">
+                  {publicStats.pay.toLocaleString(lang)} {publicStats.pay === 1 ? 'visit' : 'visits'} via Nimiq Pay ·{' '}
+                  {publicStats.hub.toLocaleString(lang)} via Nimiq Wallet
                 </p>
-              </>
-            )}
-            <button className="btn-ghost-lg" onClick={() => connectDemo()} disabled={connecting || hubConnecting}>
-              Try with a sample wallet
-            </button>
-            {error && <p className="error">{error}</p>}
-            {/* Soft warnings (stale rates, a busy node) land in the toast, which
-                this screen has no room for — a dim note carries them instead. */}
-            {toast && !error && <p className="hint small">{toast}</p>}
-            {/* Informed consent sits beside the buttons that act on it. */}
-            <p className="hint small dim count-notice">
-              {COUNT_NOTICE}{' '}
-              {countConsent === 'no' ? (
+              )}
+            </header>
+            <main className="connect-panel">
+              {stakeLinkIntent && (
+                <p className="stake-link-waiting">A stake link is waiting. Connect a wallet to open it.</p>
+              )}
+              {inNimiqPay ? (
                 <>
-                  This device won't be counted.{' '}
-                  <button className="btn-link-inline" onClick={() => chooseCount('yes')}>Count me</button>
+                  <button className="btn-primary" onClick={connect} disabled={connecting || hubConnecting}>
+                    {connecting ? 'Connecting…' : 'Connect Wallet'}
+                  </button>
+                  <p className="hint">Connect your Nimiq wallet to start keeping the books.</p>
+                  {payConsensus === false && <p className="hint small dim">{PAY_SYNCING_COPY}</p>}
+                  <div className="connect-divider">or</div>
+                </>
+              ) : isMobile ? (
+                <>
+                  <a
+                    className="btn-primary btn-link"
+                    href={payHandoffHref(stakeLinkIntent)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Open in Nimiq Pay →
+                  </a>
+                  <p className="hint">
+                    NimBooks runs inside the Nimiq Pay app, where your NIM wallet lives. Tap it
+                    on your phone.
+                  </p>
+                  {/* Phone without the app: the Hub login works on mobile browsers
+                      via redirect (lib/wallet.connectHub) — staking included,
+                      since the Hub signing path shipped. */}
+                  <button
+                    className="btn-ghost-lg"
+                    onClick={connectWithHub}
+                    disabled={connecting || hubConnecting}
+                  >
+                    {hubConnecting ? 'Opening Nimiq Hub…' : 'No app? Continue with Nimiq Hub'}
+                  </button>
                 </>
               ) : (
-                <button className="btn-link-inline" onClick={() => chooseCount('no')}>Don't count me</button>
+                <>
+                  <button className="btn-primary" onClick={connectWithHub} disabled={connecting || hubConnecting}>
+                    {hubConnecting ? 'Opening Nimiq Hub…' : 'Continue with Nimiq Hub'}
+                  </button>
+                  <p className="hint">
+                    Sign in with your Nimiq wallet right here in the browser. No app needed.
+                  </p>
+                </>
               )}
-            </p>
-          </main>
-          <PhoneQr />
+              <button className="btn-ghost-lg" onClick={() => connectDemo()} disabled={connecting || hubConnecting}>
+                Try with a sample wallet
+              </button>
+              {error && <p className="error">{error}</p>}
+              {/* Soft warnings (stale rates, a busy node) land in the toast, which
+                  this screen has no room for — a dim note carries them instead. */}
+              {toast && !error && <p className="hint small">{toast}</p>}
+              {/* Informed consent sits beside the buttons that act on it. */}
+              <p className="hint small dim count-notice">
+                {COUNT_NOTICE}{' '}
+                {countConsent === 'no' ? (
+                  <>
+                    This device won't be counted.{' '}
+                    <button className="btn-link-inline" onClick={() => chooseCount('yes')}>Count me</button>
+                  </>
+                ) : (
+                  <button className="btn-link-inline" onClick={() => chooseCount('no')}>Don't count me</button>
+                )}
+              </p>
+            </main>
+            <PhoneQr />
+          </div>
         </div>
         <Landing onSampleEntry={connectDemo} busy={connecting || hubConnecting} />
         {changelogModal}

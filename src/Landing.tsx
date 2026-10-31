@@ -96,6 +96,32 @@ export default function Landing({ onSampleEntry, busy }: LandingProps) {
   // earning. Desktop shows both groups at once (see the render below).
   const [booksOpen, setBooksOpen] = useState(false)
 
+  // Desktop only: keep the landing's left column (hero, connect panel, phone
+  // code) on screen while the explorer scrolls beside it. A fixed top would
+  // hide the bottom of a column taller than the viewport forever, so compute
+  // min(16px, viewport height - column height - 16px). A short column pins at
+  // 16px; a tall one pins with its bottom 16px above the fold, which keeps the
+  // connect panel fully visible. The sticky element is still confined to grid
+  // row 1, so it stops before the full-width strips underneath.
+  useEffect(() => {
+    if (!desktop) return
+    const intro = document.querySelector<HTMLElement>('.landing-intro')
+    if (!intro) return
+    const update = () => {
+      const height = intro.getBoundingClientRect().height
+      intro.style.setProperty('--intro-sticky-top', `${Math.min(16, window.innerHeight - height - 16)}px`)
+    }
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(intro)
+    window.addEventListener('resize', update)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', update)
+      intro.style.removeProperty('--intro-sticky-top')
+    }
+  }, [desktop])
+
   // Back, forward and a hand-edited hash move the explainer with them.
   useEffect(() => {
     const sync = () => setOpenSlug(slugNow())
