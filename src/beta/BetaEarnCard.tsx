@@ -11,10 +11,12 @@
 // (lib/chain, lib/yieldCalc) and the beta kit.
 
 import { useEffect, useRef, useState } from 'react'
-import { ChevronDownIcon } from 'lucide-react'
+import { ChevronDownIcon, CheckIcon } from 'lucide-react'
 import { formatFiat, type CurrencyCode } from '../lib/chain'
 import { projectStake } from '../lib/yieldCalc'
 import type { StakeTerms } from '../lib/earnTerms'
+import { VALIDATOR_HEALTH_INFO, type ValidatorHealthLine } from '../lib/validatorHealth'
+import InfoIcon from '../InfoIcon'
 import { Button } from './components/ui/button'
 import { CardContent } from './components/ui/card'
 import {
@@ -49,6 +51,8 @@ export default function BetaEarnCard({
   restakeGainNim = null,
   inNimiqPay = false,
   reminder = null,
+  validatorHealth = null,
+  onUnstake,
 }: {
   /** Active stake, NIM. */
   stakedNim: number
@@ -86,6 +90,10 @@ export default function BetaEarnCard({
   inNimiqPay?: boolean
   /** Weekly restake reminder (.ics and Google Calendar link). */
   reminder?: { ics: string; googleUrl: string } | null
+  /** The delegated validator's own chain record, as one line. Null when silent. */
+  validatorHealth?: ValidatorHealthLine | null
+  /** Opens the Stake panel with the unstake flow unfolded (the retired line's way out). */
+  onUnstake?: () => void
 }) {
   const yearOf = (nim: number) =>
     rate === null ? null : projectStake({ principalNim: nim, annualRateNow: rate, months: 12, compound }).firstYearNim
@@ -152,6 +160,32 @@ export default function BetaEarnCard({
             {nimFmt(stakedNim, lang)} NIM staked{validatorName ? ` with ${validatorName}` : ''}
             {stakedYear !== null && fiat(stakedYear) ? ` · ${fiat(stakedYear).trim()} a year at today's price` : ''}
           </p>
+          {/* The pool's own chain record, the same line the classic card shows. */}
+          {validatorHealth && (
+            <p
+              data-probe="earn-health"
+              data-health={validatorHealth.status}
+              className={
+                validatorHealth.tone === 'warn'
+                  ? 'tw:m-0 tw:flex tw:flex-wrap tw:items-baseline tw:gap-1.5 tw:text-sm tw:font-semibold tw:text-primary'
+                  : 'tw:m-0 tw:flex tw:flex-wrap tw:items-baseline tw:gap-1.5 tw:text-sm tw:text-muted-foreground'
+              }
+            >
+              {validatorHealth.tone === 'ok' && (
+                <CheckIcon
+                  aria-hidden="true"
+                  className="tw:size-3.5 tw:shrink-0 tw:self-center tw:text-emerald-600 tw:dark:text-emerald-400"
+                />
+              )}
+              <span className="tw:min-w-0" data-probe="earn-health-text">{validatorHealth.text}</span>
+              <InfoIcon text={VALIDATOR_HEALTH_INFO} />
+              {validatorHealth.unstake && onUnstake && (
+                <button type="button" className={reminderLinkClass} onClick={onUnstake}>
+                  Unstake
+                </button>
+              )}
+            </p>
+          )}
           {/* Why to come back: what was earned since the previous visit. A
               reward history still arriving (or a quiet week, 0 NIM) says
               nothing rather than something wrong. */}

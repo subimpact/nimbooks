@@ -58,7 +58,7 @@ export const FEATURES: FeatureDef[] = [
     steps: [
       {
         title: 'Start from the Earn card',
-        body: 'The first card on Overview shows what your NIM earns a year, or could earn if you staked it. See the maths opens a calculator; Start earning (or the leaf icon in the top bar) opens the Stake panel.',
+        body: 'The first card on Overview shows what your NIM earns a year, or could earn if you staked it. See the maths opens a calculator; Start earning (or the leaf icon in the top bar) opens the Stake panel. The card also says whether your validator is active, inactive, jailed or retired, read from its own record on chain.',
       },
       {
         title: 'Pick a validator',

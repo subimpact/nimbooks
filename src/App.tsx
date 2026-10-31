@@ -63,6 +63,7 @@ import {
   getNimiqTransactionHistory,
   refreshTransactionHead,
   fetchStakingHolding,
+  fetchValidatorHealth,
   sameStakingHolding,
   sameTxList,
   getNimiqExtendedTransactionHistory,
@@ -102,10 +103,17 @@ import {
   type HtlcHolding,
   type StakingActionKind,
   type StakingHolding,
+  type ValidatorHealthRecord,
   type ValidatorInfo,
   type VestingHolding,
 } from './lib/chain'
 import { planUnstake } from './lib/unstakePlan'
+import {
+  classifyValidatorHealth,
+  validatorHealthLine,
+  VALIDATOR_HEALTH_INFO,
+  type ValidatorHealth,
+} from './lib/validatorHealth'
 import { readFxCached, type PriceChainResult } from './lib/prices'
 import { isArchivedContract, ownFundedContracts, syncContractArchive } from './lib/payContracts'
 import { isValidNimiqAddress } from './lib/portfolio'
@@ -809,6 +817,13 @@ export default function App() {
   // holdings below are still current and the sweeps can be skipped entirely.
   const contractSweepRef = useRef<string | null>(null)
   const [stakingHolding, setStakingHolding] = useState<StakingHolding | null>(null)
+  // Health of the validator holding this stake, read from its own chain record
+  // (lib/validatorHealth). Keyed by the validator address, so a delegation
+  // change can never show the previous pool's answer.
+  const [stakeValidatorHealth, setStakeValidatorHealth] = useState<{
+    address: string
+    health: ValidatorHealth
+  } | null>(null)
   // Portfolio access grant for this wallet (see lib/stakeGate.ts). The cleanup
   // runs on address change and on disconnect, so a late lookup for a previous
   // wallet is dropped and the flag falls back to false.
@@ -1710,6 +1725,45 @@ export default function App() {
     }
   }
 
+  // One read of the delegated validator's own chain record (active, inactive,
+  // jailed, retired). Shared by the refresh below (first load, manual refresh,
+  // after a confirmed staking tx) and the every-sixth-tick effect further
+  // down, so it needs no timer of its own.
+  const readValidatorHealth = (validatorAddress: string, atBlock: number | null) => {
+    const flat = cleanAddr(validatorAddress)
+    if (!flat) {
+      setStakeValidatorHealth(null)
+      return
+    }
+    void (async () => {
+      let record: ValidatorHealthRecord | null = null
+      let failed = false
+      let block = atBlock && atBlock > 0 ? atBlock : 0
+      try {
+        const [rec, head] = await Promise.all([
+          fetchValidatorHealth(flat),
+          block > 0 ? Promise.resolve<number | null>(block) : getCurrentBlock(),
+        ])
+        record = rec
+        if (block <= 0 && head !== null && head > 0) block = head
+      } catch (e) {
+        failed = true
+        console.warn('Validator health lookup failed:', e)
+      }
+      setStakeValidatorHealth((prev) => {
+        if (failed) {
+          // A failed read proves nothing: keep whatever is on screen and mark
+          // it stale (a stale ok renders as "could not check"). With no answer
+          // behind it there is nothing to keep, and nothing to say either.
+          return prev && prev.address === flat
+            ? { address: flat, health: { ...prev.health, stale: true } }
+            : { address: flat, health: classifyValidatorHealth(null, 0) }
+        }
+        return { address: flat, health: classifyValidatorHealth(record, block) }
+      })
+    })()
+  }
+
   // `heartbeat` marks the 10s auto-refresh: it reads only what is new (see
   // refreshTransactionHead) and keeps the rates current. Every other caller gets
   // the full read, as before.
@@ -1838,6 +1892,12 @@ export default function App() {
         // (see wallet.getCurrentBlock). Best effort: an unknown height keeps
         // the previous one and the 10s auto-refresh picks it up next pass.
         if (head !== null) setCurrentBlock(head)
+        // The delegated pool's own record. Read on every full pass (first load,
+        // manual refresh, the refresh behind a confirmed staking tx); the 10s
+        // heartbeat reads it every sixth tick instead, in the effect below.
+        if (!heartbeat && staking.ok && freshHolding?.delegation) {
+          readValidatorHealth(freshHolding.delegation, head)
+        }
         // Pending unstake resolution: the marker clears when the staker record
         // shows the retire took effect (inactive balance appeared, or active
         // dropped by the pending amount) — the chain flip is the only real
@@ -3131,6 +3191,11 @@ export default function App() {
     () => validators.find((v) => cleanAddr(v.address) === lockedDelegation) ?? null,
     [validators, lockedDelegation]
   )
+  // The delegated pool's health, only while the read is for the pool the stake
+  // is actually with. One line for every screen that shows it.
+  const stakeHealth =
+    lockedDelegation && stakeValidatorHealth?.address === lockedDelegation ? stakeValidatorHealth.health : null
+  const stakeHealthLine = validatorHealthLine(stakeHealth, currentValidator?.name ?? null)
   // The panel finishes in the same two beats as the send sheet: a confirming
   // step while the tx settles on chain, then a card that waits for Done. Both
   // replace the form — mixing a live slider into "confirming on chain" is what
@@ -4148,6 +4213,21 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [account?.nimiqAddress, tour.phase])
 
+  // The delegated validator's record rides the heartbeat, the same rule the
+  // Portfolio's extra addresses use: one read every sixth tick, no timer of its
+  // own. The tour runs on a static snapshot, so it is paused there too. A
+  // cleared delegation drops the answer rather than keeping the old pool's.
+  useEffect(() => {
+    if (!lockedDelegation) {
+      setStakeValidatorHealth(null)
+      return
+    }
+    if (tour.phase === 'active' || refreshTick === 0) return
+    if (refreshTick % 6 !== 0) return
+    readValidatorHealth(lockedDelegation, currentBlock)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshTick, lockedDelegation, currentBlock, tour.phase])
+
   const makeReceipt = async (tx: NimiqTx) => {
     if (!account?.nimiqAddress) return
     if (receipts.some((r) => r.txHash === tx.hash)) {
@@ -5154,6 +5234,12 @@ export default function App() {
     restakeGainNim: restakeGain,
     inNimiqPay: inNimiqPay,
     reminder: reminder,
+    validatorHealth: stakeHealthLine,
+    onUnstake: () => {
+      // The panel's own unstake toggle: open the panel, then unfold the box.
+      openStake()
+      setUnstakeOpen(true)
+    },
   }
   // In beta the earn card is rebuilt on the kit inside BetaOverview; the
   // classic card only ever renders in the classic look.
@@ -7198,10 +7284,34 @@ export default function App() {
                     {currentValidator?.name ??
                       (lockedDelegation ? `${lockedDelegation.slice(0, 12)}…` : 'unknown validator')}
                   </span>
-                  {currentValidator && currentValidator.reliability === null && (
-                    <p className="hint small warn">
-                      This validator is not producing rewards right now.
+                  {/* The chain record is the precise answer, so it replaces the
+                      API reading when the pool is jailed, inactive or
+                      retired. An ok (or unread) record leaves the old warning
+                      to speak. */}
+                  {stakeHealthLine && stakeHealthLine.tone === 'warn' ? (
+                    <p className="hint small warn stake-health">
+                      {stakeHealthLine.text}
+                      <InfoIcon text={VALIDATOR_HEALTH_INFO} />
                     </p>
+                  ) : (
+                    <>
+                      {stakeHealthLine && (
+                        <p className="hint small stake-health">
+                          {stakeHealthLine.tone === 'ok' && (
+                            <span className="stake-health-tick" aria-hidden="true">
+                              ✓{' '}
+                            </span>
+                          )}
+                          {stakeHealthLine.text}
+                          <InfoIcon text={VALIDATOR_HEALTH_INFO} />
+                        </p>
+                      )}
+                      {currentValidator && currentValidator.reliability === null && (
+                        <p className="hint small warn">
+                          This validator is not producing rewards right now.
+                        </p>
+                      )}
+                    </>
                   )}
                 </>
               ) : (

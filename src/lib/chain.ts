@@ -278,6 +278,47 @@ export async function getStakingHolding(ownAddress: string): Promise<StakingHold
   }
 }
 
+// --- Validator health (the record of the validator holding the stake) ---
+
+/**
+ * The validator fields that say whether the pool is still working, straight
+ * from `getValidatorByAddress`. Kept to those three: lib/validatorHealth owns
+ * the rules (retired, jail window, inactivity), this is only the read.
+ */
+export interface ValidatorHealthRecord {
+  address: string
+  inactivityFlag: number | null
+  retired: boolean
+  jailedFrom: number | null
+}
+
+/**
+ * One validator's own record. `null` means the RPC says this address is not a
+ * validator any more ("validator record not found"), which is an answer.
+ * A throw means the lookup itself failed, so the answer is unknown: callers
+ * keep the last record they had (see App.tsx), they never read a throw as ok.
+ */
+export async function fetchValidatorHealth(
+  validatorAddress: string
+): Promise<ValidatorHealthRecord | null> {
+  let data: any
+  try {
+    data = await rpcCall('getValidatorByAddress', [cleanAddress(validatorAddress)])
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    // The RPC answers an unknown address with an error, not an empty record.
+    if (/no validator|validator.{0,40}(not found|does not exist)|not a validator/i.test(msg)) return null
+    throw e
+  }
+  if (!data || typeof data !== 'object') return null
+  return {
+    address: String(data.address ?? cleanAddress(validatorAddress)),
+    inactivityFlag: typeof data.inactivityFlag === 'number' ? data.inactivityFlag : null,
+    retired: data.retired === true,
+    jailedFrom: typeof data.jailedFrom === 'number' ? data.jailedFrom : null,
+  }
+}
+
 // --- Vesting holdings (time-locked funds released on a schedule) ---
 
 export interface VestingHolding {

@@ -4169,6 +4169,50 @@ a.btn-ghost.btn-link {
   font-size: 13px;
   color: var(--text);
 }
+/* The validator's own chain record, under "X NIM staked with <pool>": muted
+   when the pool is fine, amber when it is inactive, jailed or retired. */
+.earn-health {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.earn-health--ok,
+.earn-health--muted {
+  color: var(--muted);
+}
+.earn-health--warn {
+  color: var(--accent);
+  font-weight: 600;
+}
+.earn-health-tick {
+  color: var(--green);
+  font-weight: 700;
+}
+.earn-health .info-wrap {
+  align-self: center;
+}
+.earn-health .btn-link-inline {
+  font-size: 13px;
+}
+
+/* The same line in the Stake panel's "Your stake" block. */
+.stake-health {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+}
+.stake-health .info-wrap {
+  align-self: center;
+}
+.stake-health-tick {
+  color: var(--green);
+  font-weight: 700;
+}
 /* Per-validator earnings, collapsed by default. */
 .earn-validators {
   margin-top: 10px;

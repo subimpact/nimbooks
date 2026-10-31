@@ -11,6 +11,8 @@ import { useEffect, useRef, useState } from 'react'
 import { formatFiat, type CurrencyCode } from './lib/chain'
 import { projectStake } from './lib/yieldCalc'
 import type { StakeTerms } from './lib/earnTerms'
+import { VALIDATOR_HEALTH_INFO, type ValidatorHealthLine } from './lib/validatorHealth'
+import InfoIcon from './InfoIcon'
 
 const nimFmt = (n: number, lang: string, max = 2) => n.toLocaleString(lang, { maximumFractionDigits: max })
 const pct = (r: number, lang: string) => (r * 100).toLocaleString(lang, { maximumFractionDigits: 2 })
@@ -38,6 +40,8 @@ export default function EarnCard({
   restakeGainNim = null,
   inNimiqPay = false,
   reminder = null,
+  validatorHealth = null,
+  onUnstake,
 }: {
   /** Active stake, NIM. */
   stakedNim: number
@@ -75,6 +79,10 @@ export default function EarnCard({
   inNimiqPay?: boolean
   /** Weekly restake reminder (.ics and Google Calendar link). */
   reminder?: { ics: string; googleUrl: string } | null
+  /** The delegated validator's own chain record, as one line. Null when silent. */
+  validatorHealth?: ValidatorHealthLine | null
+  /** Opens the Stake panel with the unstake flow unfolded (the retired line's way out). */
+  onUnstake?: () => void
 }) {
   const yearOf = (nim: number) =>
     rate === null ? null : projectStake({ principalNim: nim, annualRateNow: rate, months: 12, compound }).firstYearNim
@@ -153,6 +161,28 @@ export default function EarnCard({
             {nimFmt(stakedNim, lang)} NIM staked{validatorName ? ` with ${validatorName}` : ''}
             {stakedYear !== null && fiat(stakedYear) ? ` · ${fiat(stakedYear).trim()} a year at today's price` : ''}
           </p>
+          {/* The pool's own chain record: active, inactive, jailed or retired.
+              One line, so a staker learns a bad state without hunting. */}
+          {validatorHealth && (
+            <p
+              className={`earn-health earn-health--${validatorHealth.tone}`}
+              data-probe="earn-health"
+              data-health={validatorHealth.status}
+            >
+              {validatorHealth.tone === 'ok' && (
+                <span className="earn-health-tick" aria-hidden="true">
+                  ✓
+                </span>
+              )}
+              <span className="earn-health-text">{validatorHealth.text}</span>
+              <InfoIcon text={VALIDATOR_HEALTH_INFO} />
+              {validatorHealth.unstake && onUnstake && (
+                <button className="btn-link-inline" onClick={onUnstake}>
+                  Unstake
+                </button>
+              )}
+            </p>
+          )}
           {/* Why to come back: what was earned since the previous visit. A
               reward history still arriving (or a quiet week, 0 NIM) says
               nothing rather than something wrong. */}
