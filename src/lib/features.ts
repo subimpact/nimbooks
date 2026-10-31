@@ -6,6 +6,11 @@
 // names). If a feature changes, change it here and the landing follows.
 // Copy rules: UK English, short sentences, no em-dashes, and no jargon without
 // a one-line explanation.
+//
+// Every entry carries a `group`: 'earn' is the landing's first story, 'books'
+// the second. The landing renders them as two sections, Earn first.
+
+import { CURRENCY_DATA } from './currencyData'
 
 /** The app views a sample-wallet entry can open on (mirrors App.tsx's View). */
 export type FeatureView = 'dashboard' | 'history' | 'receipts' | 'request' | 'export'
@@ -30,6 +35,12 @@ export interface FeatureDef {
   oneLiner: string
   /** An emoji, shown on the phone cards and in the desktop list. */
   icon: string
+  /**
+   * Which of the landing's two stories the feature belongs to: 'earn' (NIM
+   * that pays, first and visually primary) or 'books' (everything the wallet
+   * keeps for you, the second section).
+   */
+  group: 'earn' | 'books'
   /** Where the feature works, e.g. "Nimiq Pay and browser". */
   availability: string
   /** Three or four steps. */
@@ -48,12 +59,20 @@ export interface SampleEntry extends FeatureTry {
 
 const PAY_AND_BROWSER = 'Nimiq Pay and browser'
 
+/**
+ * How many display currencies the picker offers. Counted from the list itself,
+ * so the tile can never drift from the app (it said 37 long after the list had
+ * grown; the README's 148 is the same number).
+ */
+const CURRENCY_COUNT = CURRENCY_DATA.length
+
 export const FEATURES: FeatureDef[] = [
   {
     slug: 'staking',
     title: 'Staking',
     oneLiner: 'See what your NIM earns, stake it with a validator, and follow every reward.',
     icon: '🌱',
+    group: 'earn',
     availability: PAY_AND_BROWSER,
     steps: [
       {
@@ -88,10 +107,114 @@ export const FEATURES: FeatureDef[] = [
     tryView: { view: 'dashboard', open: 'stake' },
   },
   {
+    slug: 'pay-stake',
+    title: 'Stake from Nimiq Pay',
+    oneLiner: 'Even NIM still on its way to your wallet can be staked.',
+    icon: '📲',
+    group: 'earn',
+    availability: PAY_AND_BROWSER,
+    steps: [
+      {
+        title: 'Open the Stake panel',
+        body: 'Tap Start earning on the Earn card, the leaf icon in the top bar, or Unstake inside the panel. Nimiq Pay signs the stake, so the NIM never leaves your wallet.',
+      },
+      {
+        title: 'Count the NIM still in transit',
+        body: 'Nimiq Pay routes transfers through swap contracts (HTLCs). While the NIM sits in one it is not in your basic balance, but the stake slider still counts it: the wallet redeems the contract as part of the stake.',
+      },
+      {
+        title: 'Watch it land',
+        body: 'Nimiq mines in about a second. The panel waits until the stake is on chain, then the Earn card shows it earning.',
+      },
+    ],
+    behindTheScenes: [
+      'On chain: the stake is a transaction to the staking contract. When the NIM is in a swap contract, the wallet redeems that first.',
+      'In Nimiq Pay: the wallet signs and sends both steps. NimBooks shows what it can see.',
+      'In a browser: the Nimiq Hub signs the stake instead.',
+    ],
+    goodToKnow: [
+      'NIM in a swap contract counts as yours, so it can be staked or sent: the wallet redeems the contract when it signs.',
+      'A first stake starts at 100 NIM. Adding to an existing stake has no minimum.',
+      'Unstaking is three steps: deactivate, retire, withdraw. The balance banner walks them.',
+    ],
+    tryView: { view: 'dashboard', open: 'stake' },
+  },
+  {
+    slug: 'rewards',
+    title: 'Rewards in your books',
+    oneLiner: 'Staking rewards show up in History, with what each validator paid.',
+    icon: '🪙',
+    group: 'earn',
+    availability: PAY_AND_BROWSER,
+    steps: [
+      {
+        title: 'Find the reward rows',
+        body: 'History has a Rewards chip with its own count and total. Rewards arrive as daily totals, so a long stake stays readable.',
+      },
+      {
+        title: 'See what each pool paid',
+        body: 'The Earn card has Earned per validator: one row per pool, with what it paid and the first and last day it paid.',
+      },
+      {
+        title: 'Count them as income',
+        body: 'The tax report values each reward on the day it arrived, in your own currency.',
+      },
+    ],
+    behindTheScenes: [
+      'On chain: your transfers. Rewards come from Nimiq public staking rewards data, which is not in the transaction index.',
+      'On this device: reward rows are cached, so the books open fast next time.',
+      'Never leaves your wallet: nothing. Reading rewards never asks you to sign.',
+    ],
+    goodToKnow: [
+      "Rewards arrive as daily totals, and today's appear tomorrow.",
+      'A pool that pays into your wallet gets a one-tap restake, and the restaked rewards are rewards too.',
+      'Reward history reaches back to January 2025 on the public rewards service.',
+    ],
+    tryView: { view: 'history' },
+  },
+  {
+    slug: 'yield-calculator',
+    title: 'Yield calculator',
+    oneLiner: 'Any amount, any pool, 1, 3 or 5 years, month by month.',
+    icon: '🔢',
+    group: 'earn',
+    availability: PAY_AND_BROWSER,
+    steps: [
+      {
+        title: 'Open See the maths',
+        body: 'The Earn card has the button. It opens the calculator with your own amount and pool already filled in.',
+      },
+      {
+        title: 'Change the amount and the pool',
+        body: 'Type any amount, or pick a pool from the live list. Leave it on the typical pool to see the median rate of the producing validators.',
+      },
+      {
+        title: 'Pick a horizon',
+        body: 'One, three or five years. The chart shows rewards month by month, and the table under it gives the same figures year by year.',
+      },
+      {
+        title: 'Stake from the calculator',
+        body: 'The stake button carries the amount into the Stake panel. It never offers NIM that is already staking.',
+      },
+    ],
+    behindTheScenes: [
+      'On this device: the projection runs in your browser.',
+      'Same maths: the reward formula is ported from the official Nimiq wallet, so its numbers line up with the wallet\'s own calculator.',
+      'On chain: the pool list and its yields come from Nimiq public validator data.',
+    ],
+    goodToKnow: [
+      'Restaking pools compound. A pool that pays into your wallet does not, unless you restake by hand.',
+      'Issuance falls a little every year, so the second year pays less than the first.',
+      'A projection, not a promise: the rate depends on the network stake and the pool fee.',
+    ],
+    tryView: { view: 'dashboard', target: 'earn' },
+  },
+  {
     slug: 'balance',
-    title: 'Balance in 37 currencies',
+    title: `Balance in ${CURRENCY_COUNT} currencies`,
     oneLiner: 'Your NIM balance, with its value in the currency you pick.',
     icon: '💰',
+    group: 'books',
     availability: PAY_AND_BROWSER,
     steps: [
       {
@@ -104,7 +227,7 @@ export const FEATURES: FeatureDef[] = [
       },
       {
         title: 'Change the currency',
-        body: 'Tap the currency chip with the flag and pick from 37 currencies.',
+        body: `Tap the currency chip with the flag and pick from ${CURRENCY_COUNT} currencies.`,
       },
       {
         title: 'See EVM assets',
@@ -128,6 +251,7 @@ export const FEATURES: FeatureDef[] = [
     title: 'History and labels',
     oneLiner: 'Every transaction, labelled, with the note it carried.',
     icon: '📋',
+    group: 'books',
     availability: PAY_AND_BROWSER,
     steps: [
       {
@@ -164,6 +288,7 @@ export const FEATURES: FeatureDef[] = [
     title: 'Analytics',
     oneLiner: 'Daily net flow, top counterparties and your balance over time.',
     icon: '📈',
+    group: 'books',
     availability: PAY_AND_BROWSER,
     steps: [
       {
@@ -200,6 +325,7 @@ export const FEATURES: FeatureDef[] = [
     title: 'Send and receive',
     oneLiner: 'Send NIM with a note, or show your address as a QR code.',
     icon: '💸',
+    group: 'books',
     availability: PAY_AND_BROWSER,
     steps: [
       {
@@ -236,6 +362,7 @@ export const FEATURES: FeatureDef[] = [
     title: 'Payment requests',
     oneLiner: 'A payment link with an amount and a reference. It marks itself paid when the money lands.',
     icon: '📨',
+    group: 'books',
     availability: PAY_AND_BROWSER,
     steps: [
       {
@@ -272,6 +399,7 @@ export const FEATURES: FeatureDef[] = [
     title: 'Signed receipts',
     oneLiner: 'A signed proof of payment that anyone can check on a public page.',
     icon: '🧾',
+    group: 'books',
     availability: PAY_AND_BROWSER,
     steps: [
       {
@@ -308,6 +436,7 @@ export const FEATURES: FeatureDef[] = [
     title: 'Cashlinks',
     oneLiner: 'Put NIM inside a link. Whoever has the link can claim it.',
     icon: '🔗',
+    group: 'books',
     availability: PAY_AND_BROWSER,
     steps: [
       {
@@ -344,6 +473,7 @@ export const FEATURES: FeatureDef[] = [
     title: 'Yearly statements',
     oneLiner: 'Opening and closing balance, what came in, what went out and the fees, for each year.',
     icon: '📅',
+    group: 'books',
     availability: PAY_AND_BROWSER,
     steps: [
       {
@@ -380,6 +510,7 @@ export const FEATURES: FeatureDef[] = [
     title: 'Crypto tax',
     oneLiner: 'Realised gains per year, first in first out, plus staking income, in your currency.',
     icon: '🧮',
+    group: 'earn',
     availability: PAY_AND_BROWSER,
     steps: [
       {
@@ -416,6 +547,7 @@ export const FEATURES: FeatureDef[] = [
     title: 'Exports and backup',
     oneLiner: 'Download your history as CSV, or copy it. Back up your NimBooks data as text.',
     icon: '📤',
+    group: 'books',
     availability: PAY_AND_BROWSER,
     steps: [
       {
@@ -452,6 +584,7 @@ export const FEATURES: FeatureDef[] = [
     title: 'Portfolio PDF',
     oneLiner: 'One report for your wallet and up to 10 more Nimiq addresses, with a grand total.',
     icon: '📄',
+    group: 'books',
     availability: PAY_AND_BROWSER,
     steps: [
       {
@@ -488,6 +621,7 @@ export const FEATURES: FeatureDef[] = [
     title: 'MCP for AI assistants',
     oneLiner: 'Ask an AI assistant about your books. It can read them, but it never sends anything.',
     icon: '🤖',
+    group: 'books',
     availability: 'Your computer, with Node.js 20 or newer',
     steps: [
       {
@@ -524,6 +658,7 @@ export const FEATURES: FeatureDef[] = [
     title: 'Privacy',
     oneLiner: 'Reads public chain data. Your keys stay in your wallet, and there is no account.',
     icon: '🔒',
+    group: 'books',
     availability: PAY_AND_BROWSER,
     steps: [
       {
@@ -563,3 +698,11 @@ export function featureBySlug(slug: string | null | undefined): FeatureDef | und
   if (!slug) return undefined
   return FEATURES.find((f) => f.slug === slug)
 }
+
+/**
+ * The landing's two stories, in the order they are read: what your NIM earns,
+ * then the books it keeps. Filtering keeps FEATURES as the one list, so a new
+ * entry lands in the right section by its `group` alone.
+ */
+export const EARN_FEATURES: FeatureDef[] = FEATURES.filter((f) => f.group === 'earn')
+export const BOOK_FEATURES: FeatureDef[] = FEATURES.filter((f) => f.group === 'books')

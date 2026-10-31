@@ -1891,13 +1891,13 @@ export default function App() {
         // from the Pay provider when there is one, otherwise the public RPC
         // (see wallet.getCurrentBlock). Best effort: an unknown height keeps
         // the previous one and the 10s auto-refresh picks it up next pass.
-        if (head !== null) setCurrentBlock(head)
         // The delegated pool's own record. Read on every full pass (first load,
         // manual refresh, the refresh behind a confirmed staking tx); the 10s
         // heartbeat reads it every sixth tick instead, in the effect below.
         if (!heartbeat && staking.ok && freshHolding?.delegation) {
           readValidatorHealth(freshHolding.delegation, head)
         }
+        if (head !== null) setCurrentBlock(head)
         // Pending unstake resolution: the marker clears when the staker record
         // shows the retire took effect (inactive balance appeared, or active
         // dropped by the pending amount) — the chain flip is the only real
@@ -3191,11 +3191,6 @@ export default function App() {
     () => validators.find((v) => cleanAddr(v.address) === lockedDelegation) ?? null,
     [validators, lockedDelegation]
   )
-  // The delegated pool's health, only while the read is for the pool the stake
-  // is actually with. One line for every screen that shows it.
-  const stakeHealth =
-    lockedDelegation && stakeValidatorHealth?.address === lockedDelegation ? stakeValidatorHealth.health : null
-  const stakeHealthLine = validatorHealthLine(stakeHealth, currentValidator?.name ?? null)
   // The panel finishes in the same two beats as the send sheet: a confirming
   // step while the tx settles on chain, then a card that waits for Done. Both
   // replace the form — mixing a live slider into "confirming on chain" is what
@@ -3235,6 +3230,11 @@ export default function App() {
   // card never steers a newcomer to one validator.
   const activeStakeNim = (Number(stakingHolding?.active) || 0) / 100000
   const earning = activeStakeNim > 0
+  // The delegated pool's health, only while the read is for the pool the stake
+  // is actually with. One line for every screen that shows it.
+  const stakeHealth =
+    lockedDelegation && stakeValidatorHealth?.address === lockedDelegation ? stakeValidatorHealth.health : null
+  const stakeHealthLine = validatorHealthLine(stakeHealth, currentValidator?.name ?? null)
   const earnRate = (earning ? currentValidator?.annualReward : null) ?? typicalRate(validators)
   const earnCompound = earning && currentValidator ? compoundsFor(currentValidator) : true
 

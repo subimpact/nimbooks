@@ -331,6 +331,43 @@ a:focus-visible {
   color: var(--muted);
 }
 
+/* Two stories, in this order: what the NIM earns, then the books. The Earn
+   cards carry the gold edge, so the first thing read is the reason to open
+   NimBooks; the book features fold away behind one button on a phone. */
+.learn-features {
+  display: grid;
+  /* minmax(0, 1fr): the card rows scroll sideways inside themselves, so the
+     column must not grow to the width of all their cards (that would push the
+     whole page sideways on a phone). */
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+}
+.learn-books {
+  margin-top: 22px;
+}
+.learn-cards--earn .learn-card {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 5%, var(--bg-elev));
+}
+.learn-books-toggle {
+  width: auto;
+  margin: 12px 0 0;
+}
+/* Group headings in the desktop feature list, in the house label style. */
+.learn-list-title {
+  margin: 12px 0 2px;
+  padding: 0 10px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.learn-list-title--earn {
+  margin-top: 0;
+  color: var(--accent);
+}
+
 /* Phone: a horizontal row of cards that snap as you swipe. */
 .learn-cards {
   list-style: none;

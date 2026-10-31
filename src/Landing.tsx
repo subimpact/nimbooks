@@ -4,11 +4,23 @@ import QrCode from './QrCode'
 import { dialogFocus } from './lib/dialogFocus'
 import { NIMIQ_PAY_APP_URL } from './lib/device'
 import { DONATION_ADDRESS, DONATION_QR_VALUE } from './lib/support'
-import { FEATURES, featureBySlug, type FeatureDef, type SampleEntry } from './lib/features'
+import {
+  BOOK_FEATURES,
+  EARN_FEATURES,
+  FEATURES,
+  featureBySlug,
+  type FeatureDef,
+  type SampleEntry,
+} from './lib/features'
 
-// What NimBooks does, before you connect. Below 1024px: feature cards that open a
-// full-screen explainer. From 1024px: a feature list beside the explainer, and
-// the "Open on your phone" code. Both read FEATURES (lib/features.ts).
+// What NimBooks does, before you connect. Below 1024px: a card row per story
+// that open full-screen explainers. From 1024px: the same two stories as two
+// groups beside the explainer, and the "Open on your phone" code. Both read
+// FEATURES (lib/features.ts).
+//
+// Two stories, in this order: earn on your NIM first (the reason to open
+// NimBooks), then the books it keeps for you. The books fold away on a phone
+// behind one button, so the first screen is about earning.
 //
 // Addresses: #/learn opens the landing scrolled to the features, and
 // #/learn/<slug> opens that explainer. Closing it leaves the plain landing.
@@ -80,6 +92,9 @@ export default function Landing({ onSampleEntry, busy }: LandingProps) {
   const desktop = useSyncExternalStore(subscribeDesktop, isDesktopNow, notDesktop)
   // The explainer on show: the sheet on a phone, the panel on desktop.
   const [openSlug, setOpenSlug] = useState<string | null>(slugNow)
+  // On a phone the book features start folded away: the first screen is about
+  // earning. Desktop shows both groups at once (see the render below).
+  const [booksOpen, setBooksOpen] = useState(false)
 
   // Back, forward and a hand-edited hash move the explainer with them.
   useEffect(() => {
@@ -144,27 +159,34 @@ export default function Landing({ onSampleEntry, busy }: LandingProps) {
 
   if (desktop) {
     const panel = shown ?? FEATURES[0]
+    // Two groups in one list: earn first, the books second, so the explorer
+    // tells the same story as the phone cards.
+    const groupButton = (f: FeatureDef) => (
+      <button
+        key={f.slug}
+        type="button"
+        data-feature={f.slug}
+        data-group={f.group}
+        aria-current={f.slug === panel.slug ? 'true' : undefined}
+        onClick={() => openFeature(f.slug)}
+      >
+        <span className="learn-list-icon" aria-hidden="true">{f.icon}</span>
+        <span>{f.title}</span>
+      </button>
+    )
     return (
       <>
         <section className="learn-explorer" id="learn-features" aria-labelledby="learn-explorer-title">
           <div className="learn-head">
-            <h2 id="learn-explorer-title">What NimBooks does</h2>
-            <p>Pick a feature to see how it works, before you connect.</p>
+            <h2 id="learn-explorer-title">Earn on your NIM, keep your books</h2>
+            <p>Pick a feature to see how it works, before you connect. Earn comes first.</p>
           </div>
           <div className="learn-explorer-body">
             <nav className="learn-list" aria-label="Features">
-              {FEATURES.map((f) => (
-                <button
-                  key={f.slug}
-                  type="button"
-                  data-feature={f.slug}
-                  aria-current={f.slug === panel.slug ? 'true' : undefined}
-                  onClick={() => openFeature(f.slug)}
-                >
-                  <span className="learn-list-icon" aria-hidden="true">{f.icon}</span>
-                  <span>{f.title}</span>
-                </button>
-              ))}
+              <h3 className="learn-list-title learn-list-title--earn" id="learn-earn-title">Earn on your NIM</h3>
+              {EARN_FEATURES.map(groupButton)}
+              <h3 className="learn-list-title" id="learn-books-title">Your books, kept for you</h3>
+              {BOOK_FEATURES.map(groupButton)}
             </nav>
             <article className="learn-panel" aria-labelledby="learn-panel-title">
               <FeatureExplainer
@@ -187,23 +209,53 @@ export default function Landing({ onSampleEntry, busy }: LandingProps) {
 
   return (
     <>
-      <section className="learn-section" id="learn-features" aria-labelledby="learn-features-title">
-        <div className="learn-head">
-          <h2 id="learn-features-title">What NimBooks does</h2>
-          <p>Tap a feature to see how it works, before you connect.</p>
-        </div>
-        <ul className="learn-cards">
-          {FEATURES.map((f) => (
-            <li key={f.slug}>
-              <button type="button" className="learn-card" data-feature={f.slug} onClick={() => openFeature(f.slug)}>
-                <span className="learn-card-icon" aria-hidden="true">{f.icon}</span>
-                <span className="learn-card-title">{f.title}</span>
-                <span className="learn-card-line">{f.oneLiner}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      </section>
+      <div className="learn-features" id="learn-features">
+        <section className="learn-section learn-earn" aria-labelledby="learn-earn-title">
+          <div className="learn-head">
+            <h2 id="learn-earn-title">Earn on your NIM</h2>
+            <p>Stake, follow the rewards, and see what your validator is doing. Tap a card to see how it works.</p>
+          </div>
+          <ul className="learn-cards learn-cards--earn">
+            {EARN_FEATURES.map((f) => (
+              <li key={f.slug}>
+                <button type="button" className="learn-card" data-feature={f.slug} data-group={f.group} onClick={() => openFeature(f.slug)}>
+                  <span className="learn-card-icon" aria-hidden="true">{f.icon}</span>
+                  <span className="learn-card-title">{f.title}</span>
+                  <span className="learn-card-line">{f.oneLiner}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+        <section className="learn-section learn-books" aria-labelledby="learn-books-title">
+          <div className="learn-head">
+            <h2 id="learn-books-title">Your books, kept for you</h2>
+            <p>Every payment, request and receipt, read from the chain and kept on this device. Nothing to type in.</p>
+          </div>
+          <button
+            type="button"
+            className="btn-secondary learn-books-toggle"
+            aria-expanded={booksOpen}
+            aria-controls="learn-books-cards"
+            onClick={() => setBooksOpen((v) => !v)}
+          >
+            {booksOpen ? 'Show fewer book features' : `Show all ${BOOK_FEATURES.length} book features`}
+          </button>
+          {booksOpen && (
+            <ul className="learn-cards" id="learn-books-cards">
+              {BOOK_FEATURES.map((f) => (
+                <li key={f.slug}>
+                  <button type="button" className="learn-card" data-feature={f.slug} data-group={f.group} onClick={() => openFeature(f.slug)}>
+                    <span className="learn-card-icon" aria-hidden="true">{f.icon}</span>
+                    <span className="learn-card-title">{f.title}</span>
+                    <span className="learn-card-line">{f.oneLiner}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
       <HowItWorks />
       <TrustStrip />
       {support}

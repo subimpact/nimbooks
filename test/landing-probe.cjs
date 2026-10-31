@@ -13,10 +13,13 @@ const PAY_UA =
   'Mozilla/5.0 (Linux; Android 16; SM-S928B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Mobile Safari/537.36 NimiqPay/2.0.3'
 const PHONE = { width: 360, height: 780 }
 const DESK = { width: 1280, height: 800 }
-const SLUGS = [
-  'staking', 'balance', 'history', 'analytics', 'send-receive', 'requests', 'receipts',
-  'cashlinks', 'statements', 'tax', 'exports', 'portfolio', 'mcp', 'privacy',
+// Every feature, in landing order: the Earn group first, then the books.
+const EARN_SLUGS = ['staking', 'pay-stake', 'rewards', 'yield-calculator', 'tax']
+const BOOK_SLUGS = [
+  'balance', 'history', 'analytics', 'send-receive', 'requests', 'receipts',
+  'cashlinks', 'statements', 'exports', 'portfolio', 'mcp', 'privacy',
 ]
+const SLUGS = [...EARN_SLUGS, ...BOOK_SLUGS]
 const EM_DASH = '\u2014'
 
 // Environment noise, not page errors: `vite preview` has no Pages Functions, so
@@ -98,8 +101,29 @@ async function sheetFacts(page) {
     check('phone: first DOM "sample wallet" button is the connect panel one',
       await page.evaluate(() => /^Try with a sample wallet$/.test([...document.querySelectorAll('button')].find((b) => /sample wallet/i.test(b.textContent))?.textContent.trim() || '')))
 
+    // Two stories on a phone: Earn on your NIM first, the books folded away
+    // behind one button (they used to be 14 equal cards in one row).
     const cards = await page.locator('.learn-card').count()
-    check('phone: 14 feature cards', cards === 14, `found ${cards}`)
+    check('phone: 5 Earn cards first, book features folded away', cards === EARN_SLUGS.length, `found ${cards}`)
+    const sections = await page.evaluate(() =>
+      [...document.querySelectorAll('#learn-features .learn-head h2')].map((h) => h.textContent.trim())
+    )
+    check('phone: sections read "Earn on your NIM" then "Your books, kept for you"',
+      sections[0] === 'Earn on your NIM' && sections[1] === 'Your books, kept for you', JSON.stringify(sections))
+    const earnFirst = await page.evaluate(() =>
+      [...document.querySelectorAll('.learn-card')].map((c) => c.dataset.group)
+    )
+    check('phone: every card in the first row is an Earn card', earnFirst.every((g) => g === 'earn'), JSON.stringify(earnFirst))
+    const toggle = page.locator('.learn-books-toggle')
+    check('phone: the books start behind "Show all 12 book features"',
+      (await toggle.innerText()).trim() === `Show all ${BOOK_SLUGS.length} book features` &&
+      (await toggle.getAttribute('aria-expanded')) === 'false' &&
+      (await page.locator('#learn-books-cards').count()) === 0,
+      (await toggle.innerText()).trim())
+    await toggle.click()
+    const expanded = await page.locator('.learn-card').count()
+    check('phone: the button opens all book features (5 + 12 = 17 cards)',
+      expanded === SLUGS.length && (await toggle.getAttribute('aria-expanded')) === 'true', `found ${expanded}`)
     check('phone: no horizontal overflow at 360px (landing)', (await overflow(page)) <= 1, `overflow=${await overflow(page)}`)
     allText.push(await page.locator('body').innerText())
 
@@ -201,16 +225,20 @@ async function sheetFacts(page) {
   // Expected view and anchor per feature, as lib/features.ts declares them.
   const VIEW_TAB = { dashboard: 'Overview', history: 'History', receipts: 'Receipts', request: 'Request', export: 'Export' }
   const TRY = {
+    // The Earn group first, in landing order, then the books.
+    staking: ['dashboard', null],
+    'pay-stake': ['dashboard', null],
+    rewards: ['history', null],
+    'yield-calculator': ['dashboard', 'earn'],
+    tax: ['export', 'tax'],
     balance: ['dashboard', 'total'],
     history: ['history', null],
     analytics: ['dashboard', 'analytics'],
     'send-receive': ['dashboard', 'quick-actions'],
-    staking: ['dashboard', null],
     requests: ['request', null],
     receipts: ['receipts', null],
     cashlinks: ['dashboard', 'quick-actions'],
     statements: ['export', 'statement'],
-    tax: ['export', 'tax'],
     exports: ['export', 'export'],
     portfolio: ['export', 'portfolio'],
     mcp: ['dashboard', 'mcp'],
@@ -229,23 +257,24 @@ async function sheetFacts(page) {
         const el = t ? document.querySelector(`[data-learn="${t}"]`) : null
         return { found: !!el, top: el ? Math.round(el.getBoundingClientRect().top) : null }
       }, target)
-      const stakeOpen = slug === 'staking' ? await page.locator('[role="dialog"][aria-label="Stake NIM"]').count() > 0 : true
+      const wantsStake = slug === 'staking' || slug === 'pay-stake'
+      const stakeOpen = wantsStake ? await page.locator('[role="dialog"][aria-label="Stake NIM"]').count() > 0 : true
       const offer = await page.locator('#tour-offer-title').count()
       const landed = tab.toLowerCase().includes(VIEW_TAB[view].toLowerCase())
       // In view: the anchor is on screen. A card at the foot of the page cannot scroll to the top.
       const anchored = target === null || (r.found && r.top !== null && r.top >= -20 && r.top < PHONE.height - 120)
-      check(`phone Try it ${slug}: on ${VIEW_TAB[view]}${target ? `, anchor ${target}` : ''}${slug === 'staking' ? ', Stake panel open' : ''}, no tour offer`,
+      check(`phone Try it ${slug}: on ${VIEW_TAB[view]}${target ? `, anchor ${target}` : ''}${wantsStake ? ', Stake panel open' : ''}, no tour offer`,
         landed && anchored && stakeOpen && offer === 0,
         JSON.stringify({ tab, anchor: r, stakeOpen, offer }))
-      if (slug === 'staking') {
+      if (wantsStake) {
         // Closing the panel must not bring the tour offer back either.
         await page.keyboard.press('Escape')
         await page.waitForTimeout(2500)
-        check('phone Try it staking: closing the panel does not offer the tour', (await page.locator('#tour-offer-title').count()) === 0)
+        check(`phone Try it ${slug}: closing the panel does not offer the tour`, (await page.locator('#tour-offer-title').count()) === 0)
       }
       await page.evaluate(() => window.scrollTo(0, 0))
     }
-    check('phone Try it (all 14): no page errors', errors.length === 0, errors.slice(0, 3).join(' | '))
+    check('phone Try it (all 17): no page errors', errors.length === 0, errors.slice(0, 3).join(' | '))
     await ctx.close()
   }
 
@@ -290,7 +319,10 @@ async function sheetFacts(page) {
       const b = [...document.querySelectorAll('button')].find((x) => /sample wallet/i.test(x.textContent))
       return !!b && b.getBoundingClientRect().bottom <= window.innerHeight
     }))
-    check('Nimiq Pay (mocked): 14 feature cards', (await page.locator('.learn-card').count()) === 14)
+    check('Nimiq Pay (mocked): the 5 Earn cards are the visible row (books folded)',
+      (await page.locator('.learn-card').count()) === EARN_SLUGS.length)
+    check('Nimiq Pay (mocked): "Show all 12 book features" is there',
+      (await page.locator('.learn-books-toggle').innerText()).trim() === `Show all ${BOOK_SLUGS.length} book features`)
     check('Nimiq Pay (mocked): no page errors', errors.length === 0, errors.slice(0, 3).join(' | '))
     await ctx.close()
   }
@@ -314,7 +346,21 @@ async function sheetFacts(page) {
 
     const tryBox = await page.getByRole('button', { name: /try with a sample wallet/i }).boundingBox()
     check('desktop: "Try with a sample wallet" visible without scrolling', !!tryBox && tryBox.y + tryBox.height <= DESK.height, JSON.stringify(tryBox))
-    check('desktop: 14 features in the list', (await page.locator('.learn-list button[data-feature]').count()) === 14)
+    check('desktop: 17 features in the list', (await page.locator('.learn-list button[data-feature]').count()) === SLUGS.length)
+    const groups = await page.evaluate((earnCount) => {
+      const titles = [...document.querySelectorAll('.learn-list-title')].map((t) => t.textContent.trim())
+      const order = [...document.querySelectorAll('.learn-list button[data-feature]')].map((b) => b.dataset.group)
+      const firstBooks = order.indexOf('books')
+      return {
+        titles,
+        earnFirst: firstBooks === earnCount,
+        allEarnBeforeBooks:
+          order.slice(0, firstBooks).every((g) => g === 'earn') && order.slice(firstBooks).every((g) => g === 'books'),
+      }
+    }, EARN_SLUGS.length)
+    check('desktop: two groups, "Earn on your NIM" then "Your books, kept for you"',
+      groups.titles[0] === 'Earn on your NIM' && groups.titles[1] === 'Your books, kept for you' && groups.earnFirst && groups.allEarnBeforeBooks,
+      JSON.stringify(groups))
     check('desktop: no sheet (the explainer is in place)', (await page.locator('.learn-sheet').count()) === 0)
     check('desktop: "Open on your phone" code shown', (await page.locator('.learn-phone-qr svg').count()) === 1)
     check('desktop: QR is labelled for Nimiq Pay', (await page.locator('.learn-phone-qr svg').getAttribute('aria-label')) === 'QR code that opens NimBooks in Nimiq Pay')
