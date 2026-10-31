@@ -1891,9 +1891,10 @@ export default function App() {
         // from the Pay provider when there is one, otherwise the public RPC
         // (see wallet.getCurrentBlock). Best effort: an unknown height keeps
         // the previous one and the 10s auto-refresh picks it up next pass.
-        // The delegated pool's own record. Read on every full pass (first load,
-        // manual refresh, the refresh behind a confirmed staking tx); the 10s
-        // heartbeat reads it every sixth tick instead, in the effect below.
+
+        // The delegated pool's own record, read on every full pass: first load,
+        // manual refresh, and the refresh behind a confirmed staking tx. The
+        // 10s heartbeat reads it every sixth tick instead (the effect below).
         if (!heartbeat && staking.ok && freshHolding?.delegation) {
           readValidatorHealth(freshHolding.delegation, head)
         }

@@ -7,7 +7,7 @@
 // Badge text. Spelled out rather than built from a version constant so the exact
 // label ships as one string in the bundle (JSX would emit "v" as a separate node).
 // package.json carries the machine-readable version.
-export const APP_VERSION_LABEL = 'v1.41.1'
+export const APP_VERSION_LABEL = 'v1.42.0'
 
 export interface ChangelogEntry {
   version: string
@@ -16,6 +16,15 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '1.42.0',
+    date: '2026-10-31',
+    items: [
+      'The Earn card now says how your validator is doing, read from its own record on the Nimiq chain: active, inactive, jailed or retired. A jailed validator says how long is left and that unstaking waits until the jail ends; a retired one offers to unstake. Your NIM stays yours in every case',
+      'The landing now tells one story first: Earn on your NIM. Staking, staking from Nimiq Pay with NIM still on its way, rewards in your books, the yield calculator and crypto tax come first, and the book features fold into a second section behind one button on a phone',
+      'The currency tile says 148 currencies, counted from the list itself, instead of 37',
+    ],
+  },
   {
     version: '1.41.1',
     date: '2026-10-29',
