@@ -21,6 +21,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     date: '2026-11-01',
     items: [
       'On a desktop screen the landing no longer scrolls away from you: the sign-in side stays put while you read through the features, and the feature list stays beside the explainer (suggested by Harsh Yadav)',
+      'The browser tab icon is now the same open book with the gold tick as the app icon, so NimBooks looks the same in your browser tabs and on your home screen',
     ],
   },
   {
