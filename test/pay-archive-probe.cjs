@@ -12,6 +12,9 @@ const ADDR = 'NQ82 6GYU NXUU 05DM 1M7F 0SJJ D42E NUNS KELR'
 const FLAT = ADDR.replace(/\s+/g, '')
 const STALE = 'NQ98 TEYP DYB3 QC0A K5TV 3DS1 J41M 3PG5 MMG2' // settled 2026-10-13
 const STAKING = 'NQ7700000000000000000000000000000001'
+// NQ27's extension: funded by a contract, not by the basic address, so it only
+// enters the archive through the contract -> contract discovery.
+const EXTENSION = 'NQ37095HKLEGLTHP7BNAH31GQSU1RMR6TRU7'
 let pass = 0, fail = 0
 const check = (name, ok, info = '') => { ok ? pass++ : fail++; console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}${ok || !info ? '' : ' :: ' + info}`) }
 
@@ -35,13 +38,14 @@ const check = (name, ok, info = '') => { ok ? pass++ : fail++; console.log(`${ok
   await page.goto(BASE, { waitUntil: 'domcontentloaded' })
   await page.waitForSelector('.topbar', { timeout: 30000 })
 
-  // Poll the shelf until the sweep has archived the settled contracts (two
-  // budgeted passes for ~28 contracts).
+  // Poll the shelf until the sweep has archived the settled contracts (several
+  // budgeted passes for ~31 contracts) AND the extension, which is only queued
+  // once its funder NQ27 has settled, so it lands after the initial seed.
   let shelf = null
   for (let i = 0; i < 120; i++) {
     shelf = await page.evaluate((k) => { try { return JSON.parse(localStorage.getItem(k) || 'null') } catch { return null } }, `nimbooks:htlc-archive:${FLAT}`)
-    const n = shelf ? Object.keys(shelf.contracts || {}).length : 0
-    if (n >= 25) break
+    const contracts = (shelf && shelf.contracts) || {}
+    if (Object.keys(contracts).length >= 25 && contracts[EXTENSION]) break
     await page.waitForTimeout(3000)
   }
   const finals = shelf ? Object.keys(shelf.contracts) : []
@@ -51,7 +55,28 @@ const check = (name, ok, info = '') => { ok ? pass++ : fail++; console.log(`${ok
   const rows = finals.flatMap((c) => shelf.contracts[c].txs)
   const stakeRows = rows.filter((t) => (t.recipient || '').replace(/\s+/g, '') === STAKING || t.toType === 3)
   check('archive: settled contracts carry stake rows', stakeRows.length > 0, String(stakeRows.length))
-  check('archive: every archived contract is one this wallet funded', finals.every((c) => shelf.contracts[c].txs.some((t) => (t.sender || '').replace(/\s+/g, '') === FLAT)))
+  // Every archived contract must still be one this wallet owns: either funded
+  // straight from the basic address, or an HTLC extension of an archived
+  // contract whose creation data refunds to this wallet (Pay's contract ->
+  // contract hop, e.g. NQ27 -> NQ37). Nothing else may be followed.
+  const OWN_HEX = '343fcb7b9c015b50d4ef06a526904eb72da9ba99' // NQ82 address bytes
+  const senderOf = (t) => (t.sender || '').replace(/\s+/g, '')
+  const recipientOf = (t) => (t.recipient || t.to || '').replace(/\s+/g, '')
+  const fundedByBasic = (c) => shelf.contracts[c].txs.some((t) => senderOf(t) === FLAT)
+  const extendedByOwn = (c) =>
+    finals.some((from) =>
+      shelf.contracts[from].txs.some(
+        (t) =>
+          senderOf(t) === from &&
+          recipientOf(t) === c &&
+          t.toType === 2 &&
+          String(t.data || '').toLowerCase().startsWith(OWN_HEX)
+      )
+    )
+  check('archive: every archived contract is one this wallet owns', finals.every((c) => fundedByBasic(c) || extendedByOwn(c)))
+  // The extension of NQ27: NQ82's own history never shows NQ37, so this is
+  // only reachable through the contract -> contract discovery.
+  check('archive: NQ37 (the extension of NQ27) is archived', finals.includes(EXTENSION))
 
   // History renders stake rows (the basic list has none, so they can only come
   // from the contract histories).
