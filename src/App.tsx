@@ -17,6 +17,7 @@ import {
   savedSessionIsDemo,
   restoreWalletSession,
   saveSessionView,
+  onPayAccountsChanged,
   isDemoMode,
   canSend,
   canStake,
@@ -57,7 +58,6 @@ import {
   getNimiqBalance,
   getHtlcHoldings,
   getHtlcInTransit,
-  getRemoteAccountBalance,
   getContractAccount,
   getNimiqTransactions,
   getStakingHolding,
@@ -337,6 +337,16 @@ function mergeRates(base: FiatRates, cached?: Partial<FiatRates>): FiatRates {
 
 function cleanAddr(address: string): string {
   return address.replace(/\s+/g, '').toUpperCase()
+}
+
+// Live HTLC contract balances keyed by flat address (see the archive sync in
+// refresh). The 10s heartbeat re-runs the pass, so compare before storing: an
+// unchanged map must keep its identity or every consumer of the balance
+// re-renders on every tick.
+function sameLiveBalances(a: Record<string, number>, b: Record<string, number>): boolean {
+  const aKeys = Object.keys(a)
+  const bKeys = Object.keys(b)
+  return aKeys.length === bKeys.length && bKeys.every((k) => a[k] === b[k])
 }
 
 const STAKE_INTENT_KEY = 'nimbooks:stakeIntent'
@@ -777,6 +787,12 @@ export default function App() {
   // these, everything paid or staked out of earlier contracts is invisible.
   const [archiveTxs, setArchiveTxs] = useState<NimiqTx[]>([])
   const [liveContracts, setLiveContracts] = useState<string[]>([])
+  // Luna held by each live contract, flat address -> balance, from the same
+  // account answer that classified it (see ContractSyncResult.liveBalances).
+  // The remote read above only names ONE contract; Pay extends its HTLC into a
+  // new one regularly, so this is what keeps the total honest after a rotation
+  // and on a restored session whose saved remote address is already stale.
+  const [liveContractBalances, setLiveContractBalances] = useState<Record<string, number>>({})
   // refresh is a callback, so it reads the mirrors here rather than the state;
   // both are written alongside their state on every sync.
   const liveContractsRef = useRef<string[]>([])
@@ -1809,10 +1825,17 @@ export default function App() {
         // writes no tx to this user's address, so a figure gated on the tx list
         // would sit stale. Nothing here waits on it — the fallback scan keeps
         // the totals honest until it lands.
+        //
+        // Only an HTLC answer is a balance. Pay extends its contract every few
+        // days and the old one is pruned to an empty basic account, so a saved
+        // remote address read as "basic with 0" proves nothing: it must read
+        // as unknown (`null`), never as an authoritative zero, or the archive
+        // and scan fallbacks never get to answer. The archive pass below picks
+        // up the contract the money actually moved to.
         if (acc.remoteAddress) {
           const remote = acc.remoteAddress
-          void getRemoteAccountBalance(remote)
-            .then((bal) => setRemoteAccountLuna(Number(bal) || 0))
+          void getContractAccount(remote)
+            .then((acct) => setRemoteAccountLuna(acct?.type === 'htlc' ? acct.balance : null))
             .catch((e) => {
               // Back to the history scan rather than a wrong number: `null`
               // is "unknown", not "empty".
@@ -1859,18 +1882,25 @@ export default function App() {
         // Fetched in parallel with the rest — nothing downstream depends on
         // it, and History merges the two lists tagged `remote` so the full
         // wallet picture is visible and classified.
-        if (acc.remoteAddress) {
+        // A Pay session without a remote address still has live contracts
+        // discovered by the archive pass, so read those too; Hub and demo run
+        // neither and clear the list as before.
+        if (acc.remoteAddress || (acc.provider === 'pay' && liveContractsRef.current.length > 0)) {
           // The contract Pay is currently using, plus every live contract the
-          // archive sync discovered. The current one is skipped when the sync
-          // has already settled it (pruned to an empty basic account): its
-          // rows then ride in via archiveTxs and a second read would only
-          // fetch an empty list. Deduped, flat, preserving order.
-          const baseFlat = acc.remoteAddress.replace(/\s+/g, '').toUpperCase()
-          const addresses: string[] =
-            archiveFinalsRef.current.has(baseFlat) || isArchivedContract(addr, acc.remoteAddress)
-            ? []
-            : [acc.remoteAddress]
-          const seenAddr = new Set(addresses.map((a) => a.replace(/\s+/g, '').toUpperCase()))
+          // archive sync discovered (successors of an extension included). The
+          // current one is skipped when the sync has already settled it (pruned
+          // to an empty basic account): its rows then ride in via archiveTxs and
+          // a second read would only fetch an empty list. Deduped, flat,
+          // preserving order.
+          const addresses: string[] = []
+          const seenAddr = new Set<string>()
+          if (acc.remoteAddress) {
+            const baseFlat = acc.remoteAddress.replace(/\s+/g, '').toUpperCase()
+            if (!(archiveFinalsRef.current.has(baseFlat) || isArchivedContract(addr, acc.remoteAddress))) {
+              addresses.push(acc.remoteAddress)
+              seenAddr.add(baseFlat)
+            }
+          }
           for (const c of liveContractsRef.current) {
             const flat = c.replace(/\s+/g, '').toUpperCase()
             if (seenAddr.has(flat)) continue
@@ -2009,9 +2039,12 @@ export default function App() {
         // a pass that only ran out of budget continues on the next tick, one
         // that hit a failed lookup backs off (15s; doubling to 2 min only while
         // passes make no progress).
-        // Gated on a Pay session naming a remote address; Hub and demo have none.
+        // Gated on a Pay session, with or without a remote address: Pay can
+        // answer `listAccounts` with only the basic address, and the archive
+        // pass is then the only thing that discovers the contract holding the
+        // money (and the extensions of it). Hub and demo run no Pay contracts.
         if (
-          acc.remoteAddress &&
+          (acc.provider === 'pay' || !!acc.remoteAddress) &&
           !archiveBusyRef.current &&
           (sweepDue || (archivePendingRef.current && Date.now() >= archiveNextAtRef.current))
         ) {
@@ -2034,6 +2067,14 @@ export default function App() {
               prev.length === firstLive.length && prev.every((v, i) => v === firstLive[i])
                 ? prev
                 : firstLive
+            )
+            // The live contracts' balances, from the very same account answers
+            // that classified them. The remote read above names one contract;
+            // after Pay extends its HTLC the money sits in the successor, which
+            // only this pass knows. Kept whole (not capped like the history
+            // reads): every live contract's balance is the user's.
+            setLiveContractBalances((prev) =>
+              sameLiveBalances(prev, synced.liveBalances) ? prev : synced.liveBalances
             )
             if (synced.complete) {
               archivePendingRef.current = false
@@ -2151,6 +2192,41 @@ export default function App() {
     if (!account) return
     saveSessionView(view)
   }, [view, account])
+
+  // Nimiq Pay extends its HTLC and then announces the new contract through
+  // `accountsChanged` (SDK 0.2.5, see lib/wallet.ts). Without adopting it the
+  // app keeps reading the retired contract, which now looks like an empty
+  // basic account, so the balance and History would miss the money until the
+  // next explicit connect. wallet.ts has already updated the in-memory session;
+  // mirror the new remote into state and re-read with a normal refresh (not the
+  // heartbeat), so the balance call and the archive pass both target it.
+  useEffect(() => {
+    if (!account || account.provider !== 'pay') return
+    return onPayAccountsChanged((accounts) => {
+      const nextRemote = accounts[1]
+      if (cleanAddr(nextRemote ?? '') === cleanAddr(account.remoteAddress ?? '')) return
+      // A rotation means every balance the last archive pass recorded as "live"
+      // belongs to a contract Pay has moved on from: the money was moved, not
+      // duplicated. Keeping any of those entries and adding the new remote
+      // would count the same NIM twice. Clear the map, and arm the archive pass
+      // so this refresh re-classifies the contracts from chain truth and
+      // archives the one that settled (and finds the live successor if the
+      // remote read alone ever comes back empty).
+      setLiveContractBalances((prev) => (Object.keys(prev).length === 0 ? prev : {}))
+      archivePendingRef.current = true
+      archiveNextAtRef.current = 0
+      const next: WalletAccount = { ...account }
+      if (nextRemote) next.remoteAddress = nextRemote
+      else delete next.remoteAddress
+      setAccount((prev) =>
+        prev && prev.provider === 'pay' ? { ...prev, remoteAddress: nextRemote } : prev
+      )
+      void refresh(next)
+    })
+    // Re-subscribe when the account or its remote changes so the closure above
+    // is current; the unsubscribe keeps it one listener at a time.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [account?.nimiqAddress, account?.provider, account?.remoteAddress])
 
   // One ledger for everything that counts as a transaction: indexed txs, the
   // wallet's remote HTLC relay txs, plus the synthesized reward rows, newest
@@ -2363,22 +2439,39 @@ export default function App() {
     [vestingHoldings]
   )
   // The HTLC figure every total is built on. Three views of the same money,
-  // all overlapping, so the effective figure is the largest and never a sum —
-  // adding them would double-count a wallet whose stored funds are also an
-  // open swap, which is the common case.
+  // all overlapping, so the effective figure is the largest and never a sum
+  // across views: adding them would double-count a wallet whose stored funds
+  // are also an open swap, which is the common case.
   //
-  // `remoteAccountLuna` is authoritative where the provider offers it: Nimiq
-  // Pay names the HTLC holding the funds, so no discovery is involved and no
-  // contract can be missed. `lockedLuna` still counts, because a pending swap
-  // the user is the *recipient* of isn't in their own remote account at all.
-  // With no remote account (Hub, demo, or a lookup that failed) this falls
-  // back to the scan pair: `lockedLuna` for swaps still pending, and
-  // `htlcInTransit` for every contract this address funded that still holds
-  // NIM (the relay case — see getHtlcInTransit).
-  const htlcLuna =
-    remoteAccountLuna !== null
-      ? Math.max(remoteAccountLuna, lockedLuna)
-      : Math.max(lockedLuna, htlcInTransit)
+  // Within the contract view the individual contracts DO add up: Pay extends
+  // its HTLC by moving the money into a brand-new contract, so more than one
+  // contract can hold user funds while the old one settles. `contractLuna`
+  // therefore sums over DISTINCT contracts: the remote account the provider
+  // names (only when its read answered as an HTLC, see remoteAccountLuna)
+  // union the live contracts the archive pass found, keyed by flat address so
+  // a contract named by both is one contract and never counted twice.
+  //
+  // `lockedLuna` still counts on top, as the largest: a pending swap the user
+  // is the *recipient* of isn't in their own remote account at all. With no
+  // contract figure at all (Hub, demo, an unanswered or settled remote read)
+  // this falls back to the scan pair: `lockedLuna` for swaps still pending,
+  // and `htlcInTransit` for every contract this address funded that still
+  // holds NIM (the relay case, see getHtlcInTransit).
+  const contractLuna = useMemo(() => {
+    const perContract = new Map<string, number>()
+    if (account?.remoteAddress && remoteAccountLuna !== null) {
+      perContract.set(cleanAddr(account.remoteAddress), remoteAccountLuna)
+    }
+    for (const [flat, luna] of Object.entries(liveContractBalances)) {
+      // Already counted as the remote account: same contract, one balance.
+      if (perContract.has(flat) || !Number.isFinite(luna)) continue
+      perContract.set(flat, luna)
+    }
+    let sum = 0
+    for (const luna of perContract.values()) sum += luna
+    return sum
+  }, [account?.remoteAddress, remoteAccountLuna, liveContractBalances])
+  const htlcLuna = Math.max(contractLuna, lockedLuna, htlcInTransit)
   // Money the user can spend or is about to receive: the basic account plus
   // anything in flight through an HTLC. This — not the basic balance — is what
   // Nimiq Pay shows as the wallet's balance, and what anchors the trajectory.
@@ -4258,8 +4351,11 @@ export default function App() {
       clearInterval(id)
       document.removeEventListener('visibilitychange', onVisibilityChange)
     }
+    // The remote account rides along: Nimiq Pay rotates it (extends its HTLC),
+    // and a heartbeat that kept the old one would read a retired contract as an
+    // empty account and blank the balance it just re-read from the new one.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [account?.nimiqAddress, tour.phase])
+  }, [account?.nimiqAddress, account?.remoteAddress, tour.phase])
 
   // The delegated validator's record rides the heartbeat, the same rule the
   // Portfolio's extra addresses use: one read every sixth tick, no timer of its
@@ -4544,6 +4640,7 @@ export default function App() {
     // belongs to the old wallet's contracts and must not bleed into the next.
     setArchiveTxs([])
     setLiveContracts([])
+    setLiveContractBalances((prev) => (Object.keys(prev).length === 0 ? prev : {}))
     liveContractsRef.current = []
     archiveFinalsRef.current = new Set()
     archivePendingRef.current = false

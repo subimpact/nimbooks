@@ -213,6 +213,86 @@ function bytesToHex(bytes: Uint8Array): string {
     .join('')
 }
 
+// --- Nimiq Pay account changes (SDK 0.2.5) ---
+//
+// Pay rotates the remote account whenever it extends its HTLC, and the host
+// then fires `accountsChanged` with the new list. Without adopting it the
+// session keeps the retired contract as `remoteAddress`, which now reads back
+// as an empty basic account, so a wallet that holds NIM shows 0. The event
+// carries the same two addresses `listAccounts()` does, so the current ones can
+// be taken over without showing the user the native confirmation dialog again.
+//
+type PayAccountsListener = (accounts: string[]) => void
+const payAccountsListeners = new Set<PayAccountsListener>()
+// One registration per session, however often the provider handle is revived.
+let payAccountsListenerBound = false
+
+function flatAddress(addr: string | undefined): string {
+  return (addr ?? '').replace(/\s+/g, '').toUpperCase()
+}
+
+/** Subscribe to the host's account changes. Returns the unsubscribe function. */
+export function onPayAccountsChanged(cb: PayAccountsListener): () => void {
+  payAccountsListeners.add(cb)
+  return () => {
+    payAccountsListeners.delete(cb)
+  }
+}
+
+function notifyPayAccountsChanged(accounts: string[]): void {
+  for (const cb of [...payAccountsListeners]) {
+    try {
+      cb(accounts)
+    } catch (e) {
+      console.warn('Pay accountsChanged subscriber failed:', e)
+    }
+  }
+}
+
+/**
+ * Adopt an `accountsChanged` payload. Only the base address is compared: when it
+ * is the wallet this session belongs to, the second address is the current
+ * remote account and replacing it is all that is needed. A different base means
+ * the user switched wallets inside Pay, which needs a fresh `listAccounts()`
+ * prompt and a new session, so it is ignored here: the next explicit connect
+ * re-reads the provider and corrects the session, exactly as before.
+ */
+function handlePayAccountsChanged(raw: unknown): void {
+  const accounts = Array.isArray(raw) ? raw.filter((a): a is string => typeof a === 'string') : []
+  if (!currentAccount || currentAccount.provider !== 'pay') return
+  const base = flatAddress(accounts[0])
+  if (!base || base !== flatAddress(currentAccount.nimiqAddress)) return
+  const next = accounts[1]
+  // Replace the session record rather than mutating it in place: the app holds
+  // this object in React state and compares the addresses it holds against the
+  // new list, so an in-place mutation would make that comparison see no change.
+  const updated: WalletAccount = { ...currentAccount }
+  if (next) updated.remoteAddress = next
+  else delete updated.remoteAddress
+  currentAccount = updated
+  saveSession(updated)
+  notifyPayAccountsChanged(accounts)
+}
+
+/**
+ * Register the one `accountsChanged` listener on the live provider handle.
+ * Guarded on purpose: hosts older than SDK 0.2.5, the browser path and the test
+ * mocks have no `on`, a re-init must not register a second time, and a host
+ * that throws on `on` just leaves the regular refresh in charge.
+ */
+function bindPayAccountsListener(): void {
+  if (payAccountsListenerBound) return
+  const provider = nimiqProvider
+  if (!provider || typeof provider.on !== 'function') return
+  payAccountsListenerBound = true
+  try {
+    provider.on('accountsChanged', handlePayAccountsChanged)
+  } catch (e) {
+    payAccountsListenerBound = false
+    console.warn('Pay accountsChanged listener unavailable:', e)
+  }
+}
+
 /**
  * Ask the Nimiq Pay host who is connected. Shared by the connect button and the
  * silent restore below, so the two can never read the wallet differently.
@@ -223,6 +303,9 @@ async function readPayAccount(): Promise<WalletAccount> {
 
   try {
     nimiqProvider = await init({ timeout: 10000 })
+    // Keep the remote account current when Pay extends its HTLC (see
+    // onPayAccountsChanged). Safe on hosts without the event: guarded there.
+    bindPayAccountsListener()
     // A host error throws a NimiqProviderError (SDK 0.2+), caught below; an
     // empty or non-array answer still leaves the account addressless.
     const accounts = await nimiqProvider.listAccounts()
@@ -357,6 +440,9 @@ export async function restoreWalletSession(): Promise<WalletAccount | null> {
 async function reviveProviderSilently(): Promise<void> {
   try {
     nimiqProvider = await init({ timeout: 10000 })
+    // The restored session adopted the saved remote address; this keeps it
+    // current when Pay extends the HTLC (see onPayAccountsChanged).
+    bindPayAccountsListener()
   } catch {
     /* host not ready — the session stays read-only, record untouched */
   }

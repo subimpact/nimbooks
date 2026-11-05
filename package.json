@@ -14,7 +14,7 @@
     "@nimiq/core": "^2.21.0",
     "@nimiq/hub-api": "^1.15.0",
     "@nimiq/identicons": "^1.6.2",
-    "@nimiq/mini-app-sdk": "^0.2.4",
+    "@nimiq/mini-app-sdk": "^0.2.5",
     "@tailwindcss/vite": "4.3.3",
     "blakejs": "^1.2.1",
     "class-variance-authority": "0.7.1",
