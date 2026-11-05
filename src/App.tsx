@@ -6904,7 +6904,8 @@ export default function App() {
 
   const classicShell = (
     <>
-      <HeroBackground />
+      {/* Overview keeps the full field; the reading tabs calm it down. */}
+      <HeroBackground calm={view !== 'dashboard'} />
       <header className={uiBeta ? 'topbar beta-shell' : 'topbar'}>
         <div className="logo small">📒</div>
         <h1>NimBooks</h1>

@@ -103,8 +103,15 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
  *  - prefers-reduced-motion: one static frame, no rAF, no pointer handlers;
  *    it is repainted on theme change and after a resize.
  */
-export default function HeroBackground() {
+export default function HeroBackground({ calm = false }: { calm?: boolean } = {}) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  // Calm mode, for the reading screens (History, Receipts, Request, Export):
+  // page titles, hints and empty-state copy sit straight on the field there,
+  // with no card behind them, so the field dims under a flat veil and the
+  // cursor and tap effects are damped. Read through a ref so switching tabs
+  // never tears the loop down; the veil eases in and out over ~0.4 s.
+  const calmRef = useRef(calm)
+  const repaintRef = useRef<(() => void) | null>(null)
   const cursorRef = useRef<Cursor>({ x: -1, y: -1, active: false })
   const rippleRef = useRef<Ripple[]>([])
 
@@ -124,6 +131,9 @@ export default function HeroBackground() {
     let raf = 0
     let lastPaint = -Infinity // first frame paints without waiting on the cap
     let resizeTimer = 0
+    // Eased 0..1 calm amount; reduced motion jumps straight to the target.
+    let calmAmt = calmRef.current ? 1 : 0
+    let lastCalmT = -1
 
     const layout = () => {
       w = canvas.clientWidth
@@ -210,6 +220,18 @@ export default function HeroBackground() {
 
       ctx.clearRect(0, 0, w, h)
 
+      const calmTarget = calmRef.current ? 1 : 0
+      if (reduce || lastCalmT < 0) {
+        calmAmt = calmTarget
+      } else if (calmAmt !== calmTarget) {
+        const step = Math.min(1, (now - lastCalmT) / 400)
+        calmAmt = calmTarget > calmAmt ? Math.min(calmTarget, calmAmt + step) : Math.max(calmTarget, calmAmt - step)
+      }
+      lastCalmT = now
+      // Pointer effects shrink to a hint in calm mode: a tap on a form field
+      // should not send a bright ring through the text around it.
+      const effectScale = 1 - 0.75 * calmAmt
+
       const cursor = cursorRef.current
       const ripples = rippleRef.current
       const t = now
@@ -247,7 +269,7 @@ export default function HeroBackground() {
           }
         }
 
-        tier = Math.max(0, Math.min(1, tier + boost))
+        tier = Math.max(0, Math.min(1, tier + boost * effectScale))
 
         // Hex swells with its tier; the crest gets a teal fill, the body a
         // cyan stroke whose alpha follows the tier like a candlestick's
@@ -299,6 +321,13 @@ export default function HeroBackground() {
       ctx.fillStyle = veil
       ctx.fillRect(0, 0, w, h)
 
+      // Calm veil: a flat dim in the page colour over the whole field. The
+      // hexagons still move underneath, at about a third of their contrast.
+      if (calmAmt > 0) {
+        ctx.fillStyle = `rgba(${bg.r},${bg.g},${bg.b},${(0.66 * calmAmt).toFixed(3)})`
+        ctx.fillRect(0, 0, w, h)
+      }
+
       // Drop old ripples.
       if (ripples.length) {
         rippleRef.current = ripples.filter((r) => (now - r.t0) / 1000 <= 1.4)
@@ -331,6 +360,9 @@ export default function HeroBackground() {
     const themeObserver = reduce ? new MutationObserver(() => paint(0)) : null
 
     layout()
+    // Reduced motion has no loop to pick up a calm change, so the prop effect
+    // below repaints the static frame through this hook.
+    repaintRef.current = reduce ? () => paint(0) : null
 
     if (reduce) {
       // One static frame at t = 0: base + seed only (waves are frozen).
@@ -351,6 +383,7 @@ export default function HeroBackground() {
 
     return () => {
       running = false
+      repaintRef.current = null
       cancelAnimationFrame(raf)
       clearTimeout(resizeTimer)
       themeObserver?.disconnect()
@@ -361,6 +394,11 @@ export default function HeroBackground() {
       document.removeEventListener('visibilitychange', onVisibility)
     }
   }, [])
+
+  useEffect(() => {
+    calmRef.current = calm
+    repaintRef.current?.()
+  }, [calm])
 
   return <canvas ref={canvasRef} className="hero-bg" aria-hidden="true" />
 }

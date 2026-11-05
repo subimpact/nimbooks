@@ -1803,6 +1803,29 @@ a:focus-visible {
   text-align: center;
   padding: 24px 0;
 }
+/* An empty list on a reading tab is the one block of copy with no card under
+   it, so it gets the connect panel's frosted pane (the hexagon field calms on
+   these tabs too, see HeroBackground's calm mode). Solid fill first for
+   WebViews without color-mix(); near-opaque where backdrop blur is missing. */
+.history > .empty,
+.receipts > .empty,
+.request > .empty {
+  padding: 20px 16px;
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  background: color-mix(in srgb, var(--bg-elev) 78%, transparent);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .history > .empty,
+  .receipts > .empty,
+  .request > .empty {
+    background: var(--bg-elev);
+    background: color-mix(in srgb, var(--bg-elev) 94%, transparent);
+  }
+}
 
 /* One line about the history load, with a subtle indeterminate bar. It sits
    above the balance and at the top of History, so a first visit never reads as
