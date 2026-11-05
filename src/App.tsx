@@ -793,6 +793,12 @@ export default function App() {
   // new one regularly, so this is what keeps the total honest after a rotation
   // and on a restored session whose saved remote address is already stale.
   const [liveContractBalances, setLiveContractBalances] = useState<Record<string, number>>({})
+  // The wallet whose first contract archive pass has finished. Until then a
+  // Pay wallet that reads all zeros may simply not have had its current
+  // contract found yet (see payBalancePending).
+  const [payArchiveReadyAddress, setPayArchiveReadyAddress] = useState<string | null>(null)
+  const archivePassesRef = useRef(0)
+  const archiveReadyNowRef = useRef(false)
   // refresh is a callback, so it reads the mirrors here rather than the state;
   // both are written alongside their state on every sync.
   const liveContractsRef = useRef<string[]>([])
@@ -1845,6 +1851,38 @@ export default function App() {
         } else {
           setRemoteAccountLuna(null)
         }
+        // The other live contracts the archive pass found get the same fresh
+        // read. Spending from a Pay contract or extending it writes nothing to
+        // the basic address, so the archive pass (keyed on the basic tx list)
+        // would not re-run and its balances would go stale: a contract Pay has
+        // already emptied into its successor would keep counting, next to the
+        // successor itself. A contract that now reads as settled is dropped and
+        // the archive pass is armed, so the successor is found on this tick.
+        // A failed read keeps the last figure.
+        {
+          const remoteFlat = acc.remoteAddress ? cleanAddr(acc.remoteAddress) : ''
+          const others = liveContractsRef.current.filter((c) => cleanAddr(c) !== remoteFlat)
+          if (others.length > 0) {
+            void Promise.all(
+              others.map((c) => getContractAccount(c).then((a) => [cleanAddr(c), a] as const))
+            ).then((results) => {
+              const settled = results.some(([, a]) => a !== null && a.type !== 'htlc')
+              setLiveContractBalances((prev) => {
+                const next = { ...prev }
+                for (const [flat, a] of results) {
+                  if (a === null) continue
+                  if (a.type === 'htlc') next[flat] = a.balance
+                  else delete next[flat]
+                }
+                return sameLiveBalances(prev, next) ? prev : next
+              })
+              if (settled) {
+                archivePendingRef.current = true
+                archiveNextAtRef.current = 0
+              }
+            })
+          }
+        }
         // The main walk, the staker record and the chain head start together:
         // none needs the others, and the sweeps further down wait for all three.
         // The walk is the step that can take seconds; on the heartbeat it is only
@@ -2057,6 +2095,7 @@ export default function App() {
             // Progress = this pass archived at least one more contract. A pass
             // that progressed and then hit a 429 retries soon; only passes
             // that get nowhere back off harder.
+            archiveReadyNowRef.current = !synced.failed || synced.live.length > 0
             const progressed = synced.finals.size > archiveFinalsRef.current.size
             archiveFinalsRef.current = synced.finals
             const nextArchive = synced.finalTxs.map((t) => ({ ...t, remote: true }))
@@ -2098,7 +2137,23 @@ export default function App() {
             archiveBackoffRef.current = Math.min(archiveBackoffRef.current * 2, ARCHIVE_BACKOFF_MAX_MS)
           } finally {
             archiveBusyRef.current = false
+            // The balance may show whatever it reads (a real 0 included) once a
+            // pass for this wallet found its live contract or ran without a
+            // failed lookup. A pass cut short by a rate limit before it reached
+            // the live contract proves nothing, so wait for the retry, but at
+            // most three passes: a public RPC that keeps failing must not hold
+            // the balance on Loading forever.
+            archivePassesRef.current += 1
+            if (archiveReadyNowRef.current || archivePassesRef.current >= 3) {
+              setPayArchiveReadyAddress((prev) => (prev === cleanAddr(addr) ? prev : cleanAddr(addr)))
+            }
+            archiveReadyNowRef.current = false
           }
+        } else if (!archiveBusyRef.current) {
+          // No pass due (nothing changed since the last one, or not a Pay
+          // session): nothing is about to change the balance, so never leave
+          // it waiting on a pass that will not run.
+          setPayArchiveReadyAddress((prev) => (prev === cleanAddr(addr) ? prev : cleanAddr(addr)))
         }
         // Reward income lives in a separate v2 API (the tx index has no
         // staking activity at all): every period back to January 2025, cached
@@ -2482,11 +2537,22 @@ export default function App() {
   // running: the totals below are not known yet. Show a neutral placeholder
   // rather than a $0.00 / 0 NIM that would read as an empty wallet. Cached rows
   // and the 10s heartbeat keep today's figures (historyReadyAddress matches).
-  const historyPendingFirstLoad =
+  // A Pay wallet whose every figure still reads 0 while the first contract
+  // archive pass is running: its money may sit in a contract Pay extended into,
+  // which only that pass discovers (a restored session's saved remote is often
+  // long settled). Show Loading rather than a 0 NIM that reads as empty.
+  const payBalancePending =
     !!account?.nimiqAddress &&
-    loading &&
-    nimTxs.length === 0 &&
-    historyReadyAddress !== cleanAddr(account.nimiqAddress)
+    account.provider === 'pay' &&
+    !isDemoMode() &&
+    payArchiveReadyAddress !== cleanAddr(account.nimiqAddress) &&
+    totalNimLuna === 0
+  const historyPendingFirstLoad =
+    (!!account?.nimiqAddress &&
+      loading &&
+      nimTxs.length === 0 &&
+      historyReadyAddress !== cleanAddr(account.nimiqAddress)) ||
+    payBalancePending
   const lightLoadActive = !!account?.nimiqAddress && loading
 
   const totalFiat = useMemo(() => {
@@ -4641,6 +4707,8 @@ export default function App() {
     setArchiveTxs([])
     setLiveContracts([])
     setLiveContractBalances((prev) => (Object.keys(prev).length === 0 ? prev : {}))
+    setPayArchiveReadyAddress(null)
+    archivePassesRef.current = 0
     liveContractsRef.current = []
     archiveFinalsRef.current = new Set()
     archivePendingRef.current = false

@@ -279,6 +279,21 @@ export async function syncContractArchive(
     queue.push({ spaced: addr, flat })
   }
   for (const addr of contracts) enqueue(addr)
+  // Successors are queued straight after the contract that settled, not at the
+  // back: the seeds run newest first, so the newest contract's chain is the one
+  // that leads to today's money, and a wallet with dozens of older contracts
+  // would otherwise spend several budget-limited passes before reaching it.
+  const enqueueAfter = (index: number, addrs: string[]) => {
+    let at = index + 1
+    for (const addr of addrs) {
+      const flat = normAddress(addr)
+      if (!flat || seen.has(flat)) continue
+      if (queue.length >= ARCHIVE_MAX_CONTRACTS) return
+      seen.add(flat)
+      queue.splice(at, 0, { spaced: addr, flat })
+      at++
+    }
+  }
 
   let budget = maxFetches
   let complete = true
@@ -318,7 +333,7 @@ export async function syncContractArchive(
       // that was already proved on a previous pass.
       finals.add(flat)
       addRows(cached.txs)
-      for (const next of ownHtlcSuccessors(spaced, cached.txs, ownAddress)) enqueue(next)
+      enqueueAfter(i, ownHtlcSuccessors(spaced, cached.txs, ownAddress))
       continue
     }
     // Once fetching has stopped (budget spent or a failed lookup) the loop
@@ -399,7 +414,7 @@ export async function syncContractArchive(
       // This contract settled: whatever it extended into is the next contract
       // of the user's Pay wallet (proved by the refund-address prefix in the
       // creation data). Queue it. A live one is not expanded above.
-      for (const next of ownHtlcSuccessors(spaced, txs, ownAddress)) enqueue(next)
+      enqueueAfter(i, ownHtlcSuccessors(spaced, txs, ownAddress))
     } else {
       // Any other account type (a toType-2 recipient should only ever read as
       // htlc or, once pruned, basic) is not understood well enough to cache:

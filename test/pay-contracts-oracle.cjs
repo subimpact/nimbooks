@@ -383,6 +383,35 @@ async function main() {
     JSON.stringify({ live: rstop2.live, complete: rstop2.complete, calls: [...ds2.accountCalls, ...ds2.txCalls] }))
   backing.delete(key82)
 
+  // Priority: the newest seed's successor runs before older seeds. Seeds are
+  // [EXT1 (newest, settled, extends into EXT2 live), then five older settled
+  // contracts]. With a budget of 4 calls (EXT1 account + history, EXT2
+  // account) the first pass must already find EXT2, without touching the
+  // older seeds.
+  const OLD = [
+    'NQ85 Y4E8 09PY 31FD F2LC RDND 3KFT B5Y4 7UM6',
+    'NQ93 UKUQ PYS4 F99J M3N2 TE1Y 74QU FND5 JCD5',
+    'NQ18 940N 0HU7 U352 3L2C 1UUM BMPT 0LAG 80FS',
+    'NQ98 TEYP DYB3 QC0A K5TV 3DS1 J41M 3PG5 MMG2',
+    'NQ96 VTQD MD2L NAD6 4SX1 LN12 DTND UHFA 1DXB',
+  ]
+  const prioRows = { [flat(EXT1)]: [tx(EXT1, EXT2, 0, 2, { data: extData(OWN82_HEX) })] }
+  const prioAccounts = {
+    [flat(EXT1)]: { type: 'basic', balance: 0 },
+    [flat(EXT2)]: { type: 'htlc', balance: 9900000 },
+  }
+  for (const o of OLD) {
+    prioRows[flat(o)] = []
+    prioAccounts[flat(o)] = { type: 'basic', balance: 0 }
+  }
+  const dp = makeDeps(prioAccounts, prioRows)
+  const rprio = await syncContractArchive(OWN82, [EXT1, ...OLD], dp.deps, { maxFetches: 4, delayMs: 0 })
+  check('priority: newest seed\'s successor is reached in the first budget-cut pass',
+    rprio.live.map(flat).includes(flat(EXT2)) && rprio.liveBalances[flat(EXT2)] === 9900000 &&
+      OLD.every((o) => (dp.accountCalls.get(flat(o)) ?? 0) === 0),
+    JSON.stringify({ live: rprio.live, calls: [...dp.accountCalls, ...dp.txCalls] }))
+  backing.delete(key82)
+
   fs.unlinkSync(out)
   console.log(`\n${pass} passed, ${fail} failed`)
   process.exit(fail ? 1 : 0)
