@@ -7,7 +7,7 @@
 // Badge text. Spelled out rather than built from a version constant so the exact
 // label ships as one string in the bundle (JSX would emit "v" as a separate node).
 // package.json carries the machine-readable version.
-export const APP_VERSION_LABEL = 'v1.42.1'
+export const APP_VERSION_LABEL = 'v1.42.2'
 
 export interface ChangelogEntry {
   version: string
@@ -16,6 +16,14 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '1.42.2',
+    date: '2026-11-05',
+    items: [
+      'Your Nimiq Pay balance no longer reads 0 when your NIM is safe in Pay: every few days Pay moves your money into a fresh contract, straight from the old one, and NimBooks now follows that chain to the contract holding it today, so the balance, Earn card and History all count it. Until it has checked, the balance says Loading instead of 0 (reported by Kaichao)',
+      'History, Receipts, Request and Export calm the moving hexagons behind them, and an empty list sits on a frosted card, so the words on those screens no longer compete with the background. Overview keeps the full animation (reported by Kaichao)',
+    ],
+  },
   {
     version: '1.42.1',
     date: '2026-11-01',

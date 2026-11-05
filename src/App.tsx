@@ -2095,7 +2095,7 @@ export default function App() {
             // Progress = this pass archived at least one more contract. A pass
             // that progressed and then hit a 429 retries soon; only passes
             // that get nowhere back off harder.
-            archiveReadyNowRef.current = !synced.failed || synced.live.length > 0
+            archiveReadyNowRef.current = synced.complete || synced.live.length > 0
             const progressed = synced.finals.size > archiveFinalsRef.current.size
             archiveFinalsRef.current = synced.finals
             const nextArchive = synced.finalTxs.map((t) => ({ ...t, remote: true }))
@@ -2138,18 +2138,18 @@ export default function App() {
           } finally {
             archiveBusyRef.current = false
             // The balance may show whatever it reads (a real 0 included) once a
-            // pass for this wallet found its live contract or ran without a
-            // failed lookup. A pass cut short by a rate limit before it reached
-            // the live contract proves nothing, so wait for the retry, but at
-            // most three passes: a public RPC that keeps failing must not hold
-            // the balance on Loading forever.
+            // pass for this wallet found its live contract or walked every
+            // contract. A pass cut short (rate limit, budget) before it reached
+            // the live contract proves nothing, so wait for the next one, but
+            // at most three passes: a public RPC that keeps failing must not
+            // hold the balance on Loading forever.
             archivePassesRef.current += 1
             if (archiveReadyNowRef.current || archivePassesRef.current >= 3) {
               setPayArchiveReadyAddress((prev) => (prev === cleanAddr(addr) ? prev : cleanAddr(addr)))
             }
             archiveReadyNowRef.current = false
           }
-        } else if (!archiveBusyRef.current) {
+        } else if (!archiveBusyRef.current && !archivePendingRef.current) {
           // No pass due (nothing changed since the last one, or not a Pay
           // session): nothing is about to change the balance, so never leave
           // it waiting on a pass that will not run.
