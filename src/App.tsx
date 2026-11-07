@@ -5107,7 +5107,7 @@ export default function App() {
       className="version-badge"
       onClick={() => setChangelogOpen(true)}
       title="What's new in NimBooks"
-      aria-label="Version and changelog"
+      aria-label={`${APP_VERSION_LABEL}${uiBeta ? ' beta' : ''}, what's new`}
     >
       {APP_VERSION_LABEL}
       {uiBeta ? ' beta' : ''}

@@ -21,6 +21,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     date: '2026-11-07',
     items: [
       'The tab bar sits closer to the bottom of the screen instead of floating above it: 12px from the edge in Nimiq Pay, and just above the system nav bar in a phone browser',
+      'Accessibility: the MCP setup guide link on the light landing page is darker gold so it is easy to read, and screen readers now read the version badge as the version number it shows',
     ],
   },
   {

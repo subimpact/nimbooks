@@ -536,6 +536,10 @@ a:focus-visible {
   color: var(--accent);
   font-weight: 700;
 }
+/* Gold on the light page is 1.75:1; this darker gold keeps the hue at 4.8:1. */
+:root[data-theme='light'] .learn-builders a {
+  color: #8a6500;
+}
 
 /* Support section: why to give, the donation address card, and the public
    supporters list the API serves. The list hides while loading or if the API
