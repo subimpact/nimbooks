@@ -7,7 +7,7 @@
 // Badge text. Spelled out rather than built from a version constant so the exact
 // label ships as one string in the bundle (JSX would emit "v" as a separate node).
 // package.json carries the machine-readable version.
-export const APP_VERSION_LABEL = 'v1.42.2'
+export const APP_VERSION_LABEL = 'v1.42.3'
 
 export interface ChangelogEntry {
   version: string
@@ -16,6 +16,13 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '1.42.3',
+    date: '2026-11-07',
+    items: [
+      'The tab bar sits closer to the bottom of the screen instead of floating above it: 12px from the edge in Nimiq Pay, and just above the system nav bar in a phone browser',
+    ],
+  },
   {
     version: '1.42.2',
     date: '2026-11-05',

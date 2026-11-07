@@ -1325,14 +1325,16 @@ a:focus-visible {
   display: flex;
   /* 5 tabs have to fit a 320px screen — every pixel of gap counts. */
   gap: 4px;
-  margin-bottom: 16px;
   overflow-x: auto;
   position: fixed;
-  /* Plain bottom first — if env() is unsupported (older WebViews), the whole
-     calc() is dropped and the dock silently floats off-screen below the page.
-     Declaring the simple value first keeps it visible everywhere. */
+  /* Plain bottom first — if env()/max() is unsupported (older WebViews), the
+     whole value is dropped and the dock silently floats off-screen below the
+     page. Declaring the simple value first keeps it visible everywhere.
+     12px from the edge (Nimiq Pay reports no inset); where the phone reports a
+     nav-bar inset, sit 8px above it instead of stacking 12px on top. No margin:
+     on a fixed dock a margin-bottom adds to the offset (it once made 28px). */
   bottom: 12px;
-  bottom: calc(12px + env(safe-area-inset-bottom));
+  bottom: max(12px, calc(8px + env(safe-area-inset-bottom, 0px)));
   left: 0;
   right: 0;
   margin-left: auto;
