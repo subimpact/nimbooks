@@ -841,6 +841,9 @@ export default function App() {
   // Both are pure functions of the tx list, so an unchanged key means the
   // holdings below are still current and the sweeps can be skipped entirely.
   const contractSweepRef = useRef<string | null>(null)
+  // Last remote-contract read, to notice a balance change that wrote no tx to
+  // the basic address (see the remote read in refresh). undefined = not read yet.
+  const lastRemoteLunaRef = useRef<number | null | undefined>(undefined)
   const [stakingHolding, setStakingHolding] = useState<StakingHolding | null>(null)
   // Health of the validator holding this stake, read from its own chain record
   // (lib/validatorHealth). Keyed by the validator address, so a delegation
@@ -1841,7 +1844,20 @@ export default function App() {
         if (acc.remoteAddress) {
           const remote = acc.remoteAddress
           void getContractAccount(remote)
-            .then((acct) => setRemoteAccountLuna(acct?.type === 'htlc' ? acct.balance : null))
+            .then((acct) => {
+              const luna = acct?.type === 'htlc' ? acct.balance : null
+              // Spending out of the contract (a stake funded from Pay, a swap
+              // claim) writes no tx to the basic address, so the tx-keyed
+              // sweep below would keep its pre-spend htlcInTransit figure, and
+              // the max() in htlcLuna would pin Available at the old amount
+              // while Staked already counts the moved NIM. A changed contract
+              // balance re-arms the sweep so the next tick re-reads it.
+              if (lastRemoteLunaRef.current !== undefined && lastRemoteLunaRef.current !== luna) {
+                contractSweepRef.current = null
+              }
+              lastRemoteLunaRef.current = luna
+              setRemoteAccountLuna(luna)
+            })
             .catch((e) => {
               // Back to the history scan rather than a wrong number: `null`
               // is "unknown", not "empty".
@@ -1874,7 +1890,11 @@ export default function App() {
                   if (a.type === 'htlc') next[flat] = a.balance
                   else delete next[flat]
                 }
-                return sameLiveBalances(prev, next) ? prev : next
+                if (sameLiveBalances(prev, next)) return prev
+                // Same reason as the remote read: a contract balance moved
+                // without a basic-address tx, so the sweep must re-read.
+                contractSweepRef.current = null
+                return next
               })
               if (settled) {
                 archivePendingRef.current = true
@@ -3819,6 +3839,9 @@ export default function App() {
         // chain, drop the cache and pull fresh balances/staker/history so the
         // home screen is already right behind the card.
         clearTxCache()
+        // A stake funded from a Pay contract leaves no tx on the basic
+        // address, so force the contract sweep to re-read as well.
+        contractSweepRef.current = null
         if (account) void refresh(account)
         return
       }
@@ -4696,6 +4719,7 @@ export default function App() {
     setAccount(null)
     setPayConsensus(null)
     contractSweepRef.current = null
+    lastRemoteLunaRef.current = undefined
     setNimBalance(null)
     setNimTxs([])
     // The relay history goes with the rest of the ledger: connect() sets the
