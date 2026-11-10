@@ -22,6 +22,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     items: [
       'Transaction links now open on ChainTracer, the new Nimiq explorer from the Nimiq team: it names known senders and recipients (exchanges, staking pools, services) and can trace where the NIM went next',
       'Analytics: each address under Top senders and Top recipients opens its ChainTracer page, to see who it is and follow the funds',
+      'NimBooks MCP 1.3.1 hands your AI assistant ChainTracer links too, so a transaction it finds opens on the same explorer as the app',
     ],
   },
   {
