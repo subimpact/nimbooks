@@ -23,6 +23,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       'Transaction links now open on ChainTracer, the new Nimiq explorer from the Nimiq team: it names known senders and recipients (exchanges, staking pools, services) and can trace where the NIM went next',
       'Analytics: each address under Top senders and Top recipients opens its ChainTracer page, to see who it is and follow the funds',
       'NimBooks MCP 1.3.1 hands your AI assistant ChainTracer links too, so a transaction it finds opens on the same explorer as the app',
+      'Staking from Nimiq Pay: after Pay funds a stake from your balance, the idle NIM on the Earn card and your Available balance update within seconds, instead of showing the amount from before the stake until you reopened NimBooks',
     ],
   },
   {
