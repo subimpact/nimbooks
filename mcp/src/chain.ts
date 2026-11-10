@@ -828,8 +828,10 @@ export function memoForRow(tx: NimiqTx, label: TxLabel): string {
   return isCashlinkMemo(memo) ? 'Cashlink' : memo
 }
 
+// Mirrors the app (src/lib/chain.ts, v1.43.0): Nimiq ChainTracer, the Nimiq
+// team's explorer. A link only: the server never fetches from this host.
 export function explorerTxUrl(hash: string): string {
-  return `https://nimiq.watch/#${hash}`
+  return `https://chaintracer.app/tx/${hash.trim().toLowerCase()}`
 }
 
 // --- Validators list (the same registry the app's stake panel reads) ---

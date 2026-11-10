@@ -135,7 +135,7 @@ uses to reconcile:
     "amountNim": "50",
     "from": "NQ64 CNFM 19SU LHLT K5EN RLMG 8MMP 2H0S 02KK",
     "timestamp": "2026-09-10T02:00:04.873Z",
-    "explorer": "https://nimiq.watch/#3f77f5cfaa6576840483c2cff3dd112d1d2d6c3e5fd8fd0d2b4c7b1b7c8236b1"
+    "explorer": "https://chaintracer.app/tx/3f77f5cfaa6576840483c2cff3dd112d1d2d6c3e5fd8fd0d2b4c7b1b7c8236b1"
   },
   "note": "Reported from the public chain. This server does not mark anything paid — the app reconciles its own copy."
 }

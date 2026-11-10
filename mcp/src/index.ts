@@ -85,7 +85,7 @@ import {
   type ValidatorInfo,
 } from './staking.ts'
 
-const VERSION = '1.3.0'
+const VERSION = '1.3.1'
 
 // How far back a tool will walk the transaction index. The RPC pages 50 at a
 // time and is rate-limited, so these are budgets, not guesses — every tool
