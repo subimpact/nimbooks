@@ -256,7 +256,7 @@ export default function VerifyPage() {
               target="_blank"
               rel="noopener noreferrer"
             >
-              View on Nimiq Watch ↗
+              View on ChainTracer ↗
             </a>
           </div>
           {receipt.memo && (

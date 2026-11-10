@@ -6,6 +6,7 @@ import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import InfoIcon from './InfoIcon'
 import type { CurrencyCode, NimiqTx, TxLabel } from './lib/chain'
 import {
+  explorerAddressUrl,
   decodeMemo,
   explorerTxUrl,
   formatFiat,
@@ -186,7 +187,15 @@ function CounterpartyRows({
         <div key={c.norm} className="sheet-counterparty">
           <div className="sheet-cp-who">
             <div className="sheet-cp-name">{c.name || shortAddr(c.addr)}</div>
-            <div className="sheet-cp-addr mono">{c.addr}</div>
+            <a
+              className="sheet-cp-addr mono"
+              href={explorerAddressUrl(c.addr)}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Open this address on ChainTracer"
+            >
+              {c.addr} ↗
+            </a>
           </div>
           <div className="sheet-cp-amt">
             <div className={incoming ? 'green' : 'red'}>

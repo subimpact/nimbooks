@@ -1841,8 +1841,19 @@ export function encodeMemo(text: string): string {
     .join('')
 }
 
+// Nimiq ChainTracer (Nimiq Labs' explorer, launched 2026-11): clean paths
+// instead of nimiq.watch's hash fragment, counterparty names on the tx page,
+// and a fund tracer one tap away. Pages resolve a fresh tx within seconds and
+// say "may be pending" for one the index has not reached yet.
+const EXPLORER = 'https://chaintracer.app'
+
 export function explorerTxUrl(hash: string): string {
-  return `https://nimiq.watch/#${hash}`
+  return `${EXPLORER}/tx/${hash.trim().toLowerCase()}`
+}
+
+/** Address page: holdings, who it deals with, and "trace where it went". */
+export function explorerAddressUrl(address: string): string {
+  return `${EXPLORER}/address/${address.replace(/\s+/g, '').toUpperCase()}`
 }
 
 export function formatUnits(raw: string | number, decimals: number, locale = 'en'): string {

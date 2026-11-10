@@ -7,7 +7,7 @@
 // Badge text. Spelled out rather than built from a version constant so the exact
 // label ships as one string in the bundle (JSX would emit "v" as a separate node).
 // package.json carries the machine-readable version.
-export const APP_VERSION_LABEL = 'v1.42.3'
+export const APP_VERSION_LABEL = 'v1.43.0'
 
 export interface ChangelogEntry {
   version: string
@@ -16,6 +16,14 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '1.43.0',
+    date: '2026-11-10',
+    items: [
+      'Transaction links now open on ChainTracer, the new Nimiq explorer from the Nimiq team: it names known senders and recipients (exchanges, staking pools, services) and can trace where the NIM went next',
+      'Analytics: each address under Top senders and Top recipients opens its ChainTracer page, to see who it is and follow the funds',
+    ],
+  },
   {
     version: '1.42.3',
     date: '2026-11-07',

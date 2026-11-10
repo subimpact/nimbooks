@@ -2436,9 +2436,15 @@ a.btn-ghost.btn-link {
   white-space: nowrap;
 }
 .sheet-cp-addr {
+  display: block;
   color: var(--muted);
+  text-decoration: none;
   word-break: break-all;
   margin-top: 2px;
+}
+.sheet-cp-addr:hover,
+.sheet-cp-addr:focus-visible {
+  color: var(--accent-2);
 }
 .sheet-cp-amt {
   text-align: right;
