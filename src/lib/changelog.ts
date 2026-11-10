@@ -24,6 +24,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       'Analytics: each address under Top senders and Top recipients opens its ChainTracer page, to see who it is and follow the funds',
       'NimBooks MCP 1.3.1 hands your AI assistant ChainTracer links too, so a transaction it finds opens on the same explorer as the app',
       'Staking from Nimiq Pay: after Pay funds a stake from your balance, the idle NIM on the Earn card and your Available balance update within seconds, instead of showing the amount from before the stake until you reopened NimBooks',
+      'On phones with an on-screen navigation bar, the last line of every page now scrolls clear of the tab bar instead of hiding behind it',
     ],
   },
   {

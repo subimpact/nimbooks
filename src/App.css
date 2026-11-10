@@ -147,7 +147,13 @@ a:focus-visible {
   max-width: 480px;
   margin: 0 auto;
   padding: 16px;
-  padding-bottom: 104px; /* clears the floating dock */
+  /* Clears the floating dock. The dock rises with the phone's reported nav-bar
+     inset (bottom: max(12px, 8px + inset), see .tabs), so the clearance must
+     rise with it too: a fixed 104px left the last line of a page under the
+     dock on phones reporting a ~50px inset. Plain value first for WebViews
+     without env()/max(); with no inset this still resolves to 104px. */
+  padding-bottom: 104px;
+  padding-bottom: max(104px, calc(100px + env(safe-area-inset-bottom, 0px)));
   /* Stacking context for the fixed .hero-bg canvas (z-index -1): it must
      paint behind ALL app content (landing and connected screens both render
      it) while still sitting above the page background. */
@@ -1362,7 +1368,7 @@ a:focus-visible {
 }
 /* Icon above label. 20px icon + 2px gap + 11px label + 12px padding lands the
    tap target at ~45px, which keeps the whole dock near 60px — well inside the
-   104px of content clearance below <main>. */
+   104px+ of content clearance below <main> (it grows with the nav-bar inset). */
 .tab {
   flex: 1;
   min-width: 0;
