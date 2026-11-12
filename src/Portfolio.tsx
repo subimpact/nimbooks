@@ -23,6 +23,8 @@ export interface PortfolioProps {
   lang: string
   gate: StakeGateStatus
   onStake: () => void
+  /** Open the stake panel without preselecting a validator. */
+  onStakeAny: () => void
   inNimiqPay: boolean
   demo: boolean
   // Bumped after every heartbeat (see App.tsx). Every sixth one re-reads the extra addresses.
@@ -67,6 +69,7 @@ export function Portfolio({
   lang,
   gate,
   onStake,
+  onStakeAny,
   inNimiqPay,
   refreshTick,
 }: PortfolioProps) {
@@ -582,7 +585,9 @@ export function Portfolio({
 
       {gate.unlocked && gate.reason === 'staked' && (
         <p className="hint small portfolio-thanks">
-          Unlocked by your ImpactZero stake. Thank you for supporting NimBooks.
+          {gate.withImpactZero
+            ? 'Unlocked by your ImpactZero stake. Thank you for supporting NimBooks.'
+            : 'Unlocked by your stake. Staking with ImpactZero, the validator run by the person who builds NimBooks, also helps keep it running.'}
         </p>
       )}
       {gate.unlocked && gate.reason === 'granted' && (
@@ -607,15 +612,26 @@ export function Portfolio({
             <h3>Stake to unlock</h3>
             <p className="hint">
               {gate.reason === 'not-staked' &&
-                "Stake 1,000 NIM or more with ImpactZero to unlock portfolio reports. There is nothing to buy: ImpactZero is the validator run by the person who builds NimBooks, and stakes with it are how NimBooks is paid for. Staking with it means trusting that operator to run the validator well. Your NIM never leaves your wallet, keeps earning rewards, and you can unstake at any time (usually 12 hours to 4 days). Stakes with other validators don't count."}
+                "Stake 1,000 NIM or more with any validator to unlock portfolio reports. There is nothing to buy: your NIM never leaves your wallet, keeps earning rewards, and you can unstake at any time (usually 12 hours to 4 days). To support NimBooks too, stake with ImpactZero, the validator run by the person who builds it. Staking with it means trusting that operator to run the validator well."}
               {gate.reason === 'below-min' &&
-                `You have ${gate.activeNim.toLocaleString(lang, { maximumFractionDigits: 5 })} NIM staked with ImpactZero. Add ${Math.ceil(gate.missingNim).toLocaleString(lang)} NIM more to unlock portfolio reports. Thank you for supporting NimBooks.`}
-              {gate.reason === 'other-validator' &&
-                "Stakes with other validators don't unlock this. Only ImpactZero does: the validator run by the person who builds NimBooks, so staking with it means trusting that operator. Portfolio reports need 1,000 NIM or more staked with ImpactZero. To switch, unstake from your current validator in the Stake panel, then restake with ImpactZero."}
+                `You have ${gate.activeNim.toLocaleString(lang, { maximumFractionDigits: 5 })} NIM staked${gate.withImpactZero ? ' with ImpactZero' : ''}. Add ${Math.ceil(gate.missingNim).toLocaleString(lang)} NIM more to unlock portfolio reports.${gate.withImpactZero ? ' Thank you for supporting NimBooks.' : ''}`}
             </p>
-            <button className="btn-primary" onClick={onStake}>
-              {gate.reason === 'other-validator' ? 'Open Stake panel' : 'Stake with ImpactZero'}
-            </button>
+            {gate.reason === 'below-min' && !gate.withImpactZero ? (
+              <button className="btn-primary" onClick={onStakeAny}>
+                Open Stake panel
+              </button>
+            ) : (
+              <>
+                <button className="btn-primary" onClick={onStake}>
+                  Stake with ImpactZero
+                </button>
+                {gate.reason === 'not-staked' && (
+                  <button className="btn-secondary" onClick={onStakeAny}>
+                    Choose another validator
+                  </button>
+                )}
+              </>
+            )}
           </div>
         </>
       ) : (

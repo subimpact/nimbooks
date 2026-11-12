@@ -25,7 +25,7 @@ flowchart LR
     V2["v2.nimiqwatch.com<br/>staking reward events"]
     VAL["validators API<br/>fees, reliability, stake"]
     PX["prices.nim.sh · DefiLlama · CoinGecko<br/>crypto prices (tiered)"]
-    FX["Nimiq Wallet table · currency-api · er-api<br/>FX rates (tiered)"]
+    FX["Nimiq Wallet table · currency-api · er-api<br/>Frankfurter historical tax FX"]
     EVM["EVM public RPCs<br/>USDT and native balances"]
   end
   App --> RPC & V2 & VAL & PX & FX & EVM
@@ -79,7 +79,8 @@ src/
     ├── payContracts.ts  Finds and archives every Nimiq Pay payment contract
     ├── stakeGate.ts     Which wallets unlock stake-gated features
     ├── statement.ts     Tax-year statements (daily UTC closes)
-    ├── tax.ts, taxCsv.ts FIFO gains, staking income, Koinly/CoinTracking/CTC CSVs
+    ├── tax.ts, taxCsv.ts FIFO gains, staking income, Koinly/CoinTracking/Summ CSVs
+    ├── fxHistory.ts     Historical daily FX for tax reports (Frankfurter, currency-api)
     ├── receipt.ts       Receipt encode, Ed25519 verify, signer binding, chain check
     ├── invoice.ts       Payment requests: exact Luna maths, link encoding
     ├── stakeLink.ts     Stake links: parse/build #/stake?amount=…&validator=…
@@ -125,7 +126,10 @@ answer at or above $0.01 is bad data, not a rally), and assets a winning
 tier left out are filled from the next tier that has them. FX rates for the
 148 display currencies are the Nimiq Wallet's own exchange-rate table
 (Firestore), with anything missing filled from the currency-api data via
-jsDelivr, then ExchangeRate-API. A ~4 s timeout per request; every
+jsDelivr, then ExchangeRate-API. Historical daily tax rates come from ECB
+reference rates via `api.frankfurter.dev` (weekends use the prior business
+day), with dated currency-api snapshots on jsDelivr for the currencies ECB
+does not publish. A ~4 s timeout per request; every
 last-good result is cached with its timestamp (`nimbooks:rates` for
 per-asset tables, 5 minutes fresh; `nimbooks:fx` for the USD table, 60
 minutes fresh) and reused at any age when everything live fails - if the

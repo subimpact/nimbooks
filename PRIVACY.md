@@ -113,6 +113,7 @@ device calls it.
 | Nimiq network peers (only when `rpc.nimiqwatch.com` fails) | the built-in light client reads your balance and history straight from the Nimiq network: it starts at Nimiq's seed nodes and then connects to peers they return, which is why the policy allows any secure WebSocket (`wss:`) | the Nimiq addresses you look up |
 | Validators API | validator fees, reliability, yields | nothing about you |
 | CoinGecko, DefiLlama, `prices.nim.sh` | prices (Nimiq's own price service first, then DefiLlama and CoinGecko as backups) | nothing about you |
+| `api.frankfurter.dev` | historical daily exchange rates for tax reports | the currencies and dates requested |
 | EVM public RPCs (Polygon, Base, Arbitrum, Optimism, Ethereum) | USDT and native balances | your EVM address |
 | Nimiq Hub (`hub.nimiq.com`) | browser sign-in and signing | what you sign there |
 | short.io | short links for receipts and payment requests you share | the shared link, including its contents |
@@ -125,8 +126,10 @@ in order: the Nimiq Wallet's own exchange-rate table
 (`firestore.googleapis.com`), then the currency-api data served by
 `cdn.jsdelivr.net`, then ExchangeRate-API (`open.er-api.com`). Each is a
 plain GET carrying nothing but the request itself - no address, no user data
-- and whichever answers first fills the table. ExchangeRate-API's terms ask
-for a credit: **FX rates from [ExchangeRate-API](https://www.exchangerate-api.com)**.
+- and whichever answers first fills the table. Historical tax rates use
+`api.frankfurter.dev` for ECB currencies and dated `cdn.jsdelivr.net`
+snapshots for the rest. ExchangeRate-API's terms ask for a credit:
+**FX rates from [ExchangeRate-API](https://www.exchangerate-api.com)**.
 
 ## Your wallet and your keys
 

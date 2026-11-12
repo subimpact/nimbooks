@@ -1,13 +1,14 @@
 // Tax-tool CSV formats adapted from nimiqtoolbox/nimiq-tax-dashboard (MIT).
 
-import type { TaxLotRow, TaxYearSummary, TaxReport } from './tax'
+import { DEFAULT_TAX_PRICE_SOURCE, USD_FX_SOURCE, type TaxLotRow, type TaxYearSummary, type TaxReport } from './tax'
+import { APP_VERSION_LABEL } from './changelog'
 
 export type TaxFormat = 'koinly' | 'cointracking' | 'cryptotaxcalculator'
 
 export const TAX_FORMAT_LABELS: Record<TaxFormat, string> = {
   koinly: 'Koinly',
   cointracking: 'CoinTracking',
-  cryptotaxcalculator: 'CryptoTaxCalculator',
+  cryptotaxcalculator: 'Summ (CryptoTaxCalculator)',
 }
 
 const NIM = 'NIM'
@@ -37,11 +38,14 @@ function pad2(n: number): string {
   return String(n).padStart(2, '0')
 }
 
-// UTC "YYYY-MM-DD HH:MM:SS" (+ optional suffix, e.g. " UTC" for Koinly).
-// TaxLotRow carries a UTC calendar day, so the time component is midnight.
-function dateUTC(day: string, suffix = ''): string {
-  const d = new Date(`${day}T00:00:00Z`)
-  if (Number.isNaN(d.getTime())) return `${day}${suffix}`
+// UTC "YYYY-MM-DD HH:MM:SS". The row's ts carries the real transaction time;
+// a synthesised row without one falls back to midnight on its UTC day.
+function dateUTC(r: TaxLotRow, suffix = ''): string {
+  const ms = typeof r.ts === 'number' && Number.isFinite(r.ts)
+    ? r.ts
+    : Date.parse(`${r.date}T00:00:00Z`)
+  const d = new Date(ms)
+  if (Number.isNaN(d.getTime())) return `${r.date}${suffix}`
   return (
     `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())} ` +
     `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}:${pad2(d.getUTCSeconds())}${suffix}`
@@ -64,6 +68,24 @@ function usdStr(u: number | null): string {
 // the report - whatever the reporting currency - formats identically.
 function fiatStr(u: number | null): string {
   return usdStr(u)
+}
+
+// Vendor reference prices need enough precision for a sub-cent asset; trim
+// trailing zeros but never render a positive price as 0.
+function priceStr(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n) || n <= 0) return ''
+  let s = n.toFixed(8)
+  if (s.includes('.')) s = s.replace(/0+$/, '').replace(/\.$/, '')
+  return s
+}
+
+function rowReferencePrice(r: TaxLotRow): number | null {
+  if (typeof r.unitPriceFiat === 'number' && Number.isFinite(r.unitPriceFiat) && r.unitPriceFiat > 0) {
+    return r.unitPriceFiat
+  }
+  const fiat = rowUsd(r)
+  if (fiat != null && Number.isFinite(fiat) && r.nim > 0) return fiat / r.nim
+  return null
 }
 
 // Tax category the three builders key off. Staking rewards are income; the
@@ -116,11 +138,12 @@ function txFeed(rows: TaxLotRow[], incomeRows: TaxLotRow[]): TaxLotRow[] {
 }
 
 // --- Koinly custom CSV ---------------------------------------------------
-// Direction via Sent/Received, fiat value in Net Worth, staking income label.
-// Ref: https://help.koinly.io/en/articles/3662999-how-to-create-a-custom-csv-file-with-your-data
+// Direction via Sent/Received, fiat value in Net Worth, staking income as the
+// reward tag. Koinly's income tags have no "staking"; reward is the right one.
+// Ref: https://support.koinly.io/en/articles/9489976-how-to-create-a-custom-csv-file-with-your-data
 const KOINLY_HEADERS = [
   'Date', 'Sent Amount', 'Sent Currency', 'Received Amount', 'Received Currency',
-  'Fee Amount', 'Fee Currency', 'Net Worth Amount', 'Net Worth Currency', 'Label', 'Description', 'TxHash',
+  'Fee Amount', 'Fee Currency', 'Net Worth Amount', 'Net Worth Currency', 'Tag', 'Description', 'TxHash',
 ]
 
 function koinlyCsv(feed: TaxLotRow[], currency: string): string {
@@ -130,7 +153,7 @@ function koinlyCsv(feed: TaxLotRow[], currency: string): string {
       const fee = feeIfSent()
       const fiat = rowUsd(r)
       return {
-        'Date': dateUTC(r.date, ' UTC'),
+        'Date': dateUTC(r),
         'Sent Amount': inn ? '' : fmtNim(r.nim),
         'Sent Currency': inn ? '' : NIM,
         'Received Amount': inn ? fmtNim(r.nim) : '',
@@ -139,7 +162,7 @@ function koinlyCsv(feed: TaxLotRow[], currency: string): string {
         'Fee Currency': fee ? NIM : '',
         'Net Worth Amount': fiatStr(fiat),
         'Net Worth Currency': fiat != null ? currency : '',
-        'Label': taxCat(r) === 'income' ? 'staking' : '',
+        'Tag': taxCat(r) === 'income' ? 'reward' : '',
         'Description': describe(r),
         'TxHash': r.txHash || '',
       }
@@ -172,7 +195,7 @@ function cointrackingCsv(feed: TaxLotRow[]): string {
         'Exchange': 'Nimiq',
         'Trade-Group': '',
         'Comment': describe(r),
-        'Date': dateUTC(r.date),
+        'Date': dateUTC(r),
         'Tx-ID': r.txHash || '',
         'Buy Value in Account Currency': inn ? fiatStr(fiat) : '',
         'Sell Value in Account Currency': inn ? '' : fiatStr(fiat),
@@ -182,12 +205,16 @@ function cointrackingCsv(feed: TaxLotRow[]): string {
   )
 }
 
-// --- CryptoTaxCalculator advanced CSV ------------------------------------
-// Single-asset movements as transfer-in/out (+ staking income).
-const CALC_HEADERS = [
-  'Timestamp (UTC)', 'Type', 'Base Currency (Optional)', 'Base Amount (Optional)',
+// --- Summ (formerly CryptoTaxCalculator) advanced CSV -------------------
+// Single-asset movements as transfer-in/out (+ staking income). The header
+// follows Summ's current template exactly, including the leading space before
+// its optional ID column, and carries a reference price so Summ never values
+// NIM at zero. Keep the internal id 'cryptotaxcalculator' for saved choices.
+const SUMM_HEADERS = [
+  'Timestamp (UTC)', 'Type', 'Base Currency', 'Base Amount',
   'Quote Currency (Optional)', 'Quote Amount (Optional)', 'Fee Currency (Optional)', 'Fee Amount (Optional)',
-  'From (Optional)', 'To (Optional)', 'ID (Optional)', 'Description (Optional)',
+  'From (Optional)', 'To (Optional)', 'Blockchain (Optional)', ' ID (Optional)',
+  'Description (Optional)', 'Reference Price Per Unit (Optional)', 'Reference Price Currency (Optional)',
 ]
 
 function calculatorCsv(feed: TaxLotRow[], ownAddress: string, currency: string): string {
@@ -195,22 +222,26 @@ function calculatorCsv(feed: TaxLotRow[], ownAddress: string, currency: string):
     feed.map((r) => {
       const inn = taxCat(r) !== 'out'
       const fee = feeIfSent()
+      const refPrice = rowReferencePrice(r)
       return {
-        'Timestamp (UTC)': dateUTC(r.date),
+        'Timestamp (UTC)': dateUTC(r),
         'Type': taxCat(r) === 'income' ? 'staking' : inn ? 'transfer-in' : 'transfer-out',
-        'Base Currency (Optional)': NIM,
-        'Base Amount (Optional)': fmtNim(r.nim),
+        'Base Currency': NIM,
+        'Base Amount': fmtNim(r.nim),
         'Quote Currency (Optional)': '',
         'Quote Amount (Optional)': '',
         'Fee Currency (Optional)': fee ? NIM : '',
         'Fee Amount (Optional)': fee,
         'From (Optional)': inn ? '' : ownAddress,
         'To (Optional)': inn ? ownAddress : '',
-        'ID (Optional)': r.txHash || '',
+        'Blockchain (Optional)': '',
+        ' ID (Optional)': r.txHash || '',
         'Description (Optional)': descWithUsd(r, currency),
+        'Reference Price Per Unit (Optional)': priceStr(refPrice),
+        'Reference Price Currency (Optional)': currency,
       }
     }),
-    CALC_HEADERS
+    SUMM_HEADERS
   )
 }
 
@@ -231,7 +262,9 @@ export function buildTaxTransactionsCsv(
       : format === 'cointracking'
         ? cointrackingCsv(feed)
         : calculatorCsv(feed, address, cur)
-  return '\uFEFF' + csv
+  // Summ's header has to match its template byte for byte, so that format is
+  // served without the Excel BOM the other two vendors tolerate.
+  return format === 'cryptotaxcalculator' ? csv : '\uFEFF' + csv
 }
 
 export function buildTaxSummaryCsv(report: TaxReport, address: string, currency: string = DEFAULT_FIAT): string {
@@ -239,11 +272,15 @@ export function buildTaxSummaryCsv(report: TaxReport, address: string, currency:
   const curUpper = (currency || DEFAULT_FIAT).toUpperCase()
   const years = [...report.years].sort((a, b) => a.year.localeCompare(b.year))
   const escape = (c: string | number): string => `"${String(c).replace(/"/g, '""')}"`
+  const priceSource = report.priceSource || DEFAULT_TAX_PRICE_SOURCE
+  const fxSource = report.fxSource || (curUpper === 'USD' ? USD_FX_SOURCE : 'unknown')
+  const fxFallbackDays = Number.isFinite(report.fxFallbackDays) ? report.fxFallbackDays : 0
   const body: (string | number)[][] = [
     [
       `Year`, `Proceeds (${curUpper})`, `Cost Basis (${curUpper})`, `Net Gain (${curUpper})`,
       `Staking Income (${curUpper})`,
       'Disposals', 'Incomplete', 'Address', 'Generated (UTC)',
+      'method', 'price_source', 'fx_source', 'fx_fallback_days', 'app_version',
     ],
     ...years.map((y: TaxYearSummary) => [
       y.year,
@@ -255,6 +292,11 @@ export function buildTaxSummaryCsv(report: TaxReport, address: string, currency:
       y.incomplete ? 1 : 0,
       address,
       generatedAt,
+      'FIFO, single address',
+      priceSource,
+      fxSource,
+      fxFallbackDays,
+      APP_VERSION_LABEL,
     ]),
   ]
   return (

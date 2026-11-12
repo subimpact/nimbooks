@@ -7,7 +7,7 @@
 // Badge text. Spelled out rather than built from a version constant so the exact
 // label ships as one string in the bundle (JSX would emit "v" as a separate node).
 // package.json carries the machine-readable version.
-export const APP_VERSION_LABEL = 'v1.43.0'
+export const APP_VERSION_LABEL = 'v1.44.0'
 
 export interface ChangelogEntry {
   version: string
@@ -16,6 +16,18 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '1.44.0',
+    date: '2026-11-12',
+    items: [
+      "Tax reports in a currency other than USD now use each day's exchange rate instead of today's rate for the whole report, so a 2025 euro report matches 2025 rates",
+      'Tax exports now carry the real time of each transaction, not just its date, and old Nimiq 1.0 timestamps still show their true year',
+      'The Koinly export marks staking rewards as income with the reward tag, and its date column no longer adds a UTC suffix',
+      "The Summ export matches Summ's current template and carries the NIM price and report currency, so Summ never values your NIM at zero",
+      "The tax summary states the method, the price source and the exchange-rate source, plus how many days fell back to today's rate when history was unavailable",
+      'Portfolio reports now unlock with 1,000 NIM or more staked with any validator, not only ImpactZero. Staking with ImpactZero still supports NimBooks and stays the suggested choice',
+    ],
+  },
   {
     version: '1.43.0',
     date: '2026-11-10',

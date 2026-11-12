@@ -219,7 +219,13 @@ import {
   liveClosingBalanceNim,
   type Statement,
 } from './lib/statement'
-import { computeFifoGains, getAllDailyNimPrices, type TaxReport } from './lib/tax'
+import {
+  computeFifoGains,
+  getAllDailyNimPrices,
+  getDailyNimPriceSource,
+  type TaxReport,
+} from './lib/tax'
+import { getDailyFx, type DailyFxRate } from './lib/fxHistory'
 import { buildTaxTransactionsCsv, buildTaxSummaryCsv, TAX_FORMAT_LABELS, type TaxFormat } from './lib/taxCsv'
 
 type View = 'dashboard' | 'history' | 'receipts' | 'request' | 'export'
@@ -4942,8 +4948,8 @@ export default function App() {
   // swapped in, with the old figures staying visible meanwhile. Recalculate and a
   // currency switch still start from a clean spinner.
   const taxRunRef = useRef(0)
-  // The transaction list and FX rate the report on screen was built from.
-  const taxBuiltRef = useRef<{ txs: NimiqTx[]; rate: number } | null>(null)
+  // The transaction list and FX input the report on screen was built from.
+  const taxBuiltRef = useRef<{ txs: NimiqTx[]; fxKey: string } | null>(null)
   // Every daily close seen so far. A pass that cannot reach DefiLlama must not drop
   // the years only that history covers, so the prices only ever accumulate.
   const taxPricesRef = useRef<Record<string, number>>({})
@@ -4953,19 +4959,46 @@ export default function App() {
     if (!own || taxBusy) return
     const sameCurrency = taxReport?.currency === taxCurrency
     const built = taxBuiltRef.current
-    if (sameCurrency && built && built.txs === allTxs && built.rate === taxFxRate) return
+    const fxKey = `${taxCurrency}:${taxFxRate}`
+    if (sameCurrency && built && built.txs === allTxs && built.fxKey === fxKey) return
     // A report already on screen in this currency is replaced quietly.
     const silent = sameCurrency
     const run = ++taxRunRef.current
     const txs = allTxs
-    const rate = taxFxRate
+    // Every distinct UTC day a transaction touches; USD needs no FX request.
+    const days = new Set<string>()
+    for (const t of txs) {
+      if (t.executionResult === false) continue
+      if (typeof t.timestamp !== 'number' || !Number.isFinite(t.timestamp)) continue
+      days.add(new Date(timestampToMs(t.timestamp)).toISOString().slice(0, 10))
+    }
     if (!silent) setTaxBusy(true)
     getAllDailyNimPrices()
-      .then((fetched) => {
+      .then(async (fetched) => {
         if (run !== taxRunRef.current) return
         taxPricesRef.current = { ...taxPricesRef.current, ...fetched }
-        taxBuiltRef.current = { txs, rate }
-        setTaxReport(computeFifoGains(txs, own, taxPricesRef.current, taxCurrency, rate))
+        let fxInput: number | DailyFxRate = 1
+        if (taxCurrency !== 'usd') {
+          const fx = await getDailyFx(taxCurrency, [...days])
+          if (run !== taxRunRef.current) return
+          const rateFor = ((day: string) => fx.rateFor(day)) as DailyFxRate
+          // Today's live rate is the honest fallback when history is missing.
+          rateFor.todayRate = taxFxRate
+          rateFor.source = fx.source
+          fxInput = rateFor
+        }
+        if (run !== taxRunRef.current) return
+        taxBuiltRef.current = { txs, fxKey }
+        setTaxReport(
+          computeFifoGains(
+            txs,
+            own,
+            taxPricesRef.current,
+            taxCurrency,
+            fxInput,
+            getDailyNimPriceSource()
+          )
+        )
       })
       .catch(() => {
         if (!silent && run === taxRunRef.current) {
@@ -5184,6 +5217,12 @@ export default function App() {
 
   const handleStakeFromGate = () => {
     setSelectedValidator(cleanAddr(PINNED_VALIDATOR_ADDRESS))
+    openStake()
+  }
+
+  // Any validator unlocks the portfolio (validator-neutral gate); this opens
+  // the panel without preselecting ImpactZero.
+  const handleStakeAnyFromGate = () => {
     openStake()
   }
 
@@ -6738,6 +6777,7 @@ export default function App() {
               lang={lang}
               gate={stakeGate}
               onStake={handleStakeFromGate}
+              onStakeAny={handleStakeAnyFromGate}
               inNimiqPay={inNimiqPay}
               demo={demoMode}
               refreshTick={refreshTick}
@@ -6988,6 +7028,12 @@ export default function App() {
                       </p>
                     )}
                   </div>
+                  <p className="hint small" data-probe="tax-sources">
+                    {`FIFO, single address · ${taxReport.priceSource} · ${taxReport.fxSource}`}
+                    {taxReport.fxFallbackDays > 0
+                      ? ` · ${taxReport.fxFallbackDays} days used today's exchange rate`
+                      : ''}
+                  </p>
                   <div className="statement-controls">
                     <label className="hint small" htmlFor="taxFormat">
                       Format

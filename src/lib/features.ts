@@ -601,7 +601,7 @@ export const FEATURES: FeatureDef[] = [
       },
       {
         title: 'Unlock it by staking',
-        body: 'Stake to unlock: reports open when you stake 1,000 NIM or more with ImpactZero, the validator run by the person who builds NimBooks. Your NIM stays in your wallet and keeps earning. The sample wallet is unlocked.',
+        body: 'Stake to unlock: reports open when you stake 1,000 NIM or more with any validator. Staking with ImpactZero, the validator run by the person who builds NimBooks, also supports it. Your NIM stays in your wallet and keeps earning. The sample wallet is unlocked.',
       },
     ],
     behindTheScenes: [
@@ -611,7 +611,7 @@ export const FEATURES: FeatureDef[] = [
     ],
     goodToKnow: [
       "Funds Nimiq Pay holds for an extra address are not included. Your own wallet's Nimiq Pay balance is.",
-      'Only active stake with ImpactZero unlocks reports. Stakes with other validators do not count.',
+      'Only active stake counts (stake that is cooling down or retired does not). Any validator works.',
       'The PDF is made by your browser or phone print step, so nothing is uploaded to make it.',
     ],
     tryView: { view: 'export', target: 'portfolio' },

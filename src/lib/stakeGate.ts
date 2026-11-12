@@ -15,6 +15,8 @@ export interface StakeGateStatus {
   reason: StakeGateReason
   activeNim: number
   missingNim: number
+  /** The stake is delegated to ImpactZero, the builder's validator. */
+  withImpactZero: boolean
 }
 
 function clean(address: string): string {
@@ -48,16 +50,18 @@ export async function isGrantedAddress(address: string): Promise<boolean> {
 
 /**
  * Evaluates whether the connected wallet meets the minimum stake threshold
- * (1,000 NIM active stake with the ImpactZero validator) required to unlock
- * portfolio PDF reporting.
+ * (1,000 NIM active stake with ANY validator) required to unlock portfolio PDF
+ * reporting. ImpactZero, the builder's validator, is suggested first in the UI
+ * but is not required (user decision 2026-11-12: the gate is validator-neutral).
  *
  * Rules:
  * - Demo mode is always unlocked.
  * - A wallet on the access grant list is unlocked regardless of stake ('granted').
  * - Missing staker record is locked ('not-staked').
- * - Staker record delegated to any other validator is locked ('other-validator').
  * - Only active stake counts (inactive/cooling and retired do not).
- * - Minimum required is 1,000 NIM (100,000,000 Luna).
+ * - Minimum required is 1,000 NIM (100,000,000 Luna), with any validator.
+ * - 'other-validator' is kept in the reason type for old callers but is never
+ *   returned any more.
  */
 export function stakeGateStatus(
   holding: StakingHolding | null,
@@ -67,23 +71,15 @@ export function stakeGateStatus(
   const rawLuna = holding ? Number(holding.active) : 0
   const activeLuna = Number.isFinite(rawLuna) && rawLuna > 0 ? Math.floor(rawLuna) : 0
   const activeNim = activeLuna / 100000
+  const withImpactZero =
+    !!holding && clean(holding.delegation ?? '') === clean(PINNED_VALIDATOR_ADDRESS)
 
   if (isDemo) {
-    return {
-      unlocked: true,
-      reason: 'demo',
-      activeNim,
-      missingNim: 0,
-    }
+    return { unlocked: true, reason: 'demo', activeNim, missingNim: 0, withImpactZero }
   }
 
   if (granted) {
-    return {
-      unlocked: true,
-      reason: 'granted',
-      activeNim,
-      missingNim: 0,
-    }
+    return { unlocked: true, reason: 'granted', activeNim, missingNim: 0, withImpactZero }
   }
 
   if (!holding) {
@@ -92,32 +88,20 @@ export function stakeGateStatus(
       reason: 'not-staked',
       activeNim: 0,
       missingNim: STAKE_GATE_MIN_NIM,
-    }
-  }
-
-  if (clean(holding.delegation) !== clean(PINNED_VALIDATOR_ADDRESS)) {
-    return {
-      unlocked: false,
-      reason: 'other-validator',
-      activeNim,
-      missingNim: STAKE_GATE_MIN_NIM,
+      withImpactZero: false,
     }
   }
 
   const minLuna = STAKE_GATE_MIN_NIM * 100000 // 100,000,000 Luna
   if (activeLuna >= minLuna) {
-    return {
-      unlocked: true,
-      reason: 'staked',
-      activeNim,
-      missingNim: 0,
-    }
+    return { unlocked: true, reason: 'staked', activeNim, missingNim: 0, withImpactZero }
   }
 
   return {
     unlocked: false,
     reason: 'below-min',
     activeNim,
-    missingNim: (100000000 - activeLuna) / 100000,
+    missingNim: (minLuna - activeLuna) / 100000,
+    withImpactZero,
   }
 }

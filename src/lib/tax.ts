@@ -7,6 +7,17 @@ export const LLAMA_PRICE_URL = 'https://coins.llama.fi/chart/coingecko:nimiq-2'
 
 const PRICES_TAX_KEY = 'nimbooks:pricestax'
 const PRICES_TAX_TTL = 24 * 60 * 60 * 1000 // 24h, daily closes are immutable history
+
+export const DEFAULT_TAX_PRICE_SOURCE = 'daily UTC close: DefiLlama, CoinGecko fallback'
+export const USD_FX_SOURCE = 'none (USD)'
+
+// The most recent price source label from getAllDailyNimPrices, so the summary
+// CSV can state which tier actually supplied the daily closes.
+let lastDailyNimPriceSource = DEFAULT_TAX_PRICE_SOURCE
+
+export function getDailyNimPriceSource(): string {
+  return lastDailyNimPriceSource
+}
 // A cached map only counts as fresh when it reaches at least this far back.
 // DefiLlama lists NIM from 2018-07-27, so 2018-12-31 is safely past the
 // listing yet years below what a single 500-day page covers; caches written
@@ -22,6 +33,7 @@ const NIM = 1e5 // Luna -> NIM
 interface PriceCache {
   at: number
   prices: Record<string, number>
+  source?: string
 }
 
 // Full (all-time) daily NIM closes. CoinGecko market_chart answers only the
@@ -41,6 +53,7 @@ export async function getAllDailyNimPrices(): Promise<Record<string, number>> {
           if (earliestDay === null || day < earliestDay) earliestDay = day
         }
         if (earliestDay !== null && earliestDay <= LLAMA_COVERAGE_FLOOR_DAY) {
+          lastDailyNimPriceSource = entry.source || DEFAULT_TAX_PRICE_SOURCE
           return entry.prices
         }
       }
@@ -112,9 +125,22 @@ export async function getAllDailyNimPrices(): Promise<Record<string, number>> {
   }
 
   const merged: Record<string, number> = { ...coinGecko, ...llama }
-  if (Object.keys(llama).length >= 300) {
+  const llamaDays = Object.keys(llama).length
+  const coinGeckoDays = Object.keys(coinGecko).length
+  lastDailyNimPriceSource =
+    llamaDays > 0 && coinGeckoDays > 0
+      ? DEFAULT_TAX_PRICE_SOURCE
+      : llamaDays > 0
+        ? 'daily UTC close: DefiLlama'
+        : coinGeckoDays > 0
+          ? 'daily UTC close: CoinGecko'
+          : DEFAULT_TAX_PRICE_SOURCE
+  if (llamaDays >= 300) {
     try {
-      localStorage.setItem(PRICES_TAX_KEY, JSON.stringify({ at: Date.now(), prices: merged }))
+      localStorage.setItem(
+        PRICES_TAX_KEY,
+        JSON.stringify({ at: Date.now(), prices: merged, source: lastDailyNimPriceSource })
+      )
     } catch {
       /* storage unavailable, serve from memory this session */
     }
@@ -128,7 +154,11 @@ export async function getAllDailyNimPrices(): Promise<Record<string, number>> {
 export interface TaxLotRow {
   txHash: string
   date: string
+  /** Transaction time in ms, already normalised by timestampToMs. */
+  ts: number
   nim: number
+  /** Day's NIM price in report.currency, for vendor reference-price columns. */
+  unitPriceFiat?: number | null
   /** Fiat in report.currency (legacy name kept; alias of proceedsFiat). */
   proceedsUsd: number | null
   /** Fiat in report.currency (legacy name kept; alias of costBasisFiat). */
@@ -161,7 +191,29 @@ export interface TaxReport {
   unmatchedDisposals: number
   /** Lowercase fiat code the *Usd fields are denominated in, e.g. 'gbp'. */
   currency: string
+  /** Where the historical exchange rates came from. */
+  fxSource: string
+  /** Days with no historical FX that fell back to today's rate. */
+  fxFallbackDays: number
+  /** Which daily NIM close tier supplied the prices. */
+  priceSource: string
 }
+
+/** Per-day FX resolver; may carry the metadata computeFifoGains needs. */
+export type FxDayResolver = ((day: string) => number | null) & {
+  todayRate?: number | null
+  source?: string
+  fallbackDays?: number
+}
+
+export interface FxDayHistory {
+  rateFor: (day: string) => number | null
+  todayRate?: number | null
+  source?: string
+  fallbackDays?: number
+}
+
+export type FxRateInput = number | FxDayResolver | FxDayHistory
 
 function normAddr(a: string): string {
   return String(a ?? '').replace(/\s+/g, '').toUpperCase()
@@ -194,15 +246,17 @@ export function computeFifoGains(
   ownAddress: string,
   prices: Record<string, number>,
   currency: string = 'usd',
-  fxRate: number = 1.0
+  fxRate: FxRateInput = 1.0,
+  priceSource: string = DEFAULT_TAX_PRICE_SOURCE
 ): TaxReport {
+  const fx = normalizeFx(fxRate, currency)
   const empty: TaxReport = {
     rows: [], incomeRows: [], years: [], coverageStart: null, missingPriceDays: 0,
     completeHistoryDays: 0, neutralAmbiguous: 0, unmatchedDisposals: 0,
-    currency,
+    currency, fxSource: fx.source, fxFallbackDays: 0, priceSource,
   }
   try {
-    return computeFifoGainsInner(txs, ownAddress, prices, currency, fxRate)
+    return computeFifoGainsInner(txs, ownAddress, prices, currency, fx, priceSource)
   } catch {
     // Pathological input never throws - degrade to the empty shape. The
     // guard itself must not throw: prices may be the pathological input.
@@ -214,15 +268,76 @@ export function computeFifoGains(
   }
 }
 
+interface NormalizedFx {
+  rateFor: (day: string) => number | null
+  todayRate: number
+  source: string
+}
+
+function normalizeFx(input: FxRateInput, currency: string): NormalizedFx {
+  const cur = String(currency || 'usd').toLowerCase()
+  const today = new Date(Date.now()).toISOString().slice(0, 10)
+  const positive = (v: unknown): v is number =>
+    typeof v === 'number' && Number.isFinite(v) && v > 0
+
+  if (typeof input === 'number') {
+    const rate = positive(input) ? input : 1.0
+    return {
+      rateFor: () => rate,
+      todayRate: rate,
+      source: cur === 'usd' ? USD_FX_SOURCE : 'fixed rate',
+    }
+  }
+
+  if (typeof input === 'function') {
+    const fn = input as FxDayResolver
+    const todayRate = positive(fn.todayRate)
+      ? fn.todayRate
+      : positive(fn(today))
+        ? (fn(today) as number)
+        : 1.0
+    return {
+      rateFor: (day) => {
+        const value = fn(day)
+        return positive(value) ? value : null
+      },
+      todayRate,
+      source: fn.source || (cur === 'usd' ? USD_FX_SOURCE : 'daily FX'),
+    }
+  }
+
+  if (input && typeof input === 'object' && typeof input.rateFor === 'function') {
+    const history = input as FxDayHistory
+    const todayRate = positive(history.todayRate)
+      ? history.todayRate
+      : positive(history.rateFor(today))
+        ? (history.rateFor(today) as number)
+        : 1.0
+    return {
+      rateFor: (day) => {
+        const value = history.rateFor(day)
+        return positive(value) ? value : null
+      },
+      todayRate,
+      source: history.source || (cur === 'usd' ? USD_FX_SOURCE : 'daily FX'),
+    }
+  }
+
+  return {
+    rateFor: () => 1.0,
+    todayRate: 1.0,
+    source: cur === 'usd' ? USD_FX_SOURCE : 'fixed rate',
+  }
+}
+
 function computeFifoGainsInner(
   txs: NimiqTx[],
   ownAddress: string,
   prices: Record<string, number>,
   currency: string = 'usd',
-  fxRate: number = 1.0
+  fx: NormalizedFx,
+  priceSource: string
 ): TaxReport {
-  // A nonsensical rate never wipes out the figures; fall back to raw USD.
-  const rate = Number.isFinite(fxRate) && fxRate > 0 ? fxRate : 1.0
   const own = normAddr(ownAddress)
   const ownSet = new Set<string>([own])
   const isOwn = (a: string) => ownSet.has(normAddr(a))
@@ -285,16 +400,23 @@ function computeFifoGainsInner(
   const rows: TaxLotRow[] = []
   const incomeRows: TaxLotRow[] = []
   const missingDays = new Set<string>()
+  const fxFallbackDays = new Set<string>()
   const yearAcc = new Map<string, YearAcc>()
   let neutralAmbiguous = 0
   let unmatchedDisposals = 0
 
-  // Day's close in the reporting currency: raw USD price times the FX rate.
+  // Day's close in the reporting currency: raw USD price times that day's FX
+  // rate. A day without a historical rate uses today's rate and is counted so
+  // the report can say how many days did.
   const priceAt = (day: string): number | null => {
     const rawPrice = prices[day]
-    const dayPrice =
-      typeof rawPrice === 'number' && Number.isFinite(rawPrice) ? rawPrice * rate : null
-    return dayPrice
+    if (typeof rawPrice !== 'number' || !Number.isFinite(rawPrice)) return null
+    const dayRate = fx.rateFor(day)
+    if (dayRate === null) {
+      fxFallbackDays.add(day)
+      return rawPrice * fx.todayRate
+    }
+    return rawPrice * dayRate
   }
 
   const ensureYear = (day: string): YearAcc => {
@@ -343,7 +465,8 @@ function computeFifoGainsInner(
       const basis = partial ? match.cost : null
       if (partial) acc.costUsd += match.cost
       rows.push({
-        txHash: t.hash, date: day, nim, proceedsUsd: proceeds,
+        txHash: t.hash, date: day, ts: timestampToMs(t.timestamp as number), nim,
+        unitPriceFiat: price, proceedsUsd: proceeds,
         costBasisUsd: basis,
         gainUsd: partial ? proceeds - match.cost : null,
         direction: 'out',
@@ -353,7 +476,8 @@ function computeFifoGainsInner(
       acc.costUsd += match.cost
       acc.gainUsd += proceeds - match.cost
       rows.push({
-        txHash: t.hash, date: day, nim, proceedsUsd: proceeds,
+        txHash: t.hash, date: day, ts: timestampToMs(t.timestamp as number), nim,
+        unitPriceFiat: price, proceedsUsd: proceeds,
         costBasisUsd: match.cost, gainUsd: proceeds - match.cost, direction: 'out',
       })
     }
@@ -409,7 +533,8 @@ function computeFifoGainsInner(
     if (kind === 'reward') {
       lots.push({ remaining: nim, costPer: price })
       incomeRows.push({
-        txHash: t.hash, date: day, nim, proceedsUsd: null, costBasisUsd: null,
+        txHash: t.hash, date: day, ts: timestampToMs(t.timestamp as number), nim,
+        unitPriceFiat: price, proceedsUsd: null, costBasisUsd: null,
         gainUsd: null, direction: 'in', synthetic: 'reward',
       })
       ensureYear(day).incomeUsd += nim * price
@@ -420,7 +545,8 @@ function computeFifoGainsInner(
       // Acquisition.
       lots.push({ remaining: nim, costPer: price })
       rows.push({
-        txHash: t.hash, date: day, nim, proceedsUsd: null,
+        txHash: t.hash, date: day, ts: timestampToMs(t.timestamp as number), nim,
+        unitPriceFiat: price, proceedsUsd: null,
         costBasisUsd: nim * price, gainUsd: null, direction: 'in',
       })
       continue
@@ -446,8 +572,8 @@ function computeFifoGainsInner(
         [...missingDays].some((d) => d.startsWith(acc.year)),
     }))
 
-  rows.sort((a, b) => a.date.localeCompare(b.date))
-  incomeRows.sort((a, b) => a.date.localeCompare(b.date))
+  rows.sort((a, b) => a.date.localeCompare(b.date) || a.ts - b.ts)
+  incomeRows.sort((a, b) => a.date.localeCompare(b.date) || a.ts - b.ts)
 
   return {
     rows,
@@ -459,5 +585,8 @@ function computeFifoGainsInner(
     neutralAmbiguous,
     unmatchedDisposals,
     currency,
+    fxSource: fx.source,
+    fxFallbackDays: fxFallbackDays.size,
+    priceSource,
   }
 }
